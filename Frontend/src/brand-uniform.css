@@ -7439,6 +7439,19 @@ html #app > .topbar :is(.brand, .header-right, .landing-nav) {
 /* The sole wallet entry point in the menu should read as a clear primary action. */
 html #app > .topbar .connect-header {
   font-weight: 800 !important;
+  min-width: 126px;
+  height: 46px;
+  padding-inline: 24px;
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  html #app > .topbar .connect-header {
+    min-width: 112px;
+    height: 42px;
+    padding-inline: 20px;
+    font-size: 12px;
+  }
 }
 
 /* The switch communicates Auto-round state through its track and thumb; the extra word adds
