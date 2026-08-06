@@ -6476,7 +6476,7 @@ body,
 @media (min-width: 721px) {
   .topbar .main-nav::after,
   .topbar .nav-item.active::after {
-    bottom: clamp(10px, .8vw, 14px) !important;
+    bottom: clamp(3px, .25vw, 5px) !important;
     border-radius: 999px !important;
   }
 }

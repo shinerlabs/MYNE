@@ -1171,13 +1171,11 @@ const renderStakingRewards = () => {
   // Staker revenue accrues in the same SOL accumulator from the 8% mining allocation.
   const eth_ = s ? chain.format.ethSmart(s.pendingEth) : '0.00';
   const lifetimeEth = s ? chain.format.ethSmart(s.lifetimeEth) : '0.00';
-  const eEl = document.querySelector('#stake-claimable-eth');
-  const lifetimeEl = document.querySelector('#stake-lifetime-eth');
-  if (eEl) eEl.textContent = eth_;
-  if (lifetimeEl) lifetimeEl.textContent = lifetimeEth;
+  animateSolReadout('#stake-claimable-eth', eth_);
+  animateSolReadout('#stake-lifetime-eth', lifetimeEth);
   const updatedEl = document.querySelector('#stake-reward-updated');
   if (updatedEl) updatedEl.textContent = chain.state.account
-    ? `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · refreshes every minute`
+    ? `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · updates live`
     : 'Connect a wallet to see your rewards';
 
   // Migration safety only: stock balances credited before SOL mode stay claimable, but the old
@@ -1223,6 +1221,29 @@ const renderStakingRewards = () => {
       ${claimable > 0n ? `<div class="unstake-line matured"><span>Ready to withdraw</span><b>${chain.format.solIcon(claimable)} MYNE</b></div><button id="withdraw-unstaked">Withdraw ${chain.format.solIcon(claimable)}</button>` : ''}`;
   }
   updateStakeFlexCard();
+};
+
+const solReadoutAnimations = new Map();
+const animateSolReadout = (selector, value) => {
+  const node = document.querySelector(selector);
+  if (!node) return;
+  const target = Number(value);
+  if (!Number.isFinite(target)) { node.textContent = value; return; }
+  const previous = Number(node.textContent?.replace(/[^0-9.-]/g, ''));
+  const start = Number.isFinite(previous) ? previous : target;
+  const oldAnimation = solReadoutAnimations.get(selector);
+  if (oldAnimation) cancelAnimationFrame(oldAnimation);
+  if (Math.abs(target - start) < 0.000001) { node.textContent = value; return; }
+  const started = performance.now();
+  const duration = 720;
+  const step = (now) => {
+    const progress = Math.min(1, (now - started) / duration);
+    const eased = 1 - ((1 - progress) ** 3);
+    node.textContent = (start + ((target - start) * eased)).toFixed(2);
+    if (progress < 1) solReadoutAnimations.set(selector, requestAnimationFrame(step));
+    else { solReadoutAnimations.delete(selector); node.textContent = value; }
+  };
+  solReadoutAnimations.set(selector, requestAnimationFrame(step));
 };
 
 const setMetric = (id, text) => {
@@ -1321,11 +1342,13 @@ const refreshStakingMetrics = async () => {
     setMetric('#stake-flex-apy', m.aprPct == null ? '0.0%' : formatApy(m.aprPct));
     setMetric('#stake-burn-apy', m.aprPct == null ? '0.0%' : formatApy(m.aprPct * 5));
     setMetric('#metric-staked', m.totalStakedPrincipal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
-    setMetric('#metric-pool', m.rewardMode === 'eth'
+    const poolText = m.rewardMode === 'eth'
       ? `${m.rewardsPoolEth < 0.001 && m.rewardsPoolEth > 0
         ? m.rewardsPoolEth.toFixed(6)
         : m.rewardsPoolEth.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 4 })}`
-      : 'MIGRATION');
+      : 'MIGRATION';
+    if (m.rewardMode === 'eth') animateSolReadout('#metric-pool', poolText);
+    else setMetric('#metric-pool', poolText);
     const modeWarning = document.querySelector('#staking-mode-warning');
     if (modeWarning) {
       modeWarning.hidden = m.rewardMode === 'eth';
@@ -3447,6 +3470,7 @@ scheduleSocialLoad(document.body.dataset.route);
  * entirely when the tab is hidden — so it stays cheap on RPC.
  */
 const PAGE_POLL_MS = 10000;
+const STAKING_POLL_MS = 5000;
 const ROUNDS_POLL_MS = 4000;
 window.setInterval(() => {
   if (document.hidden || !protocolReady) return;
@@ -3458,7 +3482,8 @@ window.setInterval(() => {
       renderMyReferrals(true);
       break;
     case 'stake':
-      refreshStaking();
+      // A dedicated five-second loop below owns staking reads so the claimable
+      // SOL balance responds promptly as the minute-based 8% fee is distributed.
       break;
     case 'swap':
       refreshSwap();
@@ -3476,6 +3501,11 @@ window.setInterval(() => {
       break;
   }
 }, PAGE_POLL_MS);
+
+window.setInterval(() => {
+  if (document.hidden || !protocolReady || document.body.dataset.route !== 'stake') return;
+  refreshStaking();
+}, STAKING_POLL_MS);
 
 // Rounds page gets its own faster loop — history should land seconds after settlement.
 window.setInterval(() => {
