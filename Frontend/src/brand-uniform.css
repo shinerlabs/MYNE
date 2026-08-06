@@ -7364,11 +7364,15 @@ body[data-route="mine"] .deploy-panel > .deploy.ready:hover {
   box-shadow: none !important;
 }
 
-/* The navigation sits directly on the page canvas; no separate menu-bar surface. */
-html #app > .topbar,
+/* Keep the menu bar as one quiet solid surface, without a gradient or glass treatment. */
+html #app > .topbar {
+  background: #090909 !important;
+  background-color: #090909 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
 html #app > .topbar .main-nav {
   background: transparent !important;
   background-color: transparent !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
 }
