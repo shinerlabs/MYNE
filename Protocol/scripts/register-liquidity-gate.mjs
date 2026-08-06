@@ -13,8 +13,13 @@ setProvider(provider);
 assert.equal(await provider.connection.getGenesisHash(), DEVNET_GENESIS_HASH, 'RPC is not Solana devnet');
 assert.ok(process.env.METEORA_POOL, 'Set METEORA_POOL to the official Meteora pool address');
 assert.ok(process.env.METEORA_POOL_PROGRAM, 'Set METEORA_POOL_PROGRAM to the official Meteora program ID');
+assert.ok(process.env.METEORA_MYNE_VAULT, 'Set METEORA_MYNE_VAULT to the MYNE vault in the Meteora pool');
+assert.ok(process.env.METEORA_SOL_VAULT, 'Set METEORA_SOL_VAULT to the WSOL vault in the Meteora pool');
 const pool = new PublicKey(process.env.METEORA_POOL);
 const poolProgram = new PublicKey(process.env.METEORA_POOL_PROGRAM);
+assert.equal(poolProgram.toBase58(), 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', 'Pool program must be Meteora DLMM');
+const myneVault = new PublicKey(process.env.METEORA_MYNE_VAULT);
+const solVault = new PublicKey(process.env.METEORA_SOL_VAULT);
 const minSol = BigInt(process.env.MIN_LIQUIDITY_SOL_LAMPORTS ?? '100000000');
 const minMyne = BigInt(process.env.MIN_LIQUIDITY_MYNE_BASE_UNITS ?? '10000000000');
 assert.ok(minSol > 0n && minMyne > 0n, 'Liquidity thresholds must be positive');
@@ -35,6 +40,8 @@ const signature = await program.methods
     config,
     liquidityGate,
     pool,
+    baseVault: myneVault,
+    quoteVault: solVault,
     admin: provider.wallet.publicKey,
     systemProgram: web3.SystemProgram.programId,
   })

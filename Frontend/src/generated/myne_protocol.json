@@ -1314,6 +1314,17 @@
           "name": "pool"
         },
         {
+          "name": "base_vault",
+          "docs": [
+            "Optional for local legacy mode; mandatory when a Switchboard provider is configured."
+          ],
+          "optional": true
+        },
+        {
+          "name": "quote_vault",
+          "optional": true
+        },
+        {
           "name": "admin",
           "writable": true,
           "signer": true,
@@ -1980,6 +1991,14 @@
           "optional": true
         },
         {
+          "name": "base_vault",
+          "optional": true
+        },
+        {
+          "name": "quote_vault",
+          "optional": true
+        },
+        {
           "name": "admin",
           "signer": true,
           "relations": [
@@ -2306,6 +2325,12 @@
         },
         {
           "name": "liquidity_pool"
+        },
+        {
+          "name": "myne_vault"
+        },
+        {
+          "name": "sol_vault"
         },
         {
           "name": "randomness_account",
@@ -3049,91 +3074,96 @@
     },
     {
       "code": 6018,
+      "name": "RandomnessAuthorityLocked",
+      "msg": "Pause the protocol before changing the randomness authority"
+    },
+    {
+      "code": 6019,
       "name": "RandomnessProviderRequired",
       "msg": "A verified randomness provider is required for this deployment"
     },
     {
-      "code": 6019,
+      "code": 6020,
       "name": "RandomnessNotBound",
       "msg": "The round has no randomness account bound before betting"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "InvalidRandomnessAccount",
       "msg": "The supplied randomness account is invalid"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "RandomnessNotResolved",
       "msg": "The randomness account has not been revealed in the current slot"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "RandomnessCommittedTooLate",
       "msg": "The randomness commitment was created too late"
     },
     {
-      "code": 6023,
+      "code": 6024,
       "name": "ReceiptAlreadyProcessed",
       "msg": "The receipt has already been processed"
     },
     {
-      "code": 6024,
+      "code": 6025,
       "name": "InvalidReceiptAuthority",
       "msg": "The receipt authority is invalid"
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "InsufficientBalance",
       "msg": "The requested token or SOL amount is unavailable"
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "InvalidReferrer",
       "msg": "The supplied referrer is invalid"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "CooldownActive",
       "msg": "The staking cooldown has not completed"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "InvalidStakeAuthority",
       "msg": "The staking position does not match this authority"
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "InvalidFeeDestination",
       "msg": "The provided fee destination does not match protocol configuration"
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "LiquidityPoolNotVerified",
       "msg": "A verified Meteora liquidity pool is required before unpausing"
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "InvalidLiquidityPool",
       "msg": "The configured liquidity pool is invalid"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "InvalidRound",
       "msg": "The round ID does not match this account"
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "InvalidRoundSchedule",
       "msg": "Only the current scheduled round can be opened"
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "AutoPlanAlreadyExecuted",
       "msg": "This automation plan already executed for the round"
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "AutoPlanInactive",
       "msg": "This automation plan is inactive"
     }
@@ -3455,6 +3485,14 @@
           {
             "name": "min_myne_base_units",
             "type": "u64"
+          },
+          {
+            "name": "myne_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "sol_vault",
+            "type": "pubkey"
           }
         ]
       }

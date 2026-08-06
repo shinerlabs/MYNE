@@ -1359,8 +1359,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .switchboard-proof-trigger:hover,
 .switchboard-proof-trigger:focus-visible { color: #f0f0f0; }
+.switchboard-proof-trigger > span { font-size: 8.5px; }
 .switchboard-proof-trigger > b { margin-left: 1px; color: #8d8d94; font-size: 12px; font-weight: 500; }
-.switchboard-proof-trigger > img { width: 42px; height: auto; max-height: 12px; object-fit: contain; object-position: left center; }
+.switchboard-proof-trigger > img { width: 54px; height: auto; max-height: 12px; object-fit: contain; object-position: left center; }
 .switchboard-mark { position: relative; display: inline-grid; grid-template-columns: repeat(3, 4px); gap: 2px; align-items: end; width: 16px; height: 13px; color: #f1f1f1; }
 .switchboard-mark i { display: block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px rgba(255,255,255,.2); }
 .switchboard-mark i:nth-child(2) { height: 8px; margin-bottom: 2px; }

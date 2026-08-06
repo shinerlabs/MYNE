@@ -16,13 +16,14 @@ single-developer operating model and its key-management requirements.
 - 10% MYNE claim fee: 9% unclaimed balances and 1% referrer, with the configured fallback wallet
   for wallets without a referrer.
 - Buyback keeper in dry-run by default, with registered-pool/direct-route checks, spend caps,
-  reserve protection, swap simulation and burn simulation.
+  reserve protection, swap simulation, burn simulation, per-round accounting and durable retry
+  state.
 - Local Rust checks: `cargo fmt`, `cargo check`, `cargo clippy`, `cargo test`, and `anchor build`.
 - Local Rust unit tests: 6 passed. Frontend tests: 18 passed. Buyback policy tests: 2 passed.
 
 ## Critical blockers
 
-### 1. Randomness provider integration is in progress
+### 1. Randomness provider integration is implemented but not yet production-tested
 
 The production path now binds a Switchboard On-Demand randomness account before deployments,
 parses the pinned account discriminator/owner, requires a committed seed, and consumes the value
@@ -30,31 +31,35 @@ only in its reveal slot. `settle_round` remains available only when the configur
 default key, which is an explicit local/devnet legacy mode. The keeper still needs to create and
 commit a fresh Switchboard account, submit the reveal and call `settle_round_verified` in the same
 slot. `scripts/switchboard-round-keeper.mjs` now rehearses account creation, commit, round opening
-and binding; its final reveal/settlement transaction still requires an explicitly approved
-production worker. Devnet tests must cover stale reveals, wrong account binding, wrong owner,
-replay and missed-reveal recovery before this gate can be closed.
+and binding, then waits for the settlement window and submits reveal plus
+`settle_round_verified` atomically. Auto-round execution now has the same randomness-binding
+requirement, and binding is restricted to `config.randomness_authority`. Devnet tests must cover
+stale reveals, wrong account binding, wrong owner, replay and missed-reveal recovery before this
+gate can be closed.
 
-### 2. The liquidity gate does not parse or prove a MYNE/SOL Meteora pool
+### 2. The liquidity gate now verifies the configured Meteora DLMM and live vault reserves
 
-The gate currently checks an admin-supplied account is non-empty and owned by an admin-supplied
-program ID. It does not verify the Meteora program ID, pool token mints, vaults, or minimum live
-reserves on-chain. A wrong or unrelated account could therefore be registered by the admin. The
-registration flow must either validate the official Meteora pool account layout on-chain or use a
-separately audited verifier that proves MYNE/SOL reserves and the approved pool program.
+Production/devnet registration now requires the canonical Meteora DLMM program, MYNE and wrapped
+SOL vault accounts, matching mints, and minimum live vault balances. Unpause and verified
+settlement re-check those same vaults, so withdrawing liquidity pauses the protocol path. The
+pool-to-vault association still depends on the designated admin supplying the pool's official
+vault accounts; this must be verified against Meteora's published account layout during devnet
+testing and external audit.
 
-### 3. Buyback/burn is an operational keeper, not an on-chain guarantee
+### 3. Buyback/burn remains an operational keeper
 
 The program transfers 2% SOL to `buyback_wallet`; the swap and burn happen later in a Node keeper
-through Jupiter. Mainnet needs a monitored, restartable service with secret-manager or hardware
-signing, balance alerts, nonce/retry handling, API outage behavior, slippage circuit breakers,
-and an incident response plan. A single laptop process is not sufficient.
+through Jupiter. The keeper now calculates each settled round's exact 2% allocation, persists
+partial progress, retries safely after restart, and simulates both swap and burn before signing.
+Mainnet still needs monitored hosting, secret-manager or hardware signing, balance alerts, API
+outage behavior, slippage circuit breakers, and an incident response plan.
 
-### 4. There is no production round/randomness keeper
+### 4. The round/randomness keeper flow is implemented but needs an operational deployment
 
-`local-keeper.mjs` is deliberately locked to localnet/devnet and is a demo harness. Mainnet still
-needs a separate service that opens scheduled rounds, requests/fulfils randomness, settles exactly
-once, executes funded auto-plans, and monitors missed or failed transactions. It must be
-idempotent, observable and safe to restart.
+`local-keeper.mjs` remains deliberately locked to localnet/devnet. The Switchboard keeper now
+opens, commits, binds, waits, reveals and settles one round atomically. Mainnet still needs a
+supervised service that runs this flow continuously, executes funded auto-plans, and monitors
+missed or failed transactions. It must be idempotent, observable and safe to restart.
 
 ### 5. Production authority model needs explicit sign-off
 

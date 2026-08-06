@@ -59,6 +59,7 @@ export function mountSocial(host) {
     setRoute: host.setRoute,
     copyText: host.copyText,
     requireWallet,
+    chatRequiresMinedRounds: Boolean(host.chatRequiresMinedRounds),
   };
 
   configureSession({ getConnectedWallet: host.getAccount, notify: host.notify });

@@ -81,7 +81,52 @@ console.log(JSON.stringify({
   status: 'committed-awaiting-deployments-and-reveal',
 }, null, 2));
 
-// This one-shot script intentionally stops after binding. A production worker
-// must wait for the round's betting and settlement timestamps, then build the
-// revealIx + settleRoundVerified instruction in one transaction. It must not
-// reveal early or reuse a randomness account across rounds.
+const configState = await myne.account.protocolConfig.fetch(config);
+assert.equal(
+  configState.randomnessAuthority.toBase58(),
+  keypair.publicKey.toBase58(),
+  'Keeper wallet must equal config.randomness_authority',
+);
+
+// Wait until the round's settlement window, then reveal and settle atomically.
+// The verified instruction requires reveal_slot == the current slot, so the
+// reveal and settlement instructions must be in the same transaction.
+const roundState = await myne.account.round.fetch(round);
+const settlesAt = Number(roundState.settlesAt.toString()) * 1000;
+const waitMs = Math.max(0, settlesAt - Date.now() + 500);
+if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+
+const randomnessClient = new sb.Randomness(switchboardProgram, randomness.pubkey);
+const revealIx = await randomnessClient.revealIx(keypair.publicKey);
+const gateState = await myne.account.liquidityGate.fetch(liquidityGate);
+assert.ok(gateState.verified, 'Liquidity gate is not verified');
+assert.ok(gateState.myneVault && gateState.solVault, 'Liquidity gate has no verified token vaults');
+const settleIx = await myne.methods
+  .settleRoundVerified()
+  .accounts({
+    config,
+    stakePool,
+    round,
+    liquidityGate,
+    liquidityPool: gateState.pool,
+    myneVault: gateState.myneVault,
+    solVault: gateState.solVault,
+    randomnessAccount: randomness.pubkey,
+    buybackWallet: configState.buybackWallet,
+  })
+  .instruction();
+const settleTx = await sb.asV0Tx({
+  connection,
+  ixs: [revealIx, settleIx],
+  payer: keypair.publicKey,
+  signers: [keypair],
+});
+const settleSig = await connection.sendTransaction(settleTx, txOpts);
+await connection.confirmTransaction(settleSig, commitment);
+console.log(JSON.stringify({
+  ok: true,
+  round: ROUND_ID.toString(),
+  randomnessAccount: randomness.pubkey.toBase58(),
+  settlementSignature: settleSig,
+  status: 'settled',
+}, null, 2));

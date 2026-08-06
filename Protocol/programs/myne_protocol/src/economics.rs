@@ -87,6 +87,8 @@ pub enum MyneError {
     RoundAlreadySettled,
     #[msg("The randomness signer is not authorized")]
     InvalidRandomnessAuthority,
+    #[msg("Pause the protocol before changing the randomness authority")]
+    RandomnessAuthorityLocked,
     #[msg("A verified randomness provider is required for this deployment")]
     RandomnessProviderRequired,
     #[msg("The round has no randomness account bound before betting")]

@@ -46,6 +46,11 @@ pub const SWITCHBOARD_DEVNET_PROGRAM: Pubkey =
     pubkey!("Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2");
 pub const SWITCHBOARD_MAINNET_PROGRAM: Pubkey =
     pubkey!("SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv");
+/// Meteora's canonical DLMM program. Mainnet/devnet activation must use this
+/// program; accepting an arbitrary owner would allow an unrelated account to
+/// satisfy the liquidity gate.
+pub const METEORA_DLMM_PROGRAM: Pubkey = pubkey!("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo");
+pub const WRAPPED_SOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 const SWITCHBOARD_RANDOMNESS_DISCRIMINATOR: [u8; 8] = [10, 66, 229, 135, 220, 239, 217, 114];
 const SWITCHBOARD_RANDOMNESS_ACCOUNT_SIZE: usize = 408;
 
@@ -166,6 +171,44 @@ pub mod myne_protocol {
         );
         require!(min_sol_lamports > 0, MyneError::InvalidLiquidityPool);
         require!(min_myne_base_units > 0, MyneError::InvalidLiquidityPool);
+        if ctx.accounts.config.randomness_program != Pubkey::default() {
+            require_keys_eq!(
+                pool_program,
+                METEORA_DLMM_PROGRAM,
+                MyneError::InvalidLiquidityPool
+            );
+            let base_vault = ctx
+                .accounts
+                .base_vault
+                .as_ref()
+                .ok_or(MyneError::InvalidLiquidityPool)?;
+            let quote_vault = ctx
+                .accounts
+                .quote_vault
+                .as_ref()
+                .ok_or(MyneError::InvalidLiquidityPool)?;
+            require!(
+                (base_vault.mint == ctx.accounts.config.mint
+                    && quote_vault.mint == WRAPPED_SOL_MINT)
+                    || (quote_vault.mint == ctx.accounts.config.mint
+                        && base_vault.mint == WRAPPED_SOL_MINT),
+                MyneError::InvalidLiquidityPool
+            );
+            let myne_vault = if base_vault.mint == ctx.accounts.config.mint {
+                base_vault
+            } else {
+                quote_vault
+            };
+            let sol_vault = if base_vault.mint == WRAPPED_SOL_MINT {
+                base_vault
+            } else {
+                quote_vault
+            };
+            require!(
+                myne_vault.amount >= min_myne_base_units && sol_vault.amount >= min_sol_lamports,
+                MyneError::InvalidLiquidityPool
+            );
+        }
         require!(
             ctx.accounts.pool.key() == pool,
             MyneError::InvalidLiquidityPool
@@ -186,11 +229,29 @@ pub mod myne_protocol {
         gate.pool_program = pool_program;
         gate.min_sol_lamports = min_sol_lamports;
         gate.min_myne_base_units = min_myne_base_units;
+        if let (Some(base_vault), Some(quote_vault)) = (
+            ctx.accounts.base_vault.as_ref(),
+            ctx.accounts.quote_vault.as_ref(),
+        ) {
+            gate.myne_vault = if base_vault.mint == ctx.accounts.config.mint {
+                base_vault.key()
+            } else {
+                quote_vault.key()
+            };
+            gate.sol_vault = if base_vault.mint == WRAPPED_SOL_MINT {
+                base_vault.key()
+            } else {
+                quote_vault.key()
+            };
+        } else {
+            gate.myne_vault = Pubkey::default();
+            gate.sol_vault = Pubkey::default();
+        }
         gate.verified = true;
         Ok(())
     }
 
-    pub fn set_paused(ctx: Context<AdminConfig>, paused: bool) -> Result<()> {
+    pub fn set_paused(ctx: Context<SetPaused>, paused: bool) -> Result<()> {
         if !paused {
             let gate = ctx
                 .accounts
@@ -202,7 +263,13 @@ pub mod myne_protocol {
                 .liquidity_pool
                 .as_ref()
                 .ok_or_else(|| error!(MyneError::LiquidityPoolNotVerified))?;
-            assert_liquidity_pool(gate, &pool.to_account_info())?;
+            assert_liquidity_pool(
+                gate,
+                &pool.to_account_info(),
+                &ctx.accounts.config,
+                ctx.accounts.base_vault.as_ref(),
+                ctx.accounts.quote_vault.as_ref(),
+            )?;
         }
         ctx.accounts.config.paused = paused;
         emit!(PauseChanged { paused });
@@ -238,6 +305,10 @@ pub mod myne_protocol {
         ctx: Context<AdminConfig>,
         randomness_authority: Pubkey,
     ) -> Result<()> {
+        require!(
+            ctx.accounts.config.paused,
+            MyneError::RandomnessAuthorityLocked
+        );
         require!(
             randomness_authority != Pubkey::default(),
             MyneError::InvalidAuthority
@@ -378,6 +449,11 @@ pub mod myne_protocol {
             &ctx.accounts.randomness_account.to_account_info(),
             &ctx.accounts.config.randomness_program,
         )?;
+        require_keys_eq!(
+            ctx.accounts.authority.key(),
+            ctx.accounts.config.randomness_authority,
+            MyneError::InvalidRandomnessAuthority
+        );
         require!(
             parsed.reveal_slot == 0 || parsed.reveal_slot > clock.slot,
             MyneError::RandomnessNotResolved
@@ -574,6 +650,13 @@ pub mod myne_protocol {
             MyneError::InvalidRound
         );
         require!(ctx.accounts.round.id == round_id, MyneError::InvalidRound);
+        if ctx.accounts.config.randomness_program != Pubkey::default() {
+            require_keys_neq!(
+                ctx.accounts.round.randomness_account,
+                Pubkey::default(),
+                MyneError::RandomnessNotBound
+            );
+        }
         require!(
             !ctx.accounts.round.settled
                 && Clock::get()?.unix_timestamp < ctx.accounts.round.betting_ends_at,
@@ -649,6 +732,8 @@ pub mod myne_protocol {
             &ctx.accounts.liquidity_gate,
             &ctx.accounts.liquidity_pool.to_account_info(),
             &ctx.accounts.buyback_wallet.to_account_info(),
+            None,
+            None,
             randomness,
         )
     }
@@ -697,6 +782,8 @@ pub mod myne_protocol {
             &ctx.accounts.liquidity_gate,
             &ctx.accounts.liquidity_pool.to_account_info(),
             &ctx.accounts.buyback_wallet.to_account_info(),
+            Some(&ctx.accounts.myne_vault),
+            Some(&ctx.accounts.sol_vault),
             randomness.value,
         )
     }
@@ -1328,7 +1415,13 @@ fn motherlode_hit(sample: u64) -> bool {
     sample.is_multiple_of(MOTHERLODE_ODDS)
 }
 
-fn assert_liquidity_pool(gate: &LiquidityGate, pool: &AccountInfo<'_>) -> Result<()> {
+fn assert_liquidity_pool(
+    gate: &LiquidityGate,
+    pool: &AccountInfo<'_>,
+    config: &ProtocolConfig,
+    base_vault: Option<&InterfaceAccount<'_, TokenAccount>>,
+    quote_vault: Option<&InterfaceAccount<'_, TokenAccount>>,
+) -> Result<()> {
     require!(gate.verified, MyneError::LiquidityPoolNotVerified);
     require_keys_eq!(pool.key(), gate.pool, MyneError::InvalidLiquidityPool);
     require!(!pool.data_is_empty(), MyneError::InvalidLiquidityPool);
@@ -1337,6 +1430,40 @@ fn assert_liquidity_pool(gate: &LiquidityGate, pool: &AccountInfo<'_>) -> Result
         gate.pool_program,
         MyneError::InvalidLiquidityPool
     );
+    if config.randomness_program != Pubkey::default() {
+        require_keys_eq!(
+            gate.pool_program,
+            METEORA_DLMM_PROGRAM,
+            MyneError::InvalidLiquidityPool
+        );
+        let base_vault = base_vault.ok_or(MyneError::InvalidLiquidityPool)?;
+        let quote_vault = quote_vault.ok_or(MyneError::InvalidLiquidityPool)?;
+        require_keys_eq!(
+            base_vault.key(),
+            gate.myne_vault,
+            MyneError::InvalidLiquidityPool
+        );
+        require_keys_eq!(
+            quote_vault.key(),
+            gate.sol_vault,
+            MyneError::InvalidLiquidityPool
+        );
+        require_keys_eq!(
+            base_vault.mint,
+            config.mint,
+            MyneError::InvalidLiquidityPool
+        );
+        require_keys_eq!(
+            quote_vault.mint,
+            WRAPPED_SOL_MINT,
+            MyneError::InvalidLiquidityPool
+        );
+        require!(
+            base_vault.amount >= gate.min_myne_base_units
+                && quote_vault.amount >= gate.min_sol_lamports,
+            MyneError::InvalidLiquidityPool
+        );
+    }
     Ok(())
 }
 
@@ -1372,6 +1499,7 @@ fn domain_hash(domain: &[u8], round_id: u64, randomness: &[u8; 32]) -> [u8; 32] 
     hashv(&[b"MYNE_V1", domain, &round_id.to_le_bytes(), randomness]).to_bytes()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn settle_round_core(
     round: &mut Account<Round>,
     config: &mut Account<ProtocolConfig>,
@@ -1379,9 +1507,17 @@ fn settle_round_core(
     liquidity_gate: &Account<LiquidityGate>,
     liquidity_pool: &AccountInfo<'_>,
     buyback_wallet: &AccountInfo<'_>,
+    myne_vault: Option<&InterfaceAccount<'_, TokenAccount>>,
+    sol_vault: Option<&InterfaceAccount<'_, TokenAccount>>,
     randomness: [u8; 32],
 ) -> Result<()> {
-    assert_liquidity_pool(liquidity_gate, liquidity_pool)?;
+    assert_liquidity_pool(
+        liquidity_gate,
+        liquidity_pool,
+        config,
+        myne_vault,
+        sol_vault,
+    )?;
     require!(!round.settled, MyneError::RoundAlreadySettled);
     let tile_hash = domain_hash(b"tile", round.id, &randomness);
     let mode_hash = domain_hash(b"mode", round.id, &randomness);
@@ -1671,6 +1807,8 @@ pub struct LiquidityGate {
     pub pool_program: Pubkey,
     pub min_sol_lamports: u64,
     pub min_myne_base_units: u64,
+    pub myne_vault: Pubkey,
+    pub sol_vault: Pubkey,
 }
 
 #[derive(Accounts)]
@@ -1711,9 +1849,24 @@ pub struct InitializeLiquidityGate<'info> {
     pub liquidity_gate: Account<'info, LiquidityGate>,
     /// CHECK: The pool is verified by its exact configured address and owner program.
     pub pool: UncheckedAccount<'info>,
+    /// Optional for local legacy mode; mandatory when a Switchboard provider is configured.
+    pub base_vault: Option<InterfaceAccount<'info, TokenAccount>>,
+    pub quote_vault: Option<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut)]
     pub admin: Signer<'info>,
     pub system_program: Program<'info, System>,
+}
+#[derive(Accounts)]
+pub struct SetPaused<'info> {
+    #[account(mut, seeds=[CONFIG_SEED], bump=config.bump, has_one=admin)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(seeds=[LIQUIDITY_GATE_SEED], bump)]
+    pub liquidity_gate: Option<Account<'info, LiquidityGate>>,
+    /// CHECK: The pool address and owner are checked against the immutable gate.
+    pub liquidity_pool: Option<UncheckedAccount<'info>>,
+    pub base_vault: Option<InterfaceAccount<'info, TokenAccount>>,
+    pub quote_vault: Option<InterfaceAccount<'info, TokenAccount>>,
+    pub admin: Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct AcceptAdmin<'info> {
@@ -1849,6 +2002,8 @@ pub struct SettleRoundVerified<'info> {
     pub liquidity_gate: Account<'info, LiquidityGate>,
     /// CHECK: pool key and owner are checked against LiquidityGate.
     pub liquidity_pool: UncheckedAccount<'info>,
+    pub myne_vault: InterfaceAccount<'info, TokenAccount>,
+    pub sol_vault: InterfaceAccount<'info, TokenAccount>,
     /// CHECK: owner, discriminator, account binding and freshness are checked
     /// by parse_switchboard_randomness and the settlement handler.
     pub randomness_account: UncheckedAccount<'info>,

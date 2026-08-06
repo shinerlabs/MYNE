@@ -756,7 +756,9 @@ export function mountChat(hostAdapter, handlers = {}) {
 
   stickers = mountStickerPicker({
     notify: host.notify,
-    requireWallet: host.requireWallet,
+    // Devnet/testnet chat is intentionally open. Guests may choose a sticker and send it
+    // through the same chat-send function; mainnet keeps sticker sending wallet-gated.
+    requireWallet: host.chatRequiresMinedRounds ? host.requireWallet : () => true,
     focusInput: () => chatInputEl?.focus(),
   });
 
@@ -768,9 +770,10 @@ export function mountChat(hostAdapter, handlers = {}) {
       if (replyTarget) { event.preventDefault(); cancelReply(); return; }
     }
     // Enter sends; Shift+Enter inserts a newline (textarea default).
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
-      sendChatMessage();
+      event.stopPropagation();
+      void sendChatMessage();
     }
   });
   chatInputEl?.addEventListener('focus', () => {});

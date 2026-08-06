@@ -9,7 +9,8 @@
  * transaction is sent. Use DRY_RUN=1 (the default) to quote without spending.
  */
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import anchor from '@anchor-lang/core';
 import web3 from '@solana/web3.js';
 import * as splToken from '@solana/spl-token';
@@ -55,6 +56,28 @@ const [liquidityGate] = PublicKey.findProgramAddressSync([Buffer.from('liquidity
 const lamports = (sol) => Math.max(0, Math.floor(Number(sol) * LAMPORTS_PER_SOL));
 const envBool = (name, fallback) => process.env[name] == null ? fallback : process.env[name] === '1';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const statePath = process.env.BUYBACK_STATE_PATH || '';
+
+async function loadState() {
+  if (!statePath) return { rounds: {} };
+  try {
+    const parsed = JSON.parse(await readFile(statePath, 'utf8'));
+    return parsed && typeof parsed === 'object' && parsed.rounds && typeof parsed.rounds === 'object'
+      ? { nextRound: parsed.nextRound, ...parsed }
+      : { rounds: {} };
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { rounds: {} };
+    throw error;
+  }
+}
+
+async function saveState(state) {
+  if (!statePath) return;
+  const temporary = `${statePath}.${process.pid}.tmp`;
+  await mkdir(dirname(statePath), { recursive: true });
+  await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  await rename(temporary, statePath);
+}
 
 function assertLiveAuthorization() {
   if (envBool('DRY_RUN', true)) return;
@@ -144,14 +167,42 @@ async function burnDelta(mint, ata, beforeBaseUnits) {
 
 export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   if (!dryRun) assertLiveAuthorization();
+  if (!dryRun) assert.ok(statePath, 'Set BUYBACK_STATE_PATH to a durable keeper state file before live mode');
   const configState = await program.account.protocolConfig.fetch(config);
   const gateState = await program.account.liquidityGate.fetch(liquidityGate);
   assert.ok(gateState.verified, 'Liquidity gate is not verified');
   assert.equal(configState.mint.toBase58(), process.env.MYNE_MINT_ADDRESS || configState.mint.toBase58(), 'MYNE mint mismatch');
   assert.equal(configState.buybackWallet.toBase58(), payer.publicKey.toBase58(), 'Keeper must control config.buybackWallet');
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const initializedAt = Number(configState.initializedAt.toString());
+  const roundDuration = Number(configState.roundDurationSeconds.toString());
+  const currentRound = Math.floor((nowSeconds - initializedAt) / roundDuration) - 1;
+  if (currentRound < 0) return { skipped: true, reason: 'no-settled-round-yet' };
+  const state = await loadState();
+  const initialRound = state.nextRound == null ? currentRound : Number(state.nextRound);
+  const roundId = BigInt(process.env.MYNE_ROUND_ID || Math.min(initialRound, currentRound));
+  const roundSeed = Buffer.alloc(8);
+  roundSeed.writeBigUInt64LE(roundId);
+  const [roundAddress] = PublicKey.findProgramAddressSync([Buffer.from('round'), roundSeed], PROGRAM_ID);
+  if (!(await provider.connection.getAccountInfo(roundAddress, 'confirmed'))) {
+    return { skipped: true, reason: 'round-not-opened', round: roundId.toString() };
+  }
+  const roundState = await program.account.round.fetch(roundAddress);
+  if (!roundState.settled) return { skipped: true, reason: 'round-not-settled', round: roundId.toString() };
+  const allocation = (BigInt(roundState.grossDeployedLamports.toString()) * 200n) / 10_000n;
+  const previous = BigInt(state.rounds[roundId.toString()] || '0');
+  const remainingAllocation = allocation > previous ? allocation - previous : 0n;
+  if (remainingAllocation === 0n) {
+    if (!dryRun && process.env.MYNE_ROUND_ID == null) {
+      state.nextRound = Number(roundId + 1n);
+      await saveState(state);
+    }
+    return { skipped: true, reason: 'round-already-processed', round: roundId.toString() };
+  }
+  assert.ok(remainingAllocation <= BigInt(Number.MAX_SAFE_INTEGER), 'Round buyback exceeds safe keeper amount');
   const poolAddress = gateState.pool;
   const reserve = lamports(process.env.KEEPER_RESERVE_SOL || '0.25');
-  const maxSpend = lamports(process.env.MAX_BUYBACK_SOL || '0.25');
+  const maxSpend = Math.min(lamports(process.env.MAX_BUYBACK_SOL || '0.25'), Number(remainingAllocation));
   const balance = await provider.connection.getBalance(payer.publicKey, 'confirmed');
   const minimum = lamports(process.env.MIN_BUYBACK_SOL || '0.01');
   const spendPlan = calculateSpend({
@@ -160,12 +211,12 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
     maxSpendLamports: maxSpend,
     minimumLamports: minimum,
   });
-  if (spendPlan.skipped) return { ...spendPlan, balance };
+  if (spendPlan.skipped) return { ...spendPlan, balance, round: roundId.toString(), allocationLamports: allocation.toString() };
   const spend = spendPlan.spendLamports;
   const slippageBps = readInteger(process.env.BUYBACK_SLIPPAGE_BPS || '100', 'BUYBACK_SLIPPAGE_BPS');
   assert.ok(slippageBps <= 500, 'BUYBACK_SLIPPAGE_BPS must be <= 500 (5%)');
   const { raw: quote, checked } = await fetchQuote(spend, configState.mint, poolAddress, slippageBps);
-  const result = { skipped: false, dryRun, pool: poolAddress.toBase58(), spendLamports: spend, ...checked };
+  const result = { skipped: false, dryRun, round: roundId.toString(), allocationLamports: allocation.toString(), pool: poolAddress.toBase58(), spendLamports: spend, ...checked };
   if (dryRun) return result;
   const ata = await ensureMyneAta(configState.mint);
   const before = (await getAccount(provider.connection, ata, 'confirmed')).amount;
@@ -178,6 +229,11 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   result.burnSignature = await burnDelta(configState.mint, ata, before);
   assert.ok(result.burnSignature, 'Swap produced no MYNE to burn');
   result.burnedBaseUnits = checked.outputBaseUnits;
+  state.rounds[roundId.toString()] = (previous + BigInt(spend)).toString();
+  if (BigInt(state.rounds[roundId.toString()]) >= allocation && process.env.MYNE_ROUND_ID == null) {
+    state.nextRound = Number(roundId + 1n);
+  }
+  await saveState(state);
   return result;
 }
 

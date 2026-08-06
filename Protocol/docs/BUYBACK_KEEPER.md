@@ -13,13 +13,15 @@ pool-specific swap accounts, price movement, and slippage must be handled by the
 
 1. Read `ProtocolConfig` and `LiquidityGate` from the configured program.
 2. Require the gate to be verified and require the keeper signer to equal `buyback_wallet`.
-3. Preserve a SOL reserve and cap each buyback amount.
-4. Request a direct Jupiter quote restricted to `Meteora DLMM`.
-5. Reject the quote unless it uses exactly the registered pool address, native SOL as input,
+3. Read the latest settled round and calculate exactly 2% of that round's gross deployment.
+4. Preserve a SOL reserve and cap each buyback amount.
+5. Request a direct Jupiter quote restricted to `Meteora DLMM`.
+6. Reject the quote unless it uses exactly the registered pool address, native SOL as input,
    and MYNE as output.
-6. In live mode, simulate the swap, submit it, and confirm it.
-7. Burn only the MYNE balance delta received by the keeper's associated token account.
-8. Simulate and confirm the burn transaction, then log both signatures.
+7. In live mode, simulate the swap, submit it, and confirm it.
+8. Burn only the MYNE balance delta received by the keeper's associated token account.
+9. Simulate and confirm the burn transaction, then persist the round's consumed allocation and log
+   both signatures. Partial failures can safely resume without spending a completed round twice.
 
 Jupiter is used only as the transaction/quote builder; the route is constrained to the registered
 Meteora DLMM pool. This avoids embedding a fragile pool-specific CPI in the protocol while still
@@ -45,6 +47,7 @@ MIN_BUYBACK_SOL=0.01
 BUYBACK_SLIPPAGE_BPS=100
 MAX_PRIORITY_LAMPORTS=500000
 BUYBACK_INTERVAL_MS=60000
+BUYBACK_STATE_PATH=/secure/keeper-data/myne-buyback-state.json
 ```
 
 The buyback signer must be the wallet configured as `buyback_wallet`; do not use an upgrade
@@ -65,4 +68,3 @@ Run locally:
 pnpm test:buyback-policy
 DRY_RUN=1 pnpm buyback:keeper -- --once
 ```
-
