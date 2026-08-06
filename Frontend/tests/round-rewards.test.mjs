@@ -20,6 +20,15 @@ test('a 90% winning-tile contribution receives exactly 90% of SOL', () => {
   assert.equal(settledSolReward(prize, 100_000_000n, winningTileTotal), 88_000_000n);
 });
 
+test('losing-tile deployments remain in the prize pool', () => {
+  const gross = 2_000_000_000n;
+  const prize = gross * 8_800n / 10_000n; // all deployments less the 12% fee
+  const winningTileTotal = 100_000_000n;
+  assert.equal(prize, 1_760_000_000n);
+  assert.equal(settledSolReward(prize, 20_000_000n, winningTileTotal), 352_000_000n);
+  assert.equal(settledSolReward(prize, 80_000_000n, winningTileTotal), 1_408_000_000n);
+});
+
 test('Motherlode displays exactly 1% of total deployed mining while a round is open', () => {
   assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_000n, false), 14_400_000n);
   assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_099n, false), 14_400_000n);

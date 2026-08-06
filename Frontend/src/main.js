@@ -4222,6 +4222,9 @@ const minerRoundResult = (miner) => {
   return {
     resolved: true,
     ethWon: miner.eth ?? 0n,
+    winningStake: miner.winningStake ?? 0n,
+    winningTileTotal: miner.winningTileTotal ?? 0n,
+    winningSolReward: miner.winningSolReward ?? 0n,
     gldWon: miner.bullion ?? 0n,
     winningSquare: Number(miner.winningSquare),
   };
@@ -4268,7 +4271,11 @@ const openRoundMinerCard = (wallet, anchor) => {
   const myneReward = result.resolved
     ? `<img src="/gld-icon-transparent.png" alt=""/><b>${chain.format.solIcon(result.gldWon, 2)}</b>`
     : '<em>Pending result</em>';
-  card.innerHTML = `<header><span>ROUND #${roundNo(miner.roundId)}</span><code title="${miner.address}">${chain.format.short(miner.address)}</code></header><div class="round-miner-grid">${grid}</div><footer><span>DEPLOYED</span><strong>${solIcon('miner-card-eth')}<b>${chain.format.ethSmart(miner.deployed)}</b></strong><span>SOL REWARD</span><strong>${solReward}</strong><span>MYNE REWARD</span><strong>${myneReward}</strong></footer>`;
+  const deployedTitle = 'Total SOL deployed across every tile';
+  const rewardTitle = result.winningTileTotal > 0n
+    ? `88% of all round deployments × ${chain.format.ethSmart(result.winningStake)} SOL on the winning tile ÷ ${chain.format.ethSmart(result.winningTileTotal)} SOL on that tile`
+    : 'No winning-tile deployment';
+  card.innerHTML = `<header><span>ROUND #${roundNo(miner.roundId)}</span><code title="${miner.address}">${chain.format.short(miner.address)}</code></header><div class="round-miner-grid">${grid}</div><footer><span title="${deployedTitle}">DEPLOYED</span><strong title="${deployedTitle}">${solIcon('miner-card-eth')}<b>${chain.format.ethSmart(miner.deployed)}</b></strong><span title="${rewardTitle}">SOL REWARD</span><strong title="${rewardTitle}">${solReward}</strong><span>MYNE REWARD</span><strong>${myneReward}</strong></footer>`;
   document.body.appendChild(card);
   roundMinerCard = card;
   positionRoundMinerCard(anchor);

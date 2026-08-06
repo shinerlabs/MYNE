@@ -1470,8 +1470,8 @@ fn assert_liquidity_pool(
 #[cfg(test)]
 mod motherlode_tests {
     use super::{
-        motherlode_hit, motherlode_share, mul_div, BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER,
-        MOTHERLODE_ODDS,
+        checked_bps, motherlode_hit, motherlode_share, mul_div, BASE_ROUND_EMISSION,
+        BURN_WEIGHT_MULTIPLIER, MINING_PROTOCOL_FEE_BPS, MOTHERLODE_ODDS,
     };
 
     #[test]
@@ -1512,6 +1512,19 @@ mod motherlode_tests {
             mul_div(BASE_ROUND_EMISSION, smaller_share, winning_tile_total).unwrap(),
             100_000_000
         );
+    }
+
+    #[test]
+    fn winning_prize_includes_losing_tile_deployments_after_the_twelve_percent_fee() {
+        // Two SOL are deployed in total: only 0.10 SOL is on the winning tile and the
+        // remaining 1.90 SOL is on losing tiles. The 12% fee is taken from the full 2 SOL,
+        // so a 0.02 SOL winning-tile share receives 20% of the 1.76 SOL prize.
+        let gross: u64 = 2_000_000_000;
+        let fee = checked_bps(gross, MINING_PROTOCOL_FEE_BPS).unwrap();
+        let prize = gross.checked_sub(fee).unwrap();
+        assert_eq!(fee, 240_000_000);
+        assert_eq!(prize, 1_760_000_000);
+        assert_eq!(mul_div(prize, 20_000_000, 100_000_000).unwrap(), 352_000_000);
     }
 
     #[test]

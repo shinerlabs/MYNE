@@ -286,6 +286,13 @@ export async function readRoundWinners(roundId) {
       ...miner,
       wagered: miner.deployed,
       eth: solReward + motherlodeSolReward,
+      // Keep the winning-tile leg separate so the miner popup can explain why total
+      // deployment and SOL reward are different values. `eth` includes any Motherlode share.
+      winningStake,
+      winningTileTotal: round.winnerTotal,
+      winningSolReward: solReward,
+      motherlodeSolReward,
+      prizeLamports: round.potForWinners,
       bullion: bullionReward,
       won: onWinningTile || (round.jackpotHit && miner.deployed > 0n),
       onWinningTile,
