@@ -6489,6 +6489,13 @@ body,
   display: none;
 }
 
+/* Route selection runs immediately after the app shell is mounted. Keep the header controls
+   invisible during that tiny bootstrap window so a landing visit never flashes the full app menu
+   before the home-specific navigation rules apply. The ready class is added after setRoute(). */
+#app:not(.app-ready) > .topbar :is(.main-nav, .landing-nav, .header-right) {
+  visibility: hidden !important;
+}
+
 body[data-route="home"] .topbar .main-nav,
 body[data-route="home"] .topbar .header-right {
   display: none !important;

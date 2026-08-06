@@ -4733,6 +4733,9 @@ syncAutoControls();
 updateMine();
 updateStake();
 setRoute(window.location.hash.slice(1) || 'home', { updateHash: false });
+// Release the header only after the initial route has applied its visibility rules. This prevents
+// the landing page from flashing the full in-app menu while the module bootstraps.
+document.querySelector('#app')?.classList.add('app-ready');
 chain.start();
 // Price the MYNE leg immediately on load, not on the first 10s poll tick — otherwise the first
 // thing a visitor sees is a Motherlode missing most of its value.
