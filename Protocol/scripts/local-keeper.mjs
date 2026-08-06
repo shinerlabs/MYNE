@@ -216,7 +216,8 @@ async function ensureRound(roundId, now, configState) {
 
 async function deployDemoMiners(roundId) {
   const round = roundPda(roundId);
-  for (const [index, demo] of demoMiners.entries()) {
+  const limit = Math.min(demoMiners.length, Number(process.env.DEMO_MINER_LIMIT || demoMiners.length));
+  for (const [index, demo] of demoMiners.slice(0, limit).entries()) {
     const authority = demo.keypair.publicKey;
     const nonce = roundId;
     const receipt = receiptPda(roundId, authority, nonce);
