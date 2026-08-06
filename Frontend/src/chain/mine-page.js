@@ -183,14 +183,16 @@ function tick() {
   state.secondsLeft = next.secondsLeft;
 
   if (rolled) {
-    const previous = state.roundId;
     state.roundId = next.roundId;
+    // Use the new chain round as the anchor. If the tab was backgrounded, `state.roundId` may
+    // be multiple rounds behind and is not necessarily the previous round anymore.
+    const previous = next.roundId > 0n ? next.roundId - 1n : null;
     state.squareTotals = Array(25).fill(0n);
     state.squareMiners = Array(25).fill(0n);
     state.myBets = Array(25).fill(0n);
     state.totalWager = 0n;
     state.currentRound = null; // fresh round: not resolved, no winner yet
-    if (live) loadResolved(previous);
+    if (live && previous !== null) loadResolved(previous);
     if (live) {
       refreshRound();
       refreshMiner();
@@ -213,9 +215,13 @@ function tick() {
  * lags so the previous-miners panel updates atomically from its last known-good result.
  */
 async function loadResolved(roundId, attempt = 0) {
+  // A suspended/background tab can skip several rounds between ticks. Only the settled round
+  // immediately before the currently displayed round is valid for the miners panel; discard
+  // late responses/retries for older ids instead of letting the panel drift out of sync.
+  if (state.roundId !== BigInt(roundId) + 1n) return;
   try {
     const round = await readRound(roundId);
-    if (round.resolved) {
+    if (round.resolved && state.roundId === BigInt(roundId) + 1n) {
       state.lastResolved = { roundId, ...round };
       emit();
       return;

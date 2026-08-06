@@ -12,7 +12,7 @@ import { readReferralStats, readReferrerOf, setReferrer, claimReferral, readLead
 import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/config.js';
 import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, invalidateReceiptCache } from './chain/lottery.js';
 import {
-  confirmedMinerRoundKey, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
+  confirmedMinerRoundKey, previousConfirmedRoundId, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol } from './chain/round-rewards.js';
 import { readSupplyStats } from './chain/supply.js';
@@ -4249,6 +4249,10 @@ const scheduleRoundMinersRefresh = (state) => {
   window.clearTimeout(roundMinerFetchTimer);
   const fetchConfirmedMiners = async () => {
     const requestedRound = confirmed.roundId;
+    // The panel must describe exactly currentRound - 1. A rollover can happen while the RPC
+    // request is in flight, so never paint a response that is no longer adjacent to the live UI.
+    const expectedPrevious = previousConfirmedRoundId(chain.state.roundId);
+    if (expectedPrevious === null || String(expectedPrevious) !== String(requestedRound)) return;
     // Receipt scans are cached for normal reads, but a new confirmed round must always start
     // from a fresh scan. Otherwise the first read can race the final deployment and preserve the
     // previous roster forever because an empty result is treated as a transient RPC response.
@@ -4256,6 +4260,7 @@ const scheduleRoundMinersRefresh = (state) => {
     try {
       const result = await readRoundWinners(requestedRound);
       if (String(chain.state.lastResolved?.roundId) !== String(requestedRound)) return;
+      if (String(previousConfirmedRoundId(chain.state.roundId)) !== String(requestedRound)) return;
       if (!result.miners.length && confirmedMinerFetchAttempt < 8) {
         confirmedMinerFetchAttempt += 1;
         roundMinerFetchTimer = window.setTimeout(fetchConfirmedMiners, 750);

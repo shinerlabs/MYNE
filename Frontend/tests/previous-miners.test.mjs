@@ -3,9 +3,16 @@ import test from 'node:test';
 
 import {
   confirmedMinerRoundKey,
+  previousConfirmedRoundId,
   previousRoundMinerRoster,
   shouldRefreshConfirmedMiners,
 } from '../src/chain/previous-miners.js';
+
+test('the miners panel targets the round immediately before the active round', () => {
+  assert.equal(previousConfirmedRoundId(0n), null);
+  assert.equal(previousConfirmedRoundId(1n), 0n);
+  assert.equal(previousConfirmedRoundId(42n), 41n);
+});
 
 test('only a settled previous round can replace the confirmed miners panel', () => {
   assert.equal(confirmedMinerRoundKey(null), null);

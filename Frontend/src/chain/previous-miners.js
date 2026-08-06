@@ -8,6 +8,16 @@ export function confirmedMinerRoundKey(lastResolved) {
   return String(lastResolved.roundId);
 }
 
+/**
+ * The miners panel is always the immediately preceding settled round.  Round ids are raw
+ * zero-based contract ids; callers should use this helper instead of carrying the id observed
+ * before a rollover (which can be several rounds stale after a sleeping tab resumes).
+ */
+export function previousConfirmedRoundId(currentRoundId) {
+  const id = BigInt(currentRoundId);
+  return id > 0n ? id - 1n : null;
+}
+
 export function shouldRefreshConfirmedMiners(lastResolved, renderedKey, requestKey) {
   const key = confirmedMinerRoundKey(lastResolved);
   return key !== null && key !== renderedKey && key !== requestKey;
