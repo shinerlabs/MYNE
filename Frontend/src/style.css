@@ -2110,7 +2110,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   transition: color .22s ease;
 }
 .network-footer span {
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 650;
   letter-spacing: .16em;
 }
@@ -2122,12 +2122,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   transition: opacity .22s ease,filter .22s ease,transform .22s ease;
 }
 .network-footer img.solana-word-logo {
-  width: 62px;
+  width: 76px;
   height: auto;
 }
 .network-footer b {
   color: #bababa;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: .01em;
   transition: color .22s ease;
@@ -3017,8 +3017,8 @@ button:disabled { opacity: .48; }
 .social-tabs button { font-size: 10px; }
 .news-card time { color: #9d9d9d; font-size: 9px; }
 .news-card button { font-size: 10px; }
-.network-footer span { font-size: 8px; }
-.network-footer b { font-size: 10px; }
+.network-footer span { font-size: 10px; }
+.network-footer b { font-size: 11px; }
 
 * { scrollbar-width: thin; scrollbar-color: #4f4f4f #141414; }
 *::-webkit-scrollbar { width: 7px; height: 7px; }
