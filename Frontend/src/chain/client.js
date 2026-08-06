@@ -1,4 +1,8 @@
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction } from '@solana/web3.js';
+import { getWallets } from '@wallet-standard/app';
+import { StandardConnect, StandardDisconnect, StandardEvents } from '@wallet-standard/features';
+import { SolanaSignAndSendTransaction, SolanaSignTransaction } from '@solana/wallet-standard-features';
+import bs58 from 'bs58';
 import { NETWORK, PROTOCOL_READY } from '../app-config.js';
 
 export const connection = new Connection(NETWORK.rpcUrl, 'confirmed');
@@ -24,6 +28,81 @@ let account = null;
 let active = null;
 const listeners = new Set();
 
+const standardChain = ({ cluster }) => cluster === 'mainnet-beta'
+  ? 'solana:mainnet'
+  : cluster === 'testnet' ? 'solana:testnet' : 'solana:devnet';
+
+function standardCandidates() {
+  let wallets;
+  try { wallets = getWallets().get(); } catch { return []; }
+  return wallets
+    .filter((wallet) => wallet?.features?.[StandardConnect]?.connect
+      && (wallet.features?.[SolanaSignTransaction]?.signTransaction
+        || wallet.features?.[SolanaSignAndSendTransaction]?.signAndSendTransaction))
+    .map((wallet) => {
+      const id = `standard:${wallet.name}`;
+      let selectedAccount = wallet.accounts?.[0] ?? null;
+      const eventListeners = new Set();
+      const provider = {
+        async connect(options = {}) {
+          const result = await wallet.features[StandardConnect].connect(
+            options.onlyIfTrusted ? { silent: true } : undefined,
+          );
+          selectedAccount = result.accounts?.[0] ?? wallet.accounts?.[0] ?? null;
+          if (!selectedAccount) throw new Error(`${wallet.name} did not return a Solana account`);
+          return { publicKey: new PublicKey(selectedAccount.address) };
+        },
+        async disconnect() {
+          await wallet.features[StandardDisconnect]?.disconnect?.();
+        },
+        async signTransaction(transaction) {
+          const feature = wallet.features[SolanaSignTransaction];
+          if (!feature?.signTransaction) throw new Error(`${wallet.name} does not support transaction signing`);
+          const signed = await feature.signTransaction({
+            account: selectedAccount ?? wallet.accounts?.[0],
+            transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
+            chain: standardChain(NETWORK),
+          });
+          return Transaction.from(signed[0].signedTransaction);
+        },
+        async signAllTransactions(transactions) {
+          const feature = wallet.features[SolanaSignTransaction];
+          if (!feature?.signTransaction) throw new Error(`${wallet.name} does not support transaction signing`);
+          const signed = await Promise.all(transactions.map((transaction) => feature.signTransaction({
+            account: selectedAccount ?? wallet.accounts?.[0],
+            transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
+            chain: standardChain(NETWORK),
+          })));
+          return signed.map((result) => Transaction.from(result[0].signedTransaction));
+        },
+        async signAndSendTransaction(transaction) {
+          const feature = wallet.features[SolanaSignAndSendTransaction];
+          if (!feature?.signAndSendTransaction) {
+            const signed = await this.signTransaction(transaction);
+            return connection.sendRawTransaction(signed.serialize());
+          }
+          const sent = await feature.signAndSendTransaction({
+            account: selectedAccount ?? wallet.accounts?.[0],
+            transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
+            chain: standardChain(NETWORK),
+            options: { commitment: 'confirmed' },
+          });
+          return bs58.encode(sent[0].signature);
+        },
+        on(event, callback) {
+          if (event !== 'accountChanged') return () => {};
+          eventListeners.add(callback);
+          return () => eventListeners.delete(callback);
+        },
+      };
+      wallet.features[StandardEvents]?.on?.('change', ({ accounts }) => {
+        selectedAccount = accounts?.[0] ?? wallet.accounts?.[0] ?? null;
+        eventListeners.forEach((callback) => callback(selectedAccount ? new PublicKey(selectedAccount.address) : null));
+      });
+      return { id, name: wallet.name, provider, icon: wallet.icon };
+    });
+}
+
 const candidates = () => {
   if (typeof window === 'undefined') return [];
   const found = [];
@@ -34,11 +113,15 @@ const candidates = () => {
   add('solflare', 'Solflare', window.solflare);
   add('backpack', 'Backpack', window.backpack);
   add('injected', 'Solana wallet', window.solana);
-  return found;
+  const standards = standardCandidates();
+  const standardNames = new Set(standards.map((wallet) => wallet.name.toLowerCase()));
+  // Prefer Wallet Standard entries when a wallet exposes both APIs, while retaining legacy
+  // fallbacks for older extensions.
+  return [...standards, ...found.filter((wallet) => !standardNames.has(wallet.name.toLowerCase()))];
 };
 
 export async function discoverWallets() {
-  return candidates().map(({ id, name, provider }) => ({ rdns: id, name, icon: provider?.icon || null }));
+  return candidates().map(({ id, name, provider, icon }) => ({ rdns: id, name, icon: provider?.icon || icon || null }));
 }
 export const getLastWalletRdns = () => typeof localStorage === 'undefined' ? null : localStorage.getItem(STORAGE_KEY);
 export const getAccount = () => account;
@@ -64,7 +147,7 @@ function bind(wallet, publicKey) {
 export async function connect(id) {
   const wallets = candidates();
   const wallet = wallets.find((x) => x.id === id) || wallets.find((x) => x.id === getLastWalletRdns()) || wallets[0];
-  if (!wallet) throw new Error('No Solana wallet found — install Phantom, Solflare, or Backpack');
+  if (!wallet) throw new Error('No Solana wallet found — install a compatible Solana wallet');
   const result = await wallet.provider.connect();
   const key = result?.publicKey || wallet.provider.publicKey;
   if (!key) throw new Error('The wallet did not return a Solana public key');
