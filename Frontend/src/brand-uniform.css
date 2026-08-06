@@ -6501,6 +6501,23 @@ body[data-route="home"] .topbar .header-right {
   display: none !important;
 }
 
+/* The landing header is intentionally minimal. Every app route must restore the full
+   navigation explicitly so a bootstrap/route transition can never leave the app shell
+   looking like the landing page. */
+body:not([data-route="home"]) #app > .topbar .main-nav {
+  display: flex !important;
+  visibility: visible !important;
+}
+
+body:not([data-route="home"]) #app > .topbar .header-right {
+  display: flex !important;
+  visibility: visible !important;
+}
+
+body:not([data-route="home"]) #app > .topbar .landing-nav {
+  display: none !important;
+}
+
 body[data-route="home"] #app > .topbar {
   position: absolute !important;
   z-index: 20 !important;

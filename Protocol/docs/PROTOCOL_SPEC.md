@@ -104,15 +104,15 @@ escape hatch.
 
 - A MYNE claim charges 10%.
 - 9% is redistributed to remaining unclaimed MYNE balances.
-- 1% accrues to the claimant's permanent referrer.
+- 1% accrues to the claimant's permanent referrer; if no referrer is set, it is minted to
+  the configured admin-fee wallet.
 - Attribution is first-valid and permanent; self-referral and simple cycles are rejected.
 
 The scalable model is a global reward-per-unclaimed accumulator. Every miner checkpoints before
 their balance changes. This avoids iterating all unclaimed miners during a claim.
 
-Open decision: the current inherited EVM behavior waives some claim fee when nobody else is
-unclaimed. The public MYNE documentation says 10%; the Solana program should use the public rule
-unless the product explicitly chooses the exception.
+The 10% fee is always charged, including when no referrer is set. This keeps the fee split
+deterministic and prevents an unlabelled referral share from silently inflating the passive pool.
 
 ## Staking
 

@@ -1061,12 +1061,12 @@ pub mod myne_protocol {
             .ok_or(MyneError::ArithmeticOverflow)?;
         let total_fee = checked_bps(gross, CLAIM_FEE_BPS)?;
         let passive_fee = checked_bps(gross, CLAIM_PASSIVE_BPS)?;
-        let mut referral_fee = total_fee
+        let referral_share = total_fee
             .checked_sub(passive_fee)
             .ok_or(MyneError::ArithmeticOverflow)?;
-        if ctx.accounts.miner.referrer == Pubkey::default() {
-            referral_fee = 0;
-        }
+        let has_referrer = ctx.accounts.miner.referrer != Pubkey::default();
+        let referral_fee = if has_referrer { referral_share } else { 0 };
+        let admin_fee = if has_referrer { 0 } else { referral_share };
         if referral_fee > 0 {
             let referrer = ctx
                 .accounts
@@ -1083,10 +1083,9 @@ pub mod myne_protocol {
             ctx.accounts.mining_pool.total_unclaimed =
                 checked_add(ctx.accounts.mining_pool.total_unclaimed, referral_fee)?;
         }
-        let non_referral_fee = total_fee
-            .checked_sub(referral_fee)
-            .ok_or(MyneError::ArithmeticOverflow)?;
-        distribute_mining_rewards(&mut ctx.accounts.mining_pool, non_referral_fee)?;
+        // Keep the passive holder pool at exactly 9%. If no referrer was recorded, the remaining
+        // 1% is paid to the configured admin fee wallet instead of silently joining that pool.
+        distribute_mining_rewards(&mut ctx.accounts.mining_pool, passive_fee)?;
         let net = gross
             .checked_sub(total_fee)
             .ok_or(MyneError::ArithmeticOverflow)?;
@@ -1112,6 +1111,20 @@ pub mod myne_protocol {
             ),
             net,
         )?;
+        if admin_fee > 0 {
+            token_interface::mint_to(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.key(),
+                    MintTo {
+                        mint: ctx.accounts.mint.to_account_info(),
+                        to: ctx.accounts.admin_fee_tokens.to_account_info(),
+                        authority: ctx.accounts.config.to_account_info(),
+                    },
+                    signer,
+                ),
+                admin_fee,
+            )?;
+        }
         ctx.accounts.miner.lifetime_myne_claimed =
             checked_add(ctx.accounts.miner.lifetime_myne_claimed, net)?;
         ctx.accounts.miner.passive_reward_debt = ctx.accounts.mining_pool.reward_per_unclaimed;
@@ -1120,7 +1133,8 @@ pub mod myne_protocol {
             gross_base_units: gross,
             net_base_units: net,
             fee_base_units: total_fee,
-            referral_base_units: referral_fee
+            referral_base_units: referral_fee,
+            admin_base_units: admin_fee,
         });
         Ok(())
     }
@@ -1610,6 +1624,8 @@ pub struct ClaimMyne<'info> {
     pub referrer_miner: Option<Account<'info, Miner>>,
     #[account(mut, token::mint=mint, token::authority=authority)]
     pub destination_tokens: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut, token::mint=mint, token::authority=config.admin_fee_wallet)]
+    pub admin_fee_tokens: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut)]
     pub mint: InterfaceAccount<'info, Mint>,
     pub authority: Signer<'info>,
@@ -1749,4 +1765,5 @@ pub struct MyneClaimed {
     pub net_base_units: u64,
     pub fee_base_units: u64,
     pub referral_base_units: u64,
+    pub admin_base_units: u64,
 }

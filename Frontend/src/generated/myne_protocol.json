@@ -315,6 +315,10 @@
           "writable": true
         },
         {
+          "name": "admin_fee_tokens",
+          "writable": true
+        },
+        {
           "name": "mint",
           "writable": true,
           "relations": [
@@ -3331,6 +3335,10 @@
           },
           {
             "name": "referral_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "admin_base_units",
             "type": "u64"
           }
         ]

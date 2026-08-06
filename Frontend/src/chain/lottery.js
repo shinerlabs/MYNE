@@ -236,13 +236,16 @@ export async function withdrawUnrefined() {
   if (!miner || toBig(miner.unclaimedMyne) === 0n) throw new Error('Nothing to claim');
   const mint = new PublicKey(config.mint);
   const destinationTokens = associatedToken(authority, mint);
+  const adminFeeWallet = new PublicKey(config.adminFeeWallet);
+  const adminFeeTokens = associatedToken(adminFeeWallet, mint);
   const { program } = await getWritableProgram();
   const instructions = [];
   if (!(await connection.getAccountInfo(destinationTokens, 'confirmed'))) instructions.push(createAtaInstruction(authority, authority, mint, destinationTokens));
+  if (!(await connection.getAccountInfo(adminFeeTokens, 'confirmed'))) instructions.push(createAtaInstruction(authority, adminFeeWallet, mint, adminFeeTokens));
   const referrerMiner = miner.referrer.equals(PublicKey.default) ? null : minerPda(miner.referrer);
   instructions.push(await program.methods.claimMyne().accounts({
     config: protocolPdas.config, miningPool: protocolPdas.miningPool, miner: minerPda(account),
-    referrerMiner, destinationTokens, mint, authority, tokenProgram: TOKEN_PROGRAM_ID,
+    referrerMiner, destinationTokens, adminFeeTokens, mint, authority, tokenProgram: TOKEN_PROGRAM_ID,
   }).instruction());
   return sendInstructions(instructions);
 }
