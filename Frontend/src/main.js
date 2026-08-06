@@ -10,7 +10,7 @@ import { loadRoundBets, loadDrandLink } from './chain/rounds-index.js';
 import { loadRoundHistory } from './chain/rounds-page.js';
 import { readReferralStats, readReferrerOf, setReferrer, claimReferral, readLeaderboard, readMyReferrals } from './chain/referral.js';
 import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/config.js';
-import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness } from './chain/lottery.js';
+import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, invalidateReceiptCache } from './chain/lottery.js';
 import {
   confirmedMinerRoundKey, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
@@ -4094,6 +4094,7 @@ let roundMinerCloseTimer = 0;
 let confirmedMinerRenderedKey = '';
 let confirmedMinerRequestKey = '';
 let roundMinerFetchTimer = 0;
+let confirmedMinerFetchAttempt = 0;
 
 const minerRoundResult = (miner) => {
   return {
@@ -4244,12 +4245,22 @@ const scheduleRoundMinersRefresh = (state) => {
   if (!shouldRefreshConfirmedMiners(confirmed, confirmedMinerRenderedKey, confirmedMinerRequestKey)) return;
   const key = confirmedMinerRoundKey(confirmed);
   confirmedMinerRequestKey = key;
+  confirmedMinerFetchAttempt = 0;
   window.clearTimeout(roundMinerFetchTimer);
-  roundMinerFetchTimer = window.setTimeout(async () => {
+  const fetchConfirmedMiners = async () => {
     const requestedRound = confirmed.roundId;
+    // Receipt scans are cached for normal reads, but a new confirmed round must always start
+    // from a fresh scan. Otherwise the first read can race the final deployment and preserve the
+    // previous roster forever because an empty result is treated as a transient RPC response.
+    invalidateReceiptCache();
     try {
       const result = await readRoundWinners(requestedRound);
       if (String(chain.state.lastResolved?.roundId) !== String(requestedRound)) return;
+      if (!result.miners.length && confirmedMinerFetchAttempt < 8) {
+        confirmedMinerFetchAttempt += 1;
+        roundMinerFetchTimer = window.setTimeout(fetchConfirmedMiners, 750);
+        return;
+      }
       renderConfirmedMiners(previousRoundMinerRoster(result), requestedRound, result.winningSquare);
       confirmedMinerRenderedKey = key;
     } catch (error) {
@@ -4257,9 +4268,13 @@ const scheduleRoundMinersRefresh = (state) => {
       // known-good miner roster with an error or an empty state.
       console.warn('confirmed miners refresh failed', error);
     } finally {
-      if (confirmedMinerRequestKey === key) confirmedMinerRequestKey = '';
+      if (confirmedMinerRequestKey === key
+        && (confirmedMinerRenderedKey === key || String(chain.state.lastResolved?.roundId) !== String(requestedRound))) {
+        confirmedMinerRequestKey = '';
+      }
     }
-  }, 250);
+  };
+  roundMinerFetchTimer = window.setTimeout(fetchConfirmedMiners, 250);
 };
 
 const renderPagination = () => {

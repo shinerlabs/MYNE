@@ -226,7 +226,7 @@ async function loadResolved(roundId, attempt = 0) {
   // Settlement can land a few hundred milliseconds after the round rolls over. Retry quickly so
   // a fresh page load or RPC race never leaves the previous-miners panel blank for a full poll
   // interval; once a roster is rendered, later failures leave that confirmed roster untouched.
-  if (attempt < 12) window.setTimeout(() => loadResolved(roundId, attempt + 1), 500);
+  if (attempt < 24) window.setTimeout(() => loadResolved(roundId, attempt + 1), 500);
 }
 
 // --- actions -------------------------------------------------------------------------
