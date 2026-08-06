@@ -35,17 +35,21 @@ const standardChain = ({ cluster }) => cluster === 'mainnet-beta'
 function standardCandidates() {
   let wallets;
   try { wallets = getWallets().get(); } catch { return []; }
+  // Wallet Standard implementations are expected to expose a feature record, but a few
+  // older adapters shipped a Map-like object instead. Read both shapes so those wallets
+  // remain connectable while the ecosystem finishes converging on the standard record.
+  const feature = (wallet, key) => wallet?.features?.[key] || wallet?.features?.get?.(key);
   return wallets
-    .filter((wallet) => wallet?.features?.[StandardConnect]?.connect
-      && (wallet.features?.[SolanaSignTransaction]?.signTransaction
-        || wallet.features?.[SolanaSignAndSendTransaction]?.signAndSendTransaction))
+    .filter((wallet) => feature(wallet, StandardConnect)?.connect
+      && (feature(wallet, SolanaSignTransaction)?.signTransaction
+        || feature(wallet, SolanaSignAndSendTransaction)?.signAndSendTransaction))
     .map((wallet) => {
       const id = `standard:${wallet.name}`;
       let selectedAccount = wallet.accounts?.[0] ?? null;
       const eventListeners = new Set();
       const provider = {
         async connect(options = {}) {
-          const result = await wallet.features[StandardConnect].connect(
+          const result = await feature(wallet, StandardConnect).connect(
             options.onlyIfTrusted ? { silent: true } : undefined,
           );
           selectedAccount = result.accounts?.[0] ?? wallet.accounts?.[0] ?? null;
@@ -53,12 +57,12 @@ function standardCandidates() {
           return { publicKey: new PublicKey(selectedAccount.address) };
         },
         async disconnect() {
-          await wallet.features[StandardDisconnect]?.disconnect?.();
+          await feature(wallet, StandardDisconnect)?.disconnect?.();
         },
         async signTransaction(transaction) {
-          const feature = wallet.features[SolanaSignTransaction];
-          if (!feature?.signTransaction) throw new Error(`${wallet.name} does not support transaction signing`);
-          const signed = await feature.signTransaction({
+          const signer = feature(wallet, SolanaSignTransaction);
+          if (!signer?.signTransaction) throw new Error(`${wallet.name} does not support transaction signing`);
+          const signed = await signer.signTransaction({
             account: selectedAccount ?? wallet.accounts?.[0],
             transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
             chain: standardChain(NETWORK),
@@ -66,9 +70,9 @@ function standardCandidates() {
           return Transaction.from(signed[0].signedTransaction);
         },
         async signAllTransactions(transactions) {
-          const feature = wallet.features[SolanaSignTransaction];
-          if (!feature?.signTransaction) throw new Error(`${wallet.name} does not support transaction signing`);
-          const signed = await Promise.all(transactions.map((transaction) => feature.signTransaction({
+          const signer = feature(wallet, SolanaSignTransaction);
+          if (!signer?.signTransaction) throw new Error(`${wallet.name} does not support transaction signing`);
+          const signed = await Promise.all(transactions.map((transaction) => signer.signTransaction({
             account: selectedAccount ?? wallet.accounts?.[0],
             transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
             chain: standardChain(NETWORK),
@@ -76,12 +80,12 @@ function standardCandidates() {
           return signed.map((result) => Transaction.from(result[0].signedTransaction));
         },
         async signAndSendTransaction(transaction) {
-          const feature = wallet.features[SolanaSignAndSendTransaction];
-          if (!feature?.signAndSendTransaction) {
+          const signer = feature(wallet, SolanaSignAndSendTransaction);
+          if (!signer?.signAndSendTransaction) {
             const signed = await this.signTransaction(transaction);
             return connection.sendRawTransaction(signed.serialize());
           }
-          const sent = await feature.signAndSendTransaction({
+          const sent = await signer.signAndSendTransaction({
             account: selectedAccount ?? wallet.accounts?.[0],
             transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
             chain: standardChain(NETWORK),
@@ -95,7 +99,7 @@ function standardCandidates() {
           return () => eventListeners.delete(callback);
         },
       };
-      wallet.features[StandardEvents]?.on?.('change', ({ accounts }) => {
+      feature(wallet, StandardEvents)?.on?.('change', ({ accounts }) => {
         selectedAccount = accounts?.[0] ?? wallet.accounts?.[0] ?? null;
         eventListeners.forEach((callback) => callback(selectedAccount ? new PublicKey(selectedAccount.address) : null));
       });
