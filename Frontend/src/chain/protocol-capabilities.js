@@ -1,5 +1,5 @@
 export const FEATURE_REQUIREMENTS = Object.freeze({
-  configuration: ['initialize_protocol', 'set_paused', 'propose_admin', 'accept_admin', 'set_randomness_authority'],
+  configuration: ['initialize_protocol', 'initialize_liquidity_gate', 'set_paused', 'propose_admin', 'accept_admin', 'set_randomness_authority'],
   mining: ['open_round', 'register_miner', 'deploy', 'settle_round', 'claim_receipt', 'refund_receipt', 'claim_myne'],
   staking: ['stake_standard', 'burn_stake', 'request_unstake', 'withdraw_unstaked', 'claim_staking_rewards', 'fund_staking_rewards'],
   referrals: ['register_miner', 'claim_myne'],

@@ -5,11 +5,8 @@ import { publicClient, getWalletClient, getAccount, withGasHeadroom } from './cl
 /**
  * SOL <-> MYNE swaps on Uniswap V4, through the CANONICAL Universal Router.
  *
- * The 4% buy/sell liquidity pool tax is levied IN SOL by the protocol, not by the token. Its proceeds are
- * allocated 3% to stakers and 1% to the Motherlode reward pool, so MYNE remains a
- * plain ERC20 and swaps use the standard V4 flow:
- *   - BUY  (SOL -> MYNE): the protocol skims 4% of the SOL input; 96% is swapped (less the 0.3% LP fee).
- *   - SELL (MYNE -> SOL): the pool swaps MYNE -> SOL (less 0.3% fee); the protocol skims 4% of the SOL out.
+ * Trading fees are deferred. This adapter, when enabled for a future pool, quotes the venue's
+ * native LP fee only; it does not collect a protocol buy/sell tax.
  *
  * WHY NOT THE UNISWAP APP: Uniswap Labs' routing API only routes through hooks on its allowlist,
  * so app.uniswap.org reports "No routes available" for this pool even though it trades perfectly.
@@ -35,7 +32,6 @@ const Q96 = 2n ** 96n;
 // takes everything and the LP fee is nil.
 const FEE_DEN = 1_000_000n;
 const FEE_NUM = FEE_DEN - BigInt(poolKey?.fee ?? 3000);
-const TAX_NUM = 96n, TAX_DEN = 100n;   // 4% SOL tax: 3% stakers + 1% Motherlode
 
 // Universal Router command (Commands.sol) + v4-periphery actions (Actions.sol).
 const V4_SWAP = 0x10;
@@ -157,19 +153,18 @@ function amount0Out(amountIn1, sqrtP, L) {
 }
 
 /**
- * Estimate the output for `amountIn` in the given direction, net of the 0.3% fee and 4% tax.
+ * Estimate the output for `amountIn` in the given direction, net of the venue LP fee.
  * @param dir 'buy' (SOL->MYNE) or 'sell' (MYNE->SOL)
  */
 export function quote(amountIn, dir, { sqrtPriceX96, liquidity }) {
   if (amountIn <= 0n || !sqrtPriceX96) return 0n;
   if (dir === 'buy') {
-    const solForSwap = (amountIn * TAX_NUM) / TAX_DEN;        // hook takes 4% SOL first
-    const solLessFee = (solForSwap * FEE_NUM) / FEE_DEN;      // then the pool's LP fee
+    const solLessFee = (amountIn * FEE_NUM) / FEE_DEN;
     return amount1Out(solLessFee, sqrtPriceX96, liquidity);
   }
   const gldLessFee = (amountIn * FEE_NUM) / FEE_DEN;          // pool's LP fee on MYNE in
   const solGross = amount0Out(gldLessFee, sqrtPriceX96, liquidity);
-  return (solGross * TAX_NUM) / TAX_DEN;                      // hook takes 4% of SOL out
+  return solGross;
 }
 
 /** Spot price as MYNE per SOL (for the "Rate" display). */

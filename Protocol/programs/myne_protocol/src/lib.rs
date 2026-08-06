@@ -15,6 +15,7 @@ declare_id!("D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e");
 pub const CONFIG_SEED: &[u8] = b"config";
 pub const MINING_POOL_SEED: &[u8] = b"mining_pool";
 pub const STAKE_POOL_SEED: &[u8] = b"stake_pool";
+pub const LIQUIDITY_GATE_SEED: &[u8] = b"liquidity_gate";
 pub const MINER_SEED: &[u8] = b"miner";
 pub const STAKE_POSITION_SEED: &[u8] = b"stake_position";
 pub const ROUND_SEED: &[u8] = b"round";
@@ -130,7 +131,53 @@ pub mod myne_protocol {
         Ok(())
     }
 
+    pub fn initialize_liquidity_gate(
+        ctx: Context<InitializeLiquidityGate>,
+        pool: Pubkey,
+        pool_program: Pubkey,
+        min_sol_lamports: u64,
+        min_myne_base_units: u64,
+    ) -> Result<()> {
+        require!(pool != Pubkey::default(), MyneError::InvalidLiquidityPool);
+        require!(
+            pool_program != Pubkey::default(),
+            MyneError::InvalidLiquidityPool
+        );
+        require!(min_sol_lamports > 0, MyneError::InvalidLiquidityPool);
+        require!(min_myne_base_units > 0, MyneError::InvalidLiquidityPool);
+        require!(
+            ctx.accounts.pool.key() == pool,
+            MyneError::InvalidLiquidityPool
+        );
+        require!(
+            !ctx.accounts.pool.data_is_empty(),
+            MyneError::InvalidLiquidityPool
+        );
+        require_keys_eq!(
+            *ctx.accounts.pool.owner,
+            pool_program,
+            MyneError::InvalidLiquidityPool
+        );
+
+        let gate = &mut ctx.accounts.liquidity_gate;
+        gate.bump = ctx.bumps.liquidity_gate;
+        gate.pool = pool;
+        gate.pool_program = pool_program;
+        gate.min_sol_lamports = min_sol_lamports;
+        gate.min_myne_base_units = min_myne_base_units;
+        gate.verified = true;
+        Ok(())
+    }
+
     pub fn set_paused(ctx: Context<AdminConfig>, paused: bool) -> Result<()> {
+        if !paused {
+            let gate = ctx
+                .accounts
+                .liquidity_gate
+                .as_ref()
+                .ok_or_else(|| error!(MyneError::LiquidityPoolNotVerified))?;
+            require!(gate.verified, MyneError::LiquidityPoolNotVerified);
+        }
         ctx.accounts.config.paused = paused;
         emit!(PauseChanged { paused });
         Ok(())
@@ -984,6 +1031,7 @@ pub mod myne_protocol {
     }
 
     pub fn claim_myne(ctx: Context<ClaimMyne>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
         let gross = ctx.accounts.miner.unclaimed_myne;
         require!(gross > 0, MyneError::InsufficientBalance);
@@ -1265,6 +1313,17 @@ pub struct ProtocolConfig {
     pub virtual_burn_base_units: u64,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct LiquidityGate {
+    pub bump: u8,
+    pub verified: bool,
+    pub pool: Pubkey,
+    pub pool_program: Pubkey,
+    pub min_sol_lamports: u64,
+    pub min_myne_base_units: u64,
+}
+
 #[derive(Accounts)]
 pub struct InitializeProtocol<'info> {
     #[account(init, payer = payer, space = 8 + ProtocolConfig::INIT_SPACE, seeds = [CONFIG_SEED], bump)]
@@ -1288,7 +1347,22 @@ pub struct InitializeProtocol<'info> {
 pub struct AdminConfig<'info> {
     #[account(mut, seeds=[CONFIG_SEED], bump=config.bump, has_one=admin)]
     pub config: Account<'info, ProtocolConfig>,
+    #[account(seeds=[LIQUIDITY_GATE_SEED], bump)]
+    pub liquidity_gate: Option<Account<'info, LiquidityGate>>,
     pub admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeLiquidityGate<'info> {
+    #[account(seeds=[CONFIG_SEED], bump=config.bump, has_one=admin)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(init, payer=admin, space=8+LiquidityGate::INIT_SPACE, seeds=[LIQUIDITY_GATE_SEED], bump)]
+    pub liquidity_gate: Account<'info, LiquidityGate>,
+    /// CHECK: The pool is verified by its exact configured address and owner program.
+    pub pool: UncheckedAccount<'info>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 #[derive(Accounts)]
 pub struct AcceptAdmin<'info> {

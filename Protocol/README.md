@@ -13,7 +13,9 @@ The local/devnet milestone contains:
 - staking, referrals, claims, balance-funded auto-round plans, and capped MYNE minting;
 - checked basis-point arithmetic plus local integration tests.
 
-The 4% buy/sell fee remains external to this program and is configured in the Meteora pool.
+Trading fees are deferred and are not part of this protocol milestone. Staking is funded by the
+8% mining allocation; the other mining allocations are 2% to the Motherlode and 2% to buyback and
+burn.
 
 ## Intended toolchain
 

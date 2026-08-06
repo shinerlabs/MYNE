@@ -15,7 +15,8 @@ ABIs in `Frontend/src/deployments`.
 - Pre-existing burn-staked supply: 0 MYNE.
 - Initial market/liquidity allocation: all 100 genesis MYNE.
 - Current UI hard-cap promise: 2,000,000 MYNE.
-- Wallet transfers are not charged the 4% liquidity-pool tax.
+- Trading fees are deferred and are not part of this protocol milestone. Wallet transfers remain
+  ordinary SPL transfers.
 
 The mint decimals, metadata authority, freeze authority, and final mint-authority custody are not
 yet confirmed. These must be fixed before mint creation.
@@ -34,7 +35,8 @@ Current UI contract:
 - Split: miners on the winning tile receive SOL and MYNE pro rata by deployed SOL.
 - Solo: SOL remains pro rata on the winning tile; one deployment-weighted miner receives MYNE.
 - Motherlode: currently shown as 1-in-650 per round. It is the SOL payment pool; each round also
-  accrues a 0.2 MYNE staking bonus that is paid with a hit and burned into winners' staking weight.
+  accrues a 0.2 MYNE staking bonus. On a hit, the bonus is paid alongside the SOL reward to the
+  miners of that round, permanently burned, and added to each recipient's 5x staking weight.
 
 Implemented Solana account design:
 
@@ -59,8 +61,9 @@ Local/devnet decisions:
 3. Local/devnet settlement uses the configured trusted randomness signer. Mainnet remains blocked
    until this is replaced by a verified oracle callback.
 4. Unsettled receipts become fully refundable ten minutes after the normal settlement time.
-5. The 0.2 MYNE staking bonus is virtual until a Motherlode hit and becomes non-transferable 5x
-   staking weight when claimed alongside the SOL payment.
+5. The 0.2 MYNE staking bonus is virtual until a Motherlode hit. It is never a liquid or claimable
+   token balance: when claimed alongside the SOL payment, it is permanently burned and becomes
+   non-transferable 5x staking weight for each miner receiving the shared Motherlode reward.
 
 ## Mining fee
 
@@ -83,6 +86,15 @@ moves the full tracked balance—including that round's contribution—back into
 receipt-based claims. If no tile has a winning deployment, the unawarded 88% prize also rolls into
 the same tracked balance instead of becoming operator revenue.
 
+## Launch liquidity gate
+
+Initialization always leaves the protocol paused. Before the admin can unpause it, a separate
+`LiquidityGate` PDA must be initialized with the exact official Meteora pool address and its owner
+program. The gate records the declared minimum SOL and MYNE thresholds for the pool-registration
+runbook and prevents miners or other users from substituting a competing pool before emissions
+begin. Pool-specific reserve decoding remains a required deployment check. `claim_myne` also
+respects the pause flag, so an emergency pause cannot leave a token-minting escape hatch.
+
 ## Unclaimed MYNE and referrals
 
 - A MYNE claim charges 10%.
@@ -101,7 +113,7 @@ unless the product explicitly chooses the exception.
 
 - Standard stake: 1x reward weight; unstake request enters a 30-day queue.
 - Burn stake: token principal is burned permanently for 5x reward weight.
-- Rewards are SOL, funded by 8% of mining deployments and 3% of taxed pool trades.
+- Rewards are SOL, funded by the 8% mining-deployment allocation.
 - The Motherlode staking bonus enters a 5x permanent burn-stake position for each winner; the
   Motherlode SOL payment remains claimable.
 
@@ -116,19 +128,11 @@ Working accounts:
 Staking bonuses are represented as non-transferable reward weight and tracked separately from the
 liquid SPL mint supply. They are always awarded with the Motherlode SOL payment.
 
-## Meteora liquidity-pool fee
+## Future trading integration
 
-- 4% of MYNE/SOL buys and sells, collected in SOL.
-- The operator manually claims the SOL-denominated pool fees to a designated wallet.
-- The operator deposits the staking allocation through permissionless `fund_staking_rewards`.
-- Any Motherlode allocation is managed as a separate operator reserve.
-- Wallet-to-wallet MYNE transfers are unaffected.
-
-Do **not** enable Token-2022 `TransferFeeConfig` for this rule: that extension applies its fee to
-every token transfer, including wallet transfers. The MYNE program therefore does not implement a
-swap router or token transfer tax. The configured Meteora pool is the enforcement boundary, and the
-website uses Meteora's SDK once a concrete devnet pool address and fee authority are supplied. Until
-then the swap capability remains fail-closed.
+Meteora trading and any pool-trade fee are intentionally deferred. No buy/sell tax is collected by
+the MYNE program in this milestone. The current on-chain fee schedule is limited to mining rounds:
+8% to staking rewards, 2% to the Motherlode, and 2% to buyback and burn.
 
 ## Randomness and settlement
 

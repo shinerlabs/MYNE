@@ -16,7 +16,6 @@ pub const MINING_ADMIN_BPS: u16 = 0;
 pub const CLAIM_FEE_BPS: u16 = 1_000;
 pub const CLAIM_PASSIVE_BPS: u16 = 900;
 pub const CLAIM_REFERRAL_BPS: u16 = 100;
-pub const POOL_TAX_BPS: u16 = 400;
 
 pub fn checked_bps(amount: u64, bps: u16) -> Result<u64> {
     let value = (amount as u128)
@@ -47,9 +46,6 @@ pub fn validate_economics() -> Result<()> {
         CLAIM_PASSIVE_BPS.checked_add(CLAIM_REFERRAL_BPS) == Some(CLAIM_FEE_BPS),
         MyneError::InvalidFeeSchedule
     );
-    // The pool fee is enforced and claimed by the configured Meteora pool. It is intentionally
-    // not implemented as a Token-2022 transfer fee because wallet transfers must remain untaxed.
-    require!(POOL_TAX_BPS == 400, MyneError::InvalidFeeSchedule);
     Ok(())
 }
 
@@ -105,6 +101,10 @@ pub enum MyneError {
     InvalidStakeAuthority,
     #[msg("The provided fee destination does not match protocol configuration")]
     InvalidFeeDestination,
+    #[msg("A verified Meteora liquidity pool is required before unpausing")]
+    LiquidityPoolNotVerified,
+    #[msg("The configured liquidity pool is invalid")]
+    InvalidLiquidityPool,
     #[msg("The round ID does not match this account")]
     InvalidRound,
     #[msg("Only the current scheduled round can be opened")]

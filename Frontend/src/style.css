@@ -3348,7 +3348,7 @@ body[data-route="stake"] .stake-rewards h2,
 body[data-route="stake"] .calculator-head h2 { margin: 2px 0 0; font-size: 19px; letter-spacing: -.02em; }
 body[data-route="stake"] .stake-heading .eyebrow,
 body[data-route="stake"] .stake-rewards .eyebrow { font-size: 9px; letter-spacing: .16em; }
-/* The 1% / 4% / ANYTIME summary rows are hidden on this route. Display only — the element and its
+/* The summary rows are hidden on this route. Display only — the element and its
    copy are untouched, so deleting this one rule brings them back. The same terms are still stated
    elsewhere on the page (the reward balance rows name their source, and the 30-day cooldown notice
    stays on the composer), so nothing about the deal is only described here. */

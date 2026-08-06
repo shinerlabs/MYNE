@@ -25,7 +25,7 @@ activated against Solana.
 4. Implement mining deployment and claim transactions on localnet.
 5. Add indexed history/leaderboards without making the indexer authoritative for balances.
 6. Add staking and referrals after their program modules and tests are complete.
-7. Integrate swaps only after the DEX-specific 4% SOL tax design is resolved.
+7. Integrate swaps as a separate future milestone; no pool-trade fee is part of the current design.
 8. Remove `viem`, EVM ABIs, `src/deployments/4663.json`, and every legacy proxy call.
 
 ## Frontend invariants

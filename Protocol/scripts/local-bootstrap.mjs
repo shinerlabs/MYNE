@@ -19,10 +19,16 @@ const program = new Program(idl, provider);
 const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID);
 const [miningPool] = PublicKey.findProgramAddressSync([Buffer.from('mining_pool')], PROGRAM_ID);
 const [stakePool] = PublicKey.findProgramAddressSync([Buffer.from('stake_pool')], PROGRAM_ID);
+const [liquidityGate] = PublicKey.findProgramAddressSync([Buffer.from('liquidity_gate')], PROGRAM_ID);
 if (await provider.connection.getAccountInfo(config, 'confirmed')) {
   const state = await program.account.protocolConfig.fetch(config);
+  const gateExists = await provider.connection.getAccountInfo(liquidityGate, 'confirmed');
+  if (!gateExists) {
+    console.log(JSON.stringify({ ok: true, status: 'paused-awaiting-liquidity-gate', config: config.toBase58() }, null, 2));
+    process.exit(0);
+  }
   if (state.paused && state.admin.equals(payer.publicKey)) {
-    await program.methods.setPaused(false).accounts({ config, admin: payer.publicKey }).rpc();
+    await program.methods.setPaused(false).accounts({ config, liquidityGate, admin: payer.publicKey }).rpc();
   }
   console.log(JSON.stringify({
     ok: true,
@@ -47,5 +53,4 @@ await program.methods.initializeProtocol({
   config, miningPool, stakePool, payer: payer.publicKey, program: PROGRAM_ID, programData,
   upgradeAuthority: payer.publicKey, mint, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
 }).rpc();
-await program.methods.setPaused(false).accounts({ config, admin: payer.publicKey }).rpc();
-console.log(JSON.stringify({ ok: true, status: 'active', programId: PROGRAM_ID.toBase58(), config: config.toBase58(), mint: mint.toBase58() }, null, 2));
+console.log(JSON.stringify({ ok: true, status: 'paused-awaiting-liquidity-gate', programId: PROGRAM_ID.toBase58(), config: config.toBase58(), mint: mint.toBase58() }, null, 2));

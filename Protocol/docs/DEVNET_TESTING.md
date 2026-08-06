@@ -1,8 +1,27 @@
 # Devnet testing runbook
 
 The mining, staking, referral, claim, and auto-round bundles are implemented for local testing.
-Do not deploy until the full local suite passes and the devnet-only trusted randomness keeper,
-operational fee wallets, and Meteora devnet pool are explicitly confirmed.
+The program may be deployed while paused, but it must not be unpaused until the official Meteora
+pool has been created and registered. The on-chain liquidity gate stores the exact pool address and
+pool program owner; miners cannot register a competing pool. Do not enable value-bearing operations
+until the full local suite passes and the devnet-only trusted randomness keeper, operational fee
+wallets, and Meteora devnet pool are explicitly confirmed.
+
+After the pool exists, register it with the admin wallet only after independently checking its
+MYNE/SOL vault mints and reserves:
+
+```bash
+ANCHOR_PROVIDER_URL=<helius-devnet-rpc> \
+ANCHOR_WALLET=.localnet/test-wallet.json \
+METEORA_POOL=<official-pool-address> \
+METEORA_POOL_PROGRAM=<official-meteora-program-id> \
+MIN_LIQUIDITY_SOL_LAMPORTS=100000000 \
+MIN_LIQUIDITY_MYNE_BASE_UNITS=10000000000 \
+pnpm run devnet:register-liquidity
+```
+
+The registration script is fail-closed if the exact account is absent or is not owned by the
+configured Meteora program. It does not create a pool or move funds.
 
 ## What has been verified locally
 

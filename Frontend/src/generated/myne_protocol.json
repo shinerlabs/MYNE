@@ -1176,6 +1176,99 @@
       ]
     },
     {
+      "name": "initialize_liquidity_gate",
+      "discriminator": [
+        116,
+        93,
+        175,
+        5,
+        73,
+        240,
+        255,
+        48
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_gate",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool"
+        },
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "pool",
+          "type": "pubkey"
+        },
+        {
+          "name": "pool_program",
+          "type": "pubkey"
+        },
+        {
+          "name": "min_sol_lamports",
+          "type": "u64"
+        },
+        {
+          "name": "min_myne_base_units",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "initialize_protocol",
       "discriminator": [
         188,
@@ -1388,6 +1481,33 @@
                   102,
                   105,
                   103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_gate",
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101
                 ]
               }
             ]
@@ -1748,6 +1868,33 @@
           }
         },
         {
+          "name": "liquidity_gate",
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "admin",
           "signer": true,
           "relations": [
@@ -1789,6 +1936,33 @@
                   102,
                   105,
                   103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_gate",
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101
                 ]
               }
             ]
@@ -1893,10 +2067,6 @@
         },
         {
           "name": "buyback_wallet",
-          "writable": true
-        },
-        {
-          "name": "admin_fee_wallet",
           "writable": true
         }
       ],
@@ -2166,6 +2336,19 @@
         202,
         146,
         102
+      ]
+    },
+    {
+      "name": "LiquidityGate",
+      "discriminator": [
+        36,
+        222,
+        47,
+        11,
+        41,
+        251,
+        146,
+        76
       ]
     },
     {
@@ -2650,21 +2833,31 @@
     },
     {
       "code": 6025,
+      "name": "LiquidityPoolNotVerified",
+      "msg": "A verified Meteora liquidity pool is required before unpausing"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidLiquidityPool",
+      "msg": "The configured liquidity pool is invalid"
+    },
+    {
+      "code": 6027,
       "name": "InvalidRound",
       "msg": "The round ID does not match this account"
     },
     {
-      "code": 6026,
+      "code": 6028,
       "name": "InvalidRoundSchedule",
       "msg": "Only the current scheduled round can be opened"
     },
     {
-      "code": 6027,
+      "code": 6029,
       "name": "AutoPlanAlreadyExecuted",
       "msg": "This automation plan already executed for the round"
     },
     {
-      "code": 6028,
+      "code": 6030,
       "name": "AutoPlanInactive",
       "msg": "This automation plan is inactive"
     }
@@ -2925,6 +3118,38 @@
           {
             "name": "admin_fee_wallet",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LiquidityGate",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "verified",
+            "type": "bool"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_program",
+            "type": "pubkey"
+          },
+          {
+            "name": "min_sol_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "min_myne_base_units",
+            "type": "u64"
           }
         ]
       }

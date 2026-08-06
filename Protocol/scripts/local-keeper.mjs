@@ -34,6 +34,7 @@ const program = new Program(idl, provider);
 const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID);
 const [miningPool] = PublicKey.findProgramAddressSync([Buffer.from('mining_pool')], PROGRAM_ID);
 const [stakePool] = PublicKey.findProgramAddressSync([Buffer.from('stake_pool')], PROGRAM_ID);
+const [liquidityGate] = PublicKey.findProgramAddressSync([Buffer.from('liquidity_gate')], PROGRAM_ID);
 const u64Buffer = (value) => {
   const buffer = Buffer.alloc(8);
   buffer.writeBigUInt64LE(BigInt(value.toString()));
@@ -326,7 +327,7 @@ async function tick() {
 if (isDevnet) {
   const configState = await program.account.protocolConfig.fetch(config);
   if (configState.paused) {
-    await program.methods.setPaused(false).accounts({ config, admin: payer.publicKey }).rpc();
+    await program.methods.setPaused(false).accounts({ config, liquidityGate, admin: payer.publicKey }).rpc();
     log('devnet-unpaused', { admin: payer.publicKey.toBase58() });
   }
 }

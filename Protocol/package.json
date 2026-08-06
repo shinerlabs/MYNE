@@ -10,7 +10,8 @@
     "local:bootstrap": "node scripts/local-bootstrap.mjs",
     "local:keeper": "node scripts/local-keeper.mjs",
     "test:devnet:smoke": "node tests/devnet-smoke.mjs",
-    "devnet:initialize": "node scripts/devnet-initialize.mjs"
+    "devnet:initialize": "node scripts/devnet-initialize.mjs",
+    "devnet:register-liquidity": "node scripts/register-liquidity-gate.mjs"
   },
   "dependencies": {
     "@anchor-lang/core": "1.0.2",

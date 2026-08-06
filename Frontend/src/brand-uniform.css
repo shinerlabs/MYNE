@@ -4227,6 +4227,18 @@ body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-burn-apy {
   }
 }
 
+/* Tablet headers have enough room for the full navigation, so keep labels readable while
+   allowing the nav strip to scroll independently if a browser has unusually wide wallet chrome. */
+@media (min-width: 721px) and (max-width: 900px) {
+  .topbar .main-nav { gap: 9px; }
+  .topbar .nav-item {
+    font-size: clamp(10px, 1.35vw, 11px);
+    letter-spacing: .04em;
+  }
+  .topbar .brand { font-size: 18px; }
+  .topbar .header-right { gap: 3px; }
+}
+
 /* ── Referrals aligned to the Swap flow ────────────────────────────────────
    Both are narrow transactional pages: 480px measure, 16px primary surfaces, 11px inner fields
    and a consistent 14–18px rhythm between decisions and supporting information. */
