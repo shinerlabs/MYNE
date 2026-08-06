@@ -7397,6 +7397,7 @@ html .brand-atmosphere {
 html #app > .topbar {
   background: transparent !important;
   background-color: transparent !important;
+  background-image: none !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
 }
@@ -7404,6 +7405,20 @@ html #app > .topbar {
 html #app > .topbar .main-nav {
   background: transparent !important;
   background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Keep the menu bar itself completely clear on every route and viewport. The page
+   canvas remains visible behind the labels; only individual controls may carry a
+   deliberate interaction surface. */
+html #app > .topbar :is(.brand, .header-right, .landing-nav) {
+  background: transparent !important;
+  background-color: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
 }
 
 /* The sole wallet entry point in the menu should read as a clear primary action. */

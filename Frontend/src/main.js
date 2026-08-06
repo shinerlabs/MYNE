@@ -514,6 +514,11 @@ document.querySelector('.rewards-panel')?.insertAdjacentHTML('afterend', `
   <section class="round-miners-panel panel" aria-label="Confirmed miners from the previous round">
     <div class="round-miners-head"><span class="eyebrow miners-round-hint" tabindex="0" aria-label="All confirmed miners from the previous round" title="Previous round miners">MINERS</span><small id="round-miners-label">PREVIOUS ROUND</small></div>
     <div class="round-miners-list" id="round-miners-list"></div>
+    <nav class="round-miners-pagination" id="round-miners-pagination" aria-label="Previous round miners pages" hidden>
+      <button type="button" data-miners-page="prev" aria-label="Previous 10 miners">${icon('chevron')}</button>
+      <span id="round-miners-page-label" aria-live="polite"></span>
+      <button type="button" data-miners-page="next" aria-label="Next 10 miners">${icon('chevron')}</button>
+    </nav>
   </section>`);
 motherlodeStat.querySelector(':scope > span').textContent = 'MOTHERLODE';
 document.querySelector('.deploy-head .eyebrow').remove();
@@ -1684,18 +1689,29 @@ const updateProjection = () => {
   const ethUsd = ethReward * projectionRates.ethUsd;
   const goldUsd = goldReward * projectionRates.goldUsd;
   latestProjection = { principal, eth: ethReward, gold: goldReward, ethUsd, goldUsd };
-  document.querySelector('#projected-eth').textContent = compactAmount(ethReward);
-  document.querySelector('#projected-gold').textContent = compactAmount(goldReward);
+  // The projection/FLEX card is optional on the current referral surface. Keep the
+  // shared updater safe when that retired card is not mounted; an absent presentation
+  // element must not abort boot before routing and navigation are initialized.
+  const setText = (selector, value) => {
+    const node = document.querySelector(selector);
+    if (node) node.textContent = value;
+  };
+  const setHref = (selector, value) => {
+    const node = document.querySelector(selector);
+    if (node) node.href = value;
+  };
+  setText('#projected-eth', compactAmount(ethReward));
+  setText('#projected-gold', compactAmount(goldReward));
   const cardLink = document.querySelector('#card-link');
   if (cardLink) cardLink.textContent = referralShortLink(chain.state.account);
-  document.querySelector('#projected-eth-usd').textContent = `$${Math.round(ethUsd).toLocaleString()}`;
-  document.querySelector('#projected-gold-usd').textContent = `$${Math.round(goldUsd).toLocaleString()}`;
-  document.querySelector('#card-principal').textContent = principal.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  document.querySelector('#card-period').textContent = `${projectionDays} DAYS`;
-  document.querySelector('#card-eth').textContent = compactAmount(ethReward);
-  document.querySelector('#card-gold').textContent = compactAmount(goldReward);
+  setText('#projected-eth-usd', `$${Math.round(ethUsd).toLocaleString()}`);
+  setText('#projected-gold-usd', `$${Math.round(goldUsd).toLocaleString()}`);
+  setText('#card-principal', principal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  setText('#card-period', `${projectionDays} DAYS`);
+  setText('#card-eth', compactAmount(ethReward));
+  setText('#card-gold', compactAmount(goldReward));
   const shareText = `My ${projectionDays}-day MYNE staking projection: ${compactAmount(ethReward + goldReward)} SOL.`;
-  document.querySelector('#share-projection-x').href = `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(referralUrl)}`;
+  setHref('#share-projection-x', `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(referralUrl)}`);
 };
 
 const roundedRect = (context, x, y, width, height, radius) => {
@@ -4095,6 +4111,9 @@ let confirmedMinerRenderedKey = '';
 let confirmedMinerRequestKey = '';
 let roundMinerFetchTimer = 0;
 let confirmedMinerFetchAttempt = 0;
+let confirmedMinerPage = 0;
+let confirmedMinerRows = [];
+const CONFIRMED_MINERS_PAGE_SIZE = 10;
 
 const minerRoundResult = (miner) => {
   return {
@@ -4191,6 +4210,11 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
   if (!confirmedMiners.length && roundMinersList.children.length) return;
   confirmedMinerByWallet.clear();
   confirmedMiners.forEach((miner) => confirmedMinerByWallet.set(miner.address.toLowerCase(), miner));
+  confirmedMinerRows = confirmedMiners;
+  confirmedMinerPage = Math.min(
+    confirmedMinerPage,
+    Math.max(0, Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE) - 1),
+  );
   if (roundMinersLabel) {
     roundMinersLabel.textContent = `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · ${confirmedMiners.length} MINER${confirmedMiners.length === 1 ? '' : 'S'}`;
   }
@@ -4198,7 +4222,18 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
   if (!confirmedMiners.length) {
     return;
   }
-  confirmedMiners.forEach((miner) => {
+  const pageCount = Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE);
+  const pageStart = confirmedMinerPage * CONFIRMED_MINERS_PAGE_SIZE;
+  const pageRows = confirmedMiners.slice(pageStart, pageStart + CONFIRMED_MINERS_PAGE_SIZE);
+  const pagination = document.querySelector('#round-miners-pagination');
+  const pageLabel = document.querySelector('#round-miners-page-label');
+  if (pagination && pageLabel) {
+    pagination.hidden = pageCount <= 1;
+    pageLabel.textContent = `${confirmedMinerPage + 1} / ${pageCount}`;
+    pagination.querySelector('[data-miners-page="prev"]').disabled = confirmedMinerPage === 0;
+    pagination.querySelector('[data-miners-page="next"]').disabled = confirmedMinerPage >= pageCount - 1;
+  }
+  pageRows.forEach((miner) => {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'round-miner-row';
@@ -4390,6 +4425,17 @@ const renderRoundHistory = () => {
     roundMetrics[3].textContent = String(s.jackpots);
   }
 };
+
+document.querySelector('#round-miners-pagination')?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-miners-page]');
+  if (!button || button.disabled) return;
+  const pageCount = Math.ceil(confirmedMinerRows.length / CONFIRMED_MINERS_PAGE_SIZE);
+  confirmedMinerPage = Math.max(0, Math.min(
+    pageCount - 1,
+    confirmedMinerPage + (button.dataset.minersPage === 'next' ? 1 : -1),
+  ));
+  renderConfirmedMiners(confirmedMinerRows, confirmedMinerRows[0]?.roundId, confirmedMinerRows[0]?.winningSquare ?? 0);
+});
 
 const refreshRoundHistory = async ({ force = false } = {}) => {
   try {

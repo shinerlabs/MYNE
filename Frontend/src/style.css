@@ -7233,7 +7233,7 @@ body[data-route="mine"] .control-column .round-miners-panel {
   flex: 0 0 auto;
   margin: 0;
   padding: 15px 14px 10px;
-  background: linear-gradient(150deg, rgba(18,18,18,.98), rgba(9,9,9,.98));
+  background: transparent;
   box-shadow: none;
 }
 .round-miners-panel .round-miners-head {
@@ -7276,7 +7276,40 @@ body[data-route="mine"] .control-column .round-miners-panel {
   transition: background-color .16s ease;
 }
 .round-miners-list .round-miner-row:hover,
-.round-miners-list .round-miner-row:focus-visible { background: rgba(255,255,255,.055); outline: 0; box-shadow: none; }
+.round-miners-list .round-miner-row:focus-visible { background: transparent; outline: 0; box-shadow: none; }
+
+.round-miners-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: 8px auto 0;
+  padding-top: 8px;
+}
+.round-miners-pagination[hidden] { display: none; }
+.round-miners-pagination > span {
+  min-width: 36px;
+  color: #777980;
+  font: 650 9px var(--font-number);
+  text-align: center;
+}
+.round-miners-pagination > button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #a7a9af;
+  cursor: pointer;
+}
+.round-miners-pagination > button:first-child svg { transform: rotate(180deg); }
+.round-miners-pagination > button:hover:not(:disabled),
+.round-miners-pagination > button:focus-visible:not(:disabled) { background: rgba(255,255,255,.06); outline: 0; }
+.round-miners-pagination > button:disabled { color: #36373c; cursor: default; }
+.round-miners-pagination > button svg { width: 16px; height: 16px; }
 .round-miner-avatar {
   display: grid;
   place-items: center;
