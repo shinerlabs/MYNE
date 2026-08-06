@@ -7555,3 +7555,18 @@ body[data-route="mine"] .deploy-panel .configuration .auto-row {
   justify-content: start !important;
   column-gap: 8px !important;
 }
+
+/* The track and thumb are the complete Auto-round control. Keep the button's larger
+   hit target visually empty on every interaction state so hover/focus cannot restore
+   the legacy grey pill around the switch. */
+body[data-route="mine"] .deploy-panel .configuration .auto-toggle:hover,
+body[data-route="mine"] .deploy-panel .configuration .auto-toggle:focus,
+body[data-route="mine"] .deploy-panel .configuration .auto-toggle:focus-visible,
+body[data-route="mine"] .deploy-panel .configuration .auto-toggle.active:hover,
+body[data-route="mine"] .deploy-panel .configuration .auto-toggle.active:focus-visible {
+  appearance: none !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}

@@ -13,6 +13,9 @@ myne_protocol = "D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e"
 [programs.devnet]
 myne_protocol = "D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e"
 
+[programs.mainnet]
+myne_protocol = "D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e"
+
 [provider]
 cluster = "Localnet"
 wallet = ".localnet/test-wallet.json"
@@ -22,3 +25,8 @@ test = "pnpm run test:local"
 
 [test]
 upgradeable = true
+
+[test.validator]
+# Keep automated integration tests isolated from the long-running local viewer
+# validator, which uses Solana's default RPC port (8899).
+rpc_port = 18999

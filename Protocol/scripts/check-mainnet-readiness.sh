@@ -14,8 +14,17 @@ MAINNET_SWITCHBOARD="SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv"
 METEORA_DLMM="LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
 
 test -f target/deploy/myne_protocol.so
+test -f target/deploy/myne_protocol-keypair.json
 test -f target/idl/myne_protocol.json
 test -f ../Frontend/src/generated/myne_protocol.json
+test "$(solana-keygen pubkey target/deploy/myne_protocol-keypair.json)" = "$PROGRAM_ID"
+
+KEYPAIR_MODE="$(stat -f '%Lp' target/deploy/myne_protocol-keypair.json 2>/dev/null \
+  || stat -c '%a' target/deploy/myne_protocol-keypair.json)"
+if (( (8#$KEYPAIR_MODE & 077) != 0 )); then
+  echo "Program keypair permissions must be owner-only (0600); found $KEYPAIR_MODE" >&2
+  exit 1
+fi
 python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == json.load(open(sys.argv[2])), "Frontend IDL is not synchronized"' \
   target/idl/myne_protocol.json ../Frontend/src/generated/myne_protocol.json
 
@@ -27,7 +36,8 @@ grep -q 'pub const CURRENT_VERSION: u8 = 4;' programs/myne_protocol/src/lib.rs
 grep -q "$MAINNET_SWITCHBOARD" programs/myne_protocol/src/lib.rs
 grep -q "$METEORA_DLMM" programs/myne_protocol/src/lib.rs
 
-if git grep -nE '(BEGIN (OPENSSH|RSA|EC) PRIVATE KEY|PRIVATE_KEY=|SERVICE_ROLE_KEY=|api-key=[A-Za-z0-9_-]{20,})' -- ':!*.lock'; then
+if git grep -nE '(BEGIN (OPENSSH|RSA|EC) PRIVATE KEY|PRIVATE_KEY=|SERVICE_ROLE_KEY=|api-key=[A-Za-z0-9_-]{20,})' -- \
+  ':!*.lock' ':!scripts/check-mainnet-readiness.sh'; then
   echo "Potential secret material found in tracked files" >&2
   exit 1
 fi
