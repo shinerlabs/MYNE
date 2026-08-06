@@ -8,8 +8,8 @@
   "theme_color": "#0b0b0b",
   "icons": [
     {
-      "src": "/myne-token.png",
-      "sizes": "1024x1024",
+      "src": "/myne-mark-ui.png",
+      "sizes": "735x773",
       "type": "image/png",
       "purpose": "any"
     }
