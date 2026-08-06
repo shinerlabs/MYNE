@@ -41,6 +41,7 @@ assert.ok(program.programId.equals(PROGRAM_ID), 'IDL and deployed program IDs di
 const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID);
 const [miningPool] = PublicKey.findProgramAddressSync([Buffer.from('mining_pool')], PROGRAM_ID);
 const [stakePool] = PublicKey.findProgramAddressSync([Buffer.from('stake_pool')], PROGRAM_ID);
+const [liquidityGate] = PublicKey.findProgramAddressSync([Buffer.from('liquidity_gate')], PROGRAM_ID);
 const programAccount = await provider.connection.getAccountInfo(PROGRAM_ID, 'confirmed');
 assert.ok(programAccount, 'The deployed program account is missing');
 assert.ok(programAccount.owner.equals(BPF_LOADER_UPGRADEABLE_PROGRAM_ID));
@@ -134,6 +135,25 @@ const initializeSignature = await program.methods
   .signers(upgradeAuthoritySigners)
   .rpc();
 
+// The local test uses a rent-funded stand-in pool account owned by SystemProgram to
+// exercise the same immutable pool/owner gate used for Meteora on devnet.
+const localPool = Keypair.generate();
+await provider.sendAndConfirm(
+  new web3.Transaction().add(SystemProgram.createAccount({
+    fromPubkey: payer.publicKey,
+    newAccountPubkey: localPool.publicKey,
+    lamports: await provider.connection.getMinimumBalanceForRentExemption(1),
+    space: 1,
+    programId: SystemProgram.programId,
+  })),
+  [localPool],
+);
+await program.methods
+  .initializeLiquidityGate(localPool.publicKey, SystemProgram.programId, new BN(1), new BN(1))
+  .accounts({ config, liquidityGate, pool: localPool.publicKey, admin: upgradeAuthority.publicKey, systemProgram: SystemProgram.programId })
+  .signers(upgradeAuthoritySigners)
+  .rpc();
+
 let state = await program.account.protocolConfig.fetch(config);
 assert.equal(state.version, 3);
 assert.equal(state.paused, true);
@@ -148,7 +168,7 @@ assert.equal(state.unstakeDelaySeconds.toString(), '2592000');
 
 await program.methods
   .setPaused(false)
-  .accounts({ config, admin: upgradeAuthority.publicKey })
+  .accounts({ config, liquidityGate, liquidityPool: localPool.publicKey, admin: upgradeAuthority.publicKey })
   .signers(upgradeAuthoritySigners)
   .rpc();
 
@@ -270,7 +290,7 @@ assert.equal(Number(roundState.refundAt) - Number(roundState.openedAt), 665);
 await assert.rejects(
   program.methods
     .settleRound(Array(32).fill(1))
-    .accounts({ config, stakePool, round, randomnessAuthority: payer.publicKey, buybackWallet: payer.publicKey, adminFeeWallet: payer.publicKey })
+    .accounts({ config, stakePool, round, liquidityGate, liquidityPool: localPool.publicKey, randomnessAuthority: payer.publicKey, buybackWallet: payer.publicKey })
     .rpc(),
   /RoundNotReady|not ready|custom program error/i,
 );
@@ -296,7 +316,7 @@ for (let value = 0; value < 100_000; value += 1) {
 assert.ok(randomness, 'Failed to derive deterministic split-mode local randomness');
 await program.methods
   .settleRound(randomness)
-  .accounts({ config, stakePool, round, randomnessAuthority: payer.publicKey, buybackWallet: payer.publicKey, adminFeeWallet: payer.publicKey })
+  .accounts({ config, stakePool, round, liquidityGate, liquidityPool: localPool.publicKey, randomnessAuthority: payer.publicKey, buybackWallet: payer.publicKey })
   .rpc();
 for (const nonce of [new BN(10), new BN(11), new BN(0)]) {
   await program.methods
@@ -364,7 +384,7 @@ assert.ok(state.pendingAdmin.equals(PublicKey.default));
 // Leave a detached validator usable by the local keeper after the authorization assertions.
 await program.methods
   .setPaused(false)
-  .accounts({ config, admin: rogue.publicKey })
+  .accounts({ config, liquidityGate, liquidityPool: localPool.publicKey, admin: rogue.publicKey })
   .signers([rogue])
   .rpc();
 await program.methods

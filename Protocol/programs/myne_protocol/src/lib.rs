@@ -138,6 +138,7 @@ pub mod myne_protocol {
         min_sol_lamports: u64,
         min_myne_base_units: u64,
     ) -> Result<()> {
+        require!(ctx.accounts.config.paused, MyneError::ProtocolPaused);
         require!(pool != Pubkey::default(), MyneError::InvalidLiquidityPool);
         require!(
             pool_program != Pubkey::default(),
@@ -176,7 +177,12 @@ pub mod myne_protocol {
                 .liquidity_gate
                 .as_ref()
                 .ok_or_else(|| error!(MyneError::LiquidityPoolNotVerified))?;
-            require!(gate.verified, MyneError::LiquidityPoolNotVerified);
+            let pool = ctx
+                .accounts
+                .liquidity_pool
+                .as_ref()
+                .ok_or_else(|| error!(MyneError::LiquidityPoolNotVerified))?;
+            assert_liquidity_pool(gate, &pool.to_account_info())?;
         }
         ctx.accounts.config.paused = paused;
         emit!(PauseChanged { paused });
@@ -224,6 +230,7 @@ pub mod myne_protocol {
     }
 
     pub fn register_miner(ctx: Context<RegisterMiner>, referrer: Pubkey) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         require!(
             referrer != ctx.accounts.authority.key(),
             MyneError::InvalidReferrer
@@ -390,6 +397,7 @@ pub mod myne_protocol {
         amounts: [u64; TILE_COUNT],
         deposit_lamports: u64,
     ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         let per_round = checked_sum(&amounts)?;
         require!(
             per_round >= ctx.accounts.config.minimum_round_lamports,
@@ -563,6 +571,10 @@ pub mod myne_protocol {
     }
 
     pub fn settle_round(ctx: Context<SettleRound>, randomness: [u8; 32]) -> Result<()> {
+        assert_liquidity_pool(
+            &ctx.accounts.liquidity_gate,
+            &ctx.accounts.liquidity_pool.to_account_info(),
+        )?;
         require!(!ctx.accounts.round.settled, MyneError::RoundAlreadySettled);
         let now = Clock::get()?.unix_timestamp;
         require!(
@@ -636,6 +648,11 @@ pub mod myne_protocol {
             &ctx.accounts.buyback_wallet.to_account_info(),
             buyback_fee,
         )?;
+        emit!(BuybackAllocation {
+            round_id: round.id,
+            wallet: ctx.accounts.buyback_wallet.key(),
+            lamports: buyback_fee,
+        });
         move_lamports(
             &round.to_account_info(),
             &ctx.accounts.config.to_account_info(),
@@ -1158,6 +1175,18 @@ fn motherlode_hit(sample: u64) -> bool {
     sample.is_multiple_of(MOTHERLODE_ODDS)
 }
 
+fn assert_liquidity_pool(gate: &LiquidityGate, pool: &AccountInfo<'_>) -> Result<()> {
+    require!(gate.verified, MyneError::LiquidityPoolNotVerified);
+    require_keys_eq!(pool.key(), gate.pool, MyneError::InvalidLiquidityPool);
+    require!(!pool.data_is_empty(), MyneError::InvalidLiquidityPool);
+    require_keys_eq!(
+        *pool.owner,
+        gate.pool_program,
+        MyneError::InvalidLiquidityPool
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod motherlode_tests {
     use super::{motherlode_hit, motherlode_share, BURN_WEIGHT_MULTIPLIER, MOTHERLODE_ODDS};
@@ -1349,6 +1378,8 @@ pub struct AdminConfig<'info> {
     pub config: Account<'info, ProtocolConfig>,
     #[account(seeds=[LIQUIDITY_GATE_SEED], bump)]
     pub liquidity_gate: Option<Account<'info, LiquidityGate>>,
+    /// CHECK: The account is checked against the immutable pool and owner stored in LiquidityGate.
+    pub liquidity_pool: Option<UncheckedAccount<'info>>,
     pub admin: Signer<'info>,
 }
 
@@ -1466,6 +1497,10 @@ pub struct SettleRound<'info> {
     pub stake_pool: Box<Account<'info, StakePool>>,
     #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
     pub round: Box<Account<'info, Round>>,
+    #[account(seeds=[LIQUIDITY_GATE_SEED], bump=liquidity_gate.bump)]
+    pub liquidity_gate: Account<'info, LiquidityGate>,
+    /// CHECK: The pool address and owner are checked against LiquidityGate before settlement.
+    pub liquidity_pool: UncheckedAccount<'info>,
     pub randomness_authority: Signer<'info>,
     /// CHECK: Address constrained to immutable configuration.
     #[account(mut)]
@@ -1657,6 +1692,12 @@ pub struct RoundSettled {
     pub motherlode_hit: bool,
     pub prize_lamports: u64,
     pub motherlode_payout_lamports: u64,
+}
+#[event]
+pub struct BuybackAllocation {
+    pub round_id: u64,
+    pub wallet: Pubkey,
+    pub lamports: u64,
 }
 #[event]
 pub struct ReceiptClaimed {

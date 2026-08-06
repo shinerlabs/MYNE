@@ -1514,6 +1514,10 @@
           }
         },
         {
+          "name": "liquidity_pool",
+          "optional": true
+        },
+        {
           "name": "admin",
           "signer": true,
           "relations": [
@@ -1895,6 +1899,10 @@
           }
         },
         {
+          "name": "liquidity_pool",
+          "optional": true
+        },
+        {
           "name": "admin",
           "signer": true,
           "relations": [
@@ -1967,6 +1975,10 @@
               }
             ]
           }
+        },
+        {
+          "name": "liquidity_pool",
+          "optional": true
         },
         {
           "name": "admin",
@@ -2060,6 +2072,35 @@
               }
             ]
           }
+        },
+        {
+          "name": "liquidity_gate",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_pool"
         },
         {
           "name": "randomness_authority",
@@ -2507,6 +2548,19 @@
         133,
         107,
         100
+      ]
+    },
+    {
+      "name": "BuybackAllocation",
+      "discriminator": [
+        37,
+        209,
+        234,
+        172,
+        253,
+        65,
+        150,
+        134
       ]
     },
     {
@@ -3070,6 +3124,26 @@
           {
             "name": "refunded",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BuybackAllocation",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
           }
         ]
       }

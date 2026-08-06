@@ -21,7 +21,10 @@ pnpm run devnet:register-liquidity
 ```
 
 The registration script is fail-closed if the exact account is absent or is not owned by the
-configured Meteora program. It does not create a pool or move funds.
+configured Meteora program. It does not create a pool or move funds. Activation then re-checks
+that exact account, and every round settlement re-checks it before moving the 2% buyback/burn
+allocation. If the account is missing or owned by another program, activation or settlement fails
+closed.
 
 ## What has been verified locally
 

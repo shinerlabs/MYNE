@@ -283,9 +283,10 @@ async function settleReadyRound(roundId, now, configState) {
     config,
     stakePool,
     round,
+    liquidityGate,
+    liquidityPool: (await program.account.liquidityGate.fetch(liquidityGate)).pool,
     randomnessAuthority: payer.publicKey,
     buybackWallet: configState.buybackWallet,
-    adminFeeWallet: configState.adminFeeWallet,
   }).rpc();
   const settled = await program.account.round.fetch(round);
   log('round-settled', {
@@ -327,7 +328,8 @@ async function tick() {
 if (isDevnet) {
   const configState = await program.account.protocolConfig.fetch(config);
   if (configState.paused) {
-    await program.methods.setPaused(false).accounts({ config, liquidityGate, admin: payer.publicKey }).rpc();
+    const gateState = await program.account.liquidityGate.fetch(liquidityGate);
+    await program.methods.setPaused(false).accounts({ config, liquidityGate, liquidityPool: gateState.pool, admin: payer.publicKey }).rpc();
     log('devnet-unpaused', { admin: payer.publicKey.toBase58() });
   }
 }

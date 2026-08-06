@@ -20,3 +20,6 @@ node_modules/
 .env.*
 !.env.example
 !.env.local.example
+
+# Supabase CLI local project metadata
+supabase/.temp/

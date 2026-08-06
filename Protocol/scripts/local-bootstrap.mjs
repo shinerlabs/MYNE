@@ -28,7 +28,8 @@ if (await provider.connection.getAccountInfo(config, 'confirmed')) {
     process.exit(0);
   }
   if (state.paused && state.admin.equals(payer.publicKey)) {
-    await program.methods.setPaused(false).accounts({ config, liquidityGate, admin: payer.publicKey }).rpc();
+    const gateState = await program.account.liquidityGate.fetch(liquidityGate);
+    await program.methods.setPaused(false).accounts({ config, liquidityGate, liquidityPool: gateState.pool, admin: payer.publicKey }).rpc();
   }
   console.log(JSON.stringify({
     ok: true,
