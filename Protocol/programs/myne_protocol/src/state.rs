@@ -66,6 +66,10 @@ pub struct Round {
     pub solo_mode: bool,
     pub motherlode_hit: bool,
     pub randomness: [u8; 32],
+    /// Switchboard randomness account bound before betting closes. A default
+    /// key is only allowed for the explicitly local/devnet legacy path.
+    pub randomness_account: Pubkey,
+    pub randomness_commit_slot: u64,
     pub solo_sample: u64,
     pub tile_lamports: [u64; TILE_COUNT],
     pub tile_receipts: [u64; TILE_COUNT],

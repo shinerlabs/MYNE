@@ -87,6 +87,16 @@ pub enum MyneError {
     RoundAlreadySettled,
     #[msg("The randomness signer is not authorized")]
     InvalidRandomnessAuthority,
+    #[msg("A verified randomness provider is required for this deployment")]
+    RandomnessProviderRequired,
+    #[msg("The round has no randomness account bound before betting")]
+    RandomnessNotBound,
+    #[msg("The supplied randomness account is invalid")]
+    InvalidRandomnessAccount,
+    #[msg("The randomness account has not been revealed in the current slot")]
+    RandomnessNotResolved,
+    #[msg("The randomness commitment was created too late")]
+    RandomnessCommittedTooLate,
     #[msg("The receipt has already been processed")]
     ReceiptAlreadyProcessed,
     #[msg("The receipt authority is invalid")]

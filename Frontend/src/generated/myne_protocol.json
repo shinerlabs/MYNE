@@ -47,6 +47,79 @@
       "args": []
     },
     {
+      "name": "bind_round_randomness",
+      "docs": [
+        "Bind a Switchboard randomness account before any deployment is accepted.",
+        "The account must still be committed (not revealed) at bind time. This",
+        "prevents a keeper or miner from selecting an already-known outcome."
+      ],
+      "discriminator": [
+        46,
+        185,
+        97,
+        213,
+        48,
+        223,
+        93,
+        196
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "randomness_account"
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "burn_stake",
       "discriminator": [
         97,
@@ -2128,6 +2201,126 @@
       ]
     },
     {
+      "name": "settle_round_verified",
+      "discriminator": [
+        189,
+        17,
+        80,
+        78,
+        123,
+        95,
+        104,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_gate",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_pool"
+        },
+        {
+          "name": "randomness_account",
+          "docs": [
+            "by parse_switchboard_randomness and the settlement handler."
+          ]
+        },
+        {
+          "name": "buyback_wallet",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "stake_standard",
       "discriminator": [
         216,
@@ -2856,66 +3049,91 @@
     },
     {
       "code": 6018,
+      "name": "RandomnessProviderRequired",
+      "msg": "A verified randomness provider is required for this deployment"
+    },
+    {
+      "code": 6019,
+      "name": "RandomnessNotBound",
+      "msg": "The round has no randomness account bound before betting"
+    },
+    {
+      "code": 6020,
+      "name": "InvalidRandomnessAccount",
+      "msg": "The supplied randomness account is invalid"
+    },
+    {
+      "code": 6021,
+      "name": "RandomnessNotResolved",
+      "msg": "The randomness account has not been revealed in the current slot"
+    },
+    {
+      "code": 6022,
+      "name": "RandomnessCommittedTooLate",
+      "msg": "The randomness commitment was created too late"
+    },
+    {
+      "code": 6023,
       "name": "ReceiptAlreadyProcessed",
       "msg": "The receipt has already been processed"
     },
     {
-      "code": 6019,
+      "code": 6024,
       "name": "InvalidReceiptAuthority",
       "msg": "The receipt authority is invalid"
     },
     {
-      "code": 6020,
+      "code": 6025,
       "name": "InsufficientBalance",
       "msg": "The requested token or SOL amount is unavailable"
     },
     {
-      "code": 6021,
+      "code": 6026,
       "name": "InvalidReferrer",
       "msg": "The supplied referrer is invalid"
     },
     {
-      "code": 6022,
+      "code": 6027,
       "name": "CooldownActive",
       "msg": "The staking cooldown has not completed"
     },
     {
-      "code": 6023,
+      "code": 6028,
       "name": "InvalidStakeAuthority",
       "msg": "The staking position does not match this authority"
     },
     {
-      "code": 6024,
+      "code": 6029,
       "name": "InvalidFeeDestination",
       "msg": "The provided fee destination does not match protocol configuration"
     },
     {
-      "code": 6025,
+      "code": 6030,
       "name": "LiquidityPoolNotVerified",
       "msg": "A verified Meteora liquidity pool is required before unpausing"
     },
     {
-      "code": 6026,
+      "code": 6031,
       "name": "InvalidLiquidityPool",
       "msg": "The configured liquidity pool is invalid"
     },
     {
-      "code": 6027,
+      "code": 6032,
       "name": "InvalidRound",
       "msg": "The round ID does not match this account"
     },
     {
-      "code": 6028,
+      "code": 6033,
       "name": "InvalidRoundSchedule",
       "msg": "Only the current scheduled round can be opened"
     },
     {
-      "code": 6029,
+      "code": 6034,
       "name": "AutoPlanAlreadyExecuted",
       "msg": "This automation plan already executed for the round"
     },
     {
-      "code": 6030,
+      "code": 6035,
       "name": "AutoPlanInactive",
       "msg": "This automation plan is inactive"
     }
@@ -3186,6 +3404,15 @@
             "type": "pubkey"
           },
           {
+            "name": "randomness_program",
+            "docs": [
+              "Switchboard On-Demand program ID. A default key explicitly selects the",
+              "local/devnet legacy randomness harness and is rejected for production",
+              "settlement by the verified instruction."
+            ],
+            "type": "pubkey"
+          },
+          {
             "name": "buyback_wallet",
             "type": "pubkey"
           },
@@ -3390,6 +3617,10 @@
             "type": "pubkey"
           },
           {
+            "name": "randomness_program",
+            "type": "pubkey"
+          },
+          {
             "name": "buyback_wallet",
             "type": "pubkey"
           },
@@ -3589,6 +3820,18 @@
                 32
               ]
             }
+          },
+          {
+            "name": "randomness_account",
+            "docs": [
+              "Switchboard randomness account bound before betting closes. A default",
+              "key is only allowed for the explicitly local/devnet legacy path."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "randomness_commit_slot",
+            "type": "u64"
           },
           {
             "name": "solo_sample",

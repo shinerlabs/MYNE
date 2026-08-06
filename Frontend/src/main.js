@@ -295,7 +295,7 @@ document.querySelector('#app').innerHTML = `
 
   <main class="workspace page-view" data-page="mine">
     ${socialPanel}
-    <section class="board-panel panel" aria-label="Mining tiles"><div class="slot-grid">${slots.map(([id, value]) => `<button class="slot" data-slot="${id}" aria-label="Tile ${id}, ${value} SOL deployed" aria-pressed="false"><span>#${id}</span><strong>${value}</strong></button>`).join('')}</div><div class="board-footer"><div class="round-reward" tabindex="0" aria-describedby="round-reward-tip"><span class="round-reward-label"><img src="/gld-icon-transparent.png" alt=""/><b>+${isPremine ? '0.3' : '1'}</b><small>/ ROUND</small></span><aside class="round-reward-tip" id="round-reward-tip" role="tooltip"><strong>Mine ${isPremine ? '0.3' : '1'} MYNE</strong><p>${isPremine ? 'Premine emission is reduced until launch, and mined MYNE stays locked until liquidity opens.' : 'Mine MYNE every round for a chance to receive the Motherlode and staking bonus.'}</p></aside></div><button data-route="about" data-about-target="mining">Details <b>↗</b></button></div></section>
+    <section class="board-panel panel" aria-label="Mining tiles"><div class="slot-grid">${slots.map(([id, value]) => `<button class="slot" data-slot="${id}" aria-label="Tile ${id}, ${value} SOL deployed" aria-pressed="false"><span>#${id}</span><strong>${value}</strong></button>`).join('')}</div><div class="board-footer"><div class="round-reward" tabindex="0" aria-describedby="round-reward-tip"><span class="round-reward-label"><img src="/gld-icon-transparent.png" alt=""/><b>+${isPremine ? '0.3' : '1'}</b><small>/ ROUND</small></span><aside class="round-reward-tip" id="round-reward-tip" role="tooltip"><strong>Mine ${isPremine ? '0.3' : '1'} MYNE</strong><p>${isPremine ? 'Premine emission is reduced until launch, and mined MYNE stays locked until liquidity opens.' : 'Mine MYNE every round for a chance to receive the Motherlode and staking bonus.'}</p></aside></div><button class="switchboard-proof-trigger" id="switchboard-proof-trigger" type="button" aria-haspopup="dialog"><img src="/switchboard-logo.svg" alt="Switchboard"/><span>Verifiably random via Switchboard</span><b aria-hidden="true">↗</b></button></div></section>
     <aside class="control-column"><section class="round-summary panel"><div class="summary-stat"><span>DEPLOYED</span><strong>${solIcon('summary-eth')} 7.17</strong><small>≈ $24,748</small></div><div class="summary-stat"><span>MOTHERLODE</span><strong><img src="/gld-icon-transparent.png" alt=""/> 4.4</strong><small>MYNE</small></div><div class="summary-stat"><span>TIME LEFT</span><strong>00:34</strong><small>Round #458</small></div></section><section class="deploy-panel panel"><div class="deploy-head"><div><span class="eyebrow">MINT MYNE</span><h2>Configure mine</h2></div><div class="refine-chip" id="mined-chip"><span>${isPremine ? 'MINED · LOCKED' : 'UNCLAIMED'}</span><b><img src="/gld-icon-transparent.png" alt=""/> <em id="mined-chip-value">0.000</em></b></div></div><button class="last-round" data-route="rounds"><span>Last round</span><aside>${icon('grid')} #— <b>—</b> ${icon('chevron')}</aside></button><div class="amount-label-bar"><label class="amount-label" for="amount"><span>SOL per tile</span><small>Balance 2.500 SOL</small></label><button class="mine-currency-toggle" id="mine-currency-toggle" type="button" aria-pressed="false" aria-label="Show mining values in US dollars"><span>SOL</span><i></i><b>USD</b></button></div><div class="amount-display"><i class="extraction-field" aria-hidden="true"></i>${solIcon('amount-eth')}<b class="amount-usd-mark" aria-hidden="true">$</b><input id="amount" value="" placeholder="0.00" inputmode="decimal" aria-label="SOL per tile" autocomplete="off" autocorrect="off" spellcheck="false"/><span>SOL</span></div><div class="quick-amounts"><button data-add="0.0001">+0.0001</button><button data-add="0.001">+0.001</button><button data-add="0.01">+0.01</button><button data-add="0.1">+0.1</button></div><small class="amount-min" hidden></small><div class="configuration"><div class="config-row"><div><b>Tiles</b><small id="tile-helper">No tiles selected</small></div><div class="stepper"><button id="all">ALL</button><button id="tiles-minus" aria-label="Remove tile">${icon('minus')}</button><strong id="tile-count">0</strong><button id="tiles-plus" aria-label="Add tile">${icon('plus')}</button></div></div><div class="config-row auto-row"><div><b>Auto-round</b><small id="auto-helper">Manually enter each round</small></div><button class="auto-toggle" id="auto-round" role="switch" aria-checked="false"><span></span><b>Off</b></button></div><div class="config-row rounds-config"><div><b>Rounds</b><small id="round-helper">Repeat deployment</small></div><div class="stepper compact"><button id="rounds-minus" aria-label="Remove round">${icon('minus')}</button><strong id="round-count">1</strong><button id="rounds-plus" aria-label="Add round">${icon('plus')}</button></div><button class="until-balance-toggle" id="until-balance" role="switch" aria-checked="false" title="Fund as many rounds as your wallet balance allows"><span></span><b>Max</b></button></div><div class="config-row auto-claim-row" hidden><div><b>Auto-claim</b><small>Settle and reclaim after each round</small></div><button class="auto-toggle" id="auto-claim" role="switch" aria-checked="true"><span></span><b>On</b></button></div></div><div class="total-row per-round-row" id="per-round-row" hidden><div><span>Total per round</span></div><strong>${solIcon('total-eth')} <em .00</em> SOL</strong></div><div class="total-row"><div><span>Total deployment</span><small id="total-detail">0 tiles × 0.00 SOL × 1 round</small></div><strong>${solIcon('total-eth')} <em .00</em> SOL</strong></div><div class="auto-plan" id="auto-plan" hidden></div><button class="deploy" id="deploy"><i class="mine-button-mark"><img src="/gld-icon-transparent.png" alt=""/></i><span>MINE</span><b aria-hidden="true">→</b></button><div class="security-note">${icon('shield')} Transactions settle on Solana</div></section><section class="miners round-results panel" hidden aria-live="polite"><div class="miners-head"><div><span class="eyebrow">LIVE THIS ROUND · #458</span><h2>Top miners</h2></div><button data-route="rounds">History</button></div><div class="settlement-result"><span><small>WINNING TILE</small><strong>#13</strong></span><span><small>DEPLOYED</small><strong>${solIcon()} 7.17</strong></span><span><small>REWARD</small><strong><img src="/gld-icon-transparent.png" alt=""/> 1.0</strong></span></div><div class="miner"><i class="bullion-avatar"><img src="/gld-icon-transparent.png" alt=""/></i><b>WILD</b><span>${icon('grid')} 9</span><strong>${solIcon()} 1.250</strong></div><div class="miner"><i>${icon('user')}</i><b>7ykD...B3Ng</b><span>${icon('grid')} 6</span><strong>${solIcon()} 1.111</strong></div><div class="miner"><i>${icon('user')}</i><b>Hm1t...4ENk</b><span>${icon('grid')} 4</span><strong>${solIcon()} 0.780</strong></div><div class="next-round"><span>NEXT ROUND</span><b>00:08</b></div></section></aside>
   </main>
 
@@ -669,6 +669,68 @@ const syncMineCurrency = () => {
 syncMineCurrency();
 const stakeAmount = document.querySelector('#stake-amount');
 const notify = (message) => { const toast = document.querySelector('#toast'); toast.textContent = message; toast.classList.add('show'); window.setTimeout(() => toast.classList.remove('show'), 2000); };
+
+/**
+ * Show the public randomness proof without asking users to trust a dashboard label.
+ * The dialog reads the latest resolved round already held by the live chain poll, then lets
+ * the reader run the same on-chain consistency check used by the history page. No secret,
+ * wallet connection, or transaction is required to inspect a proof.
+ */
+const openSwitchboardProof = () => {
+  const latest = chain.state.lastResolved || (chain.state.currentRound?.resolved ? chain.state.currentRound : null);
+  const roundId = latest?.roundId ?? latest?.id ?? null;
+  const randomness = latest?.randomnessValue ?? latest?.randomness ?? null;
+  const winningSquare = Number(latest?.winningSquare ?? -1);
+  const providerId = import.meta.env.VITE_MYNE_RANDOMNESS_PROGRAM_ID || 'Configured in the deployed protocol';
+  const proofReady = roundId !== null && randomness !== null && winningSquare >= 0 && winningSquare < 25;
+
+  const dlg = document.createElement('dialog');
+  dlg.className = 'confirm-dialog switchboard-proof-dialog';
+  dlg.setAttribute('aria-labelledby', 'switchboard-proof-title');
+  const panel = document.createElement('form');
+  panel.method = 'dialog';
+  panel.className = 'confirm-panel switchboard-proof-panel';
+  panel.innerHTML = `
+    <div class="switchboard-proof-brand"><img src="/switchboard-logo.svg" alt="Switchboard"/></div>
+    <h2 class="confirm-title" id="switchboard-proof-title">Randomness proof</h2>
+    <p class="confirm-lead">The winning tile is derived from a Switchboard-revealed value after bidding closes. The contract validates the provider, round binding and reveal before settlement.</p>
+    <dl class="confirm-rows switchboard-proof-rows">
+      <dt>Status</dt><dd data-proof-status>${proofReady ? 'Proof available' : 'Awaiting a resolved round'}</dd>
+      <dt>Round</dt><dd>${roundId === null ? '—' : `#${roundNo(roundId)}`}</dd>
+      <dt>Winning tile</dt><dd>${proofReady ? `#${winningSquare + 1}` : '—'}</dd>
+      <dt>Provider</dt><dd>${providerId}</dd>
+    </dl>
+    <p class="switchboard-proof-note">Anyone can independently verify a resolved round. No wallet signature is needed.</p>
+    <div class="confirm-actions"><button type="button" class="confirm-cancel">Close</button><button type="button" class="confirm-go" data-proof-verify ${proofReady ? '' : 'disabled'}>${proofReady ? 'Verify round' : 'Waiting for proof'}</button></div>
+    <a class="switchboard-doc-link" href="https://docs.switchboard.xyz/docs-by-chain/solana-svm/randomness/randomness-tutorial" target="_blank" rel="noreferrer">How Switchboard randomness works ↗</a>`;
+  dlg.append(panel);
+  document.body.append(dlg);
+
+  const close = () => dlg.close();
+  panel.querySelector('.confirm-cancel').addEventListener('click', close);
+  dlg.addEventListener('click', (event) => { if (event.target === dlg) close(); });
+  const verify = panel.querySelector('[data-proof-verify]');
+  verify?.addEventListener('click', async () => {
+    if (!proofReady) return;
+    verify.disabled = true;
+    verify.textContent = 'Checking…';
+    try {
+      const result = await verifyRoundFairness(BigInt(roundId), randomness, winningSquare);
+      const status = panel.querySelector('[data-proof-status]');
+      status.textContent = result?.ok ? 'Verified on-chain' : 'Could not verify';
+      status.classList.toggle('proof-ok', Boolean(result?.ok));
+      verify.textContent = result?.ok ? 'Verified' : 'Try again';
+      verify.disabled = Boolean(result?.ok);
+    } catch {
+      verify.textContent = 'Try again';
+      verify.disabled = false;
+    }
+  });
+  dlg.addEventListener('close', () => dlg.remove(), { once: true });
+  dlg.showModal();
+  panel.querySelector('.confirm-cancel').focus();
+};
+document.querySelector('#switchboard-proof-trigger')?.addEventListener('click', openSwitchboardProof);
 
 /**
  * In-app confirmation for irreversible actions.

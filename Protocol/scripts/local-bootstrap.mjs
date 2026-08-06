@@ -50,6 +50,7 @@ assert.equal(launchMint.freezeAuthority, null, 'MYNE must launch without freeze 
 assert.ok(launchMint.mintAuthority?.equals(config), 'MYNE mint authority must be the config PDA');
 await program.methods.initializeProtocol({
   randomnessAuthority: payer.publicKey,
+  randomnessProgram: PublicKey.default,
   buybackWallet: payer.publicKey,
   motherlodeWallet: payer.publicKey,
   adminFeeWallet: payer.publicKey,

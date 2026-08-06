@@ -7454,6 +7454,27 @@ html #app > .topbar .connect-header {
   }
 }
 
+/* Keep the established wallet-button footprint while giving the disconnected CTA a stronger
+   visual hierarchy. Connected addresses retain the compact account treatment above. */
+html #app > .topbar .connect-header:not(.connected) {
+  width: 126px !important;
+  min-width: 126px !important;
+  height: 46px !important;
+  padding: 0 !important;
+  box-sizing: border-box;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  letter-spacing: -.02em;
+}
+@media (max-width: 720px) {
+  html #app > .topbar .connect-header:not(.connected) {
+    width: 112px !important;
+    min-width: 112px !important;
+    height: 42px !important;
+    font-size: 16px !important;
+  }
+}
+
 /* The switch communicates Auto-round state through its track and thumb; the extra word adds
    noise to the compact control. Keep the label available to assistive technology. */
 body[data-route="mine"] .configuration .auto-row #auto-round > b {

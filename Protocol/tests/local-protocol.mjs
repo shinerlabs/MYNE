@@ -117,6 +117,7 @@ await assert.rejects(
   program.methods
     .initializeProtocol({
       randomnessAuthority: payer.publicKey,
+      randomnessProgram: PublicKey.default,
       buybackWallet: payer.publicKey,
       motherlodeWallet: payer.publicKey,
       adminFeeWallet: payer.publicKey,
@@ -130,6 +131,7 @@ await assert.rejects(
 const initializeSignature = await program.methods
   .initializeProtocol({
     randomnessAuthority: payer.publicKey,
+    randomnessProgram: PublicKey.default,
     buybackWallet: payer.publicKey,
     motherlodeWallet: payer.publicKey,
     adminFeeWallet: payer.publicKey,

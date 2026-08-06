@@ -13,12 +13,14 @@
     "test:buyback-policy": "node --test tests/buyback-policy.test.mjs",
     "test:devnet:smoke": "node tests/devnet-smoke.mjs",
     "devnet:initialize": "node scripts/devnet-initialize.mjs",
-    "devnet:register-liquidity": "node scripts/register-liquidity-gate.mjs"
+    "devnet:register-liquidity": "node scripts/register-liquidity-gate.mjs",
+    "devnet:switchboard-round": "node scripts/switchboard-round-keeper.mjs"
   },
   "dependencies": {
     "@anchor-lang/core": "1.0.2",
     "@solana/spl-token": "0.4.14",
-    "@solana/web3.js": "1.98.4"
+    "@solana/web3.js": "1.98.4",
+    "@switchboard-xyz/on-demand": "3.10.3"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [

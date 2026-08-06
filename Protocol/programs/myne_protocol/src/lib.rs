@@ -37,6 +37,18 @@ pub const BASE_ROUND_EMISSION: u64 = 1_000_000_000;
 pub const MOTHERLODE_ROUND_EMISSION: u64 = 200_000_000;
 pub const BURN_WEIGHT_MULTIPLIER: u64 = 5;
 
+// Switchboard On-Demand randomness account identifiers. The account layout is
+// intentionally parsed locally so the protocol does not depend on an Anchor
+// version-specific SDK at build time. These IDs are pinned to Switchboard's
+// published deployments; the configured ProtocolConfig value is still checked
+// for every request and settlement.
+pub const SWITCHBOARD_DEVNET_PROGRAM: Pubkey =
+    pubkey!("Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2");
+pub const SWITCHBOARD_MAINNET_PROGRAM: Pubkey =
+    pubkey!("SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv");
+const SWITCHBOARD_RANDOMNESS_DISCRIMINATOR: [u8; 8] = [10, 66, 229, 135, 220, 239, 217, 114];
+const SWITCHBOARD_RANDOMNESS_ACCOUNT_SIZE: usize = 408;
+
 #[program]
 pub mod myne_protocol {
     use super::*;
@@ -62,6 +74,13 @@ pub mod myne_protocol {
             args.admin_fee_wallet != Pubkey::default(),
             MyneError::InvalidAuthority
         );
+        if args.randomness_program != Pubkey::default() {
+            require!(
+                args.randomness_program == SWITCHBOARD_DEVNET_PROGRAM
+                    || args.randomness_program == SWITCHBOARD_MAINNET_PROGRAM,
+                MyneError::InvalidRandomnessAccount
+            );
+        }
         require_keys_eq!(
             *ctx.accounts.mint.to_account_info().owner,
             ctx.accounts.token_program.key(),
@@ -92,6 +111,7 @@ pub mod myne_protocol {
         config.pending_admin = Pubkey::default();
         config.mint = ctx.accounts.mint.key();
         config.randomness_authority = args.randomness_authority;
+        config.randomness_program = args.randomness_program;
         config.buyback_wallet = args.buyback_wallet;
         config.motherlode_wallet = args.motherlode_wallet;
         config.admin_fee_wallet = args.admin_fee_wallet;
@@ -318,6 +338,8 @@ pub mod myne_protocol {
         round.solo_mode = false;
         round.motherlode_hit = false;
         round.randomness = [0; 32];
+        round.randomness_account = Pubkey::default();
+        round.randomness_commit_slot = 0;
         round.solo_sample = 0;
         round.tile_lamports = [0; TILE_COUNT];
         round.tile_receipts = [0; TILE_COUNT];
@@ -335,6 +357,40 @@ pub mod myne_protocol {
         Ok(())
     }
 
+    /// Bind a Switchboard randomness account before any deployment is accepted.
+    /// The account must still be committed (not revealed) at bind time. This
+    /// prevents a keeper or miner from selecting an already-known outcome.
+    pub fn bind_round_randomness(ctx: Context<BindRoundRandomness>, round_id: u64) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        require_keys_neq!(
+            ctx.accounts.config.randomness_program,
+            Pubkey::default(),
+            MyneError::RandomnessProviderRequired
+        );
+        require!(ctx.accounts.round.id == round_id, MyneError::InvalidRound);
+        require!(
+            !ctx.accounts.round.settled
+                && Clock::get()?.unix_timestamp < ctx.accounts.round.betting_ends_at,
+            MyneError::BettingClosed
+        );
+        let clock = Clock::get()?;
+        let parsed = parse_switchboard_randomness(
+            &ctx.accounts.randomness_account.to_account_info(),
+            &ctx.accounts.config.randomness_program,
+        )?;
+        require!(
+            parsed.reveal_slot == 0 || parsed.reveal_slot > clock.slot,
+            MyneError::RandomnessNotResolved
+        );
+        require!(
+            ctx.accounts.round.randomness_account == Pubkey::default(),
+            MyneError::RandomnessNotBound
+        );
+        ctx.accounts.round.randomness_account = ctx.accounts.randomness_account.key();
+        ctx.accounts.round.randomness_commit_slot = clock.slot;
+        Ok(())
+    }
+
     pub fn deploy(
         ctx: Context<Deploy>,
         round_id: u64,
@@ -348,6 +404,13 @@ pub mod myne_protocol {
                 && Clock::get()?.unix_timestamp < ctx.accounts.round.betting_ends_at,
             MyneError::BettingClosed
         );
+        if ctx.accounts.config.randomness_program != Pubkey::default() {
+            require_keys_neq!(
+                ctx.accounts.round.randomness_account,
+                Pubkey::default(),
+                MyneError::RandomnessNotBound
+            );
+        }
         let total = checked_sum(&amounts)?;
         require!(
             total >= ctx.accounts.config.minimum_round_lamports,
@@ -571,6 +634,75 @@ pub mod myne_protocol {
     }
 
     pub fn settle_round(ctx: Context<SettleRound>, randomness: [u8; 32]) -> Result<()> {
+        // This path is retained solely for local/devnet rehearsal. Production
+        // configurations set a Switchboard provider and therefore cannot use a
+        // caller-supplied random byte array.
+        require_keys_eq!(
+            ctx.accounts.config.randomness_program,
+            Pubkey::default(),
+            MyneError::RandomnessProviderRequired
+        );
+        settle_round_core(
+            &mut ctx.accounts.round,
+            &mut ctx.accounts.config,
+            &mut ctx.accounts.stake_pool,
+            &ctx.accounts.liquidity_gate,
+            &ctx.accounts.liquidity_pool.to_account_info(),
+            &ctx.accounts.buyback_wallet.to_account_info(),
+            randomness,
+        )
+    }
+
+    pub fn settle_round_verified(ctx: Context<SettleRoundVerified>) -> Result<()> {
+        require!(!ctx.accounts.round.settled, MyneError::RoundAlreadySettled);
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            now >= ctx.accounts.round.settles_at && now < ctx.accounts.round.refund_at,
+            MyneError::RoundNotReady
+        );
+        require_keys_eq!(
+            ctx.accounts.round.randomness_account,
+            ctx.accounts.randomness_account.key(),
+            MyneError::InvalidRandomnessAccount
+        );
+        require_keys_eq!(
+            ctx.accounts.buyback_wallet.key(),
+            ctx.accounts.config.buyback_wallet,
+            MyneError::InvalidFeeDestination
+        );
+        let clock = Clock::get()?;
+        let randomness = parse_switchboard_randomness(
+            &ctx.accounts.randomness_account.to_account_info(),
+            &ctx.accounts.config.randomness_program,
+        )?;
+        require!(
+            randomness.seed_slot >= ctx.accounts.round.randomness_commit_slot,
+            MyneError::RandomnessCommittedTooLate
+        );
+        require!(
+            randomness.seed_slot < clock.slot,
+            MyneError::RandomnessNotResolved
+        );
+        // Switchboard's consume rule is deliberately strict: the randomness
+        // must be consumed in the same slot in which it was revealed. This
+        // prevents replaying an old favourable value.
+        require!(
+            randomness.reveal_slot == clock.slot,
+            MyneError::RandomnessNotResolved
+        );
+        settle_round_core(
+            &mut ctx.accounts.round,
+            &mut ctx.accounts.config,
+            &mut ctx.accounts.stake_pool,
+            &ctx.accounts.liquidity_gate,
+            &ctx.accounts.liquidity_pool.to_account_info(),
+            &ctx.accounts.buyback_wallet.to_account_info(),
+            randomness.value,
+        )
+    }
+
+    /*
+    pub fn settle_round_legacy_body(ctx: Context<SettleRound>, randomness: [u8; 32]) -> Result<()> {
         assert_liquidity_pool(
             &ctx.accounts.liquidity_gate,
             &ctx.accounts.liquidity_pool.to_account_info(),
@@ -702,6 +834,7 @@ pub mod myne_protocol {
         });
         Ok(())
     }
+    */
 
     pub fn claim_receipt(ctx: Context<ClaimReceipt>) -> Result<()> {
         require!(ctx.accounts.round.settled, MyneError::RoundNotReady);
@@ -1238,6 +1371,168 @@ mod motherlode_tests {
 fn domain_hash(domain: &[u8], round_id: u64, randomness: &[u8; 32]) -> [u8; 32] {
     hashv(&[b"MYNE_V1", domain, &round_id.to_le_bytes(), randomness]).to_bytes()
 }
+
+fn settle_round_core(
+    round: &mut Account<Round>,
+    config: &mut Account<ProtocolConfig>,
+    stake_pool: &mut Account<StakePool>,
+    liquidity_gate: &Account<LiquidityGate>,
+    liquidity_pool: &AccountInfo<'_>,
+    buyback_wallet: &AccountInfo<'_>,
+    randomness: [u8; 32],
+) -> Result<()> {
+    assert_liquidity_pool(liquidity_gate, liquidity_pool)?;
+    require!(!round.settled, MyneError::RoundAlreadySettled);
+    let tile_hash = domain_hash(b"tile", round.id, &randomness);
+    let mode_hash = domain_hash(b"mode", round.id, &randomness);
+    let solo_hash = domain_hash(b"solo", round.id, &randomness);
+    let motherlode_hash = domain_hash(b"motherlode", round.id, &randomness);
+    let tile_sample = u64::from_le_bytes(
+        tile_hash[..8]
+            .try_into()
+            .map_err(|_| error!(MyneError::ArithmeticOverflow))?,
+    );
+    let mode_sample = u64::from_le_bytes(
+        mode_hash[..8]
+            .try_into()
+            .map_err(|_| error!(MyneError::ArithmeticOverflow))?,
+    );
+    let solo_sample = u64::from_le_bytes(
+        solo_hash[..8]
+            .try_into()
+            .map_err(|_| error!(MyneError::ArithmeticOverflow))?,
+    );
+    let motherlode_sample = u64::from_le_bytes(
+        motherlode_hash[..8]
+            .try_into()
+            .map_err(|_| error!(MyneError::ArithmeticOverflow))?,
+    );
+    let winning_tile = (tile_sample % TILE_COUNT as u64) as usize;
+    round.winning_tile = winning_tile as u8;
+    round.solo_mode = mode_sample % 2 == 0;
+    round.motherlode_hit = motherlode_hit(motherlode_sample);
+    round.randomness = randomness;
+    let winning_total = round.tile_lamports[winning_tile];
+    round.solo_sample = if winning_total > 0 {
+        solo_sample % winning_total
+    } else {
+        0
+    };
+
+    let staking_fee = checked_bps(round.gross_deployed_lamports, MINING_STAKING_BPS)?;
+    let buyback_fee = checked_bps(round.gross_deployed_lamports, MINING_BUYBACK_BPS)?;
+    let motherlode_fee = checked_bps(round.gross_deployed_lamports, MINING_MOTHERLODE_BPS)?;
+    let total_fee = checked_add(checked_add(staking_fee, buyback_fee)?, motherlode_fee)?;
+    round.prize_lamports = round
+        .gross_deployed_lamports
+        .checked_sub(total_fee)
+        .ok_or(MyneError::ArithmeticOverflow)?;
+    move_lamports(
+        &round.to_account_info(),
+        &stake_pool.to_account_info(),
+        staking_fee,
+    )?;
+    fund_stake_rewards(stake_pool, staking_fee)?;
+    move_lamports(&round.to_account_info(), buyback_wallet, buyback_fee)?;
+    emit!(BuybackAllocation {
+        round_id: round.id,
+        wallet: *buyback_wallet.key,
+        lamports: buyback_fee,
+    });
+    move_lamports(
+        &round.to_account_info(),
+        &config.to_account_info(),
+        motherlode_fee,
+    )?;
+    config.motherlode_lamports = checked_add(config.motherlode_lamports, motherlode_fee)?;
+    config.motherlode_base_units =
+        checked_add(config.motherlode_base_units, MOTHERLODE_ROUND_EMISSION)?;
+    round.base_emission = if winning_total > 0 {
+        BASE_ROUND_EMISSION
+    } else {
+        0
+    };
+    if winning_total == 0 {
+        let rollover = round.prize_lamports;
+        move_lamports(
+            &round.to_account_info(),
+            &config.to_account_info(),
+            rollover,
+        )?;
+        config.motherlode_lamports = checked_add(config.motherlode_lamports, rollover)?;
+        round.prize_lamports = 0;
+    } else if round.motherlode_hit {
+        round.motherlode_emission = config.motherlode_base_units;
+        config.motherlode_base_units = 0;
+        let motherlode_payout = config.motherlode_lamports;
+        move_lamports(
+            &config.to_account_info(),
+            &round.to_account_info(),
+            motherlode_payout,
+        )?;
+        round.motherlode_payout_lamports = motherlode_payout;
+        config.motherlode_lamports = 0;
+    }
+    round.settled = true;
+    emit!(RoundSettled {
+        round_id: round.id,
+        winning_tile: round.winning_tile,
+        solo_mode: round.solo_mode,
+        motherlode_hit: round.motherlode_hit,
+        prize_lamports: round.prize_lamports,
+        motherlode_payout_lamports: round.motherlode_payout_lamports,
+    });
+    Ok(())
+}
+
+struct SwitchboardRandomness {
+    seed_slot: u64,
+    reveal_slot: u64,
+    value: [u8; 32],
+}
+
+/// Parse the stable zero-copy Switchboard randomness account layout without
+/// importing its Anchor SDK. The SDK documents an 8-byte discriminator
+/// followed by the account fields; keeping this parser local avoids pulling a
+/// second Anchor version into the MYNE program.
+fn parse_switchboard_randomness(
+    account: &AccountInfo<'_>,
+    expected_owner: &Pubkey,
+) -> Result<SwitchboardRandomness> {
+    require_keys_eq!(
+        *account.owner,
+        *expected_owner,
+        MyneError::InvalidRandomnessAccount
+    );
+    let data = account
+        .try_borrow_data()
+        .map_err(|_| error!(MyneError::InvalidRandomnessAccount))?;
+    require!(
+        data.len() >= SWITCHBOARD_RANDOMNESS_ACCOUNT_SIZE,
+        MyneError::InvalidRandomnessAccount
+    );
+    require!(
+        data[..8] == SWITCHBOARD_RANDOMNESS_DISCRIMINATOR,
+        MyneError::InvalidRandomnessAccount
+    );
+    let seed_slot = u64::from_le_bytes(
+        data[104..112]
+            .try_into()
+            .map_err(|_| error!(MyneError::InvalidRandomnessAccount))?,
+    );
+    let reveal_slot = u64::from_le_bytes(
+        data[144..152]
+            .try_into()
+            .map_err(|_| error!(MyneError::InvalidRandomnessAccount))?,
+    );
+    let mut value = [0u8; 32];
+    value.copy_from_slice(&data[152..184]);
+    Ok(SwitchboardRandomness {
+        seed_slot,
+        reveal_slot,
+        value,
+    })
+}
 fn move_lamports(from: &AccountInfo<'_>, to: &AccountInfo<'_>, amount: u64) -> Result<()> {
     if amount == 0 {
         return Ok(());
@@ -1332,6 +1627,10 @@ fn fund_stake_rewards(pool: &mut Account<StakePool>, amount: u64) -> Result<()> 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct InitializeArgs {
     pub randomness_authority: Pubkey,
+    /// Switchboard On-Demand program ID. A default key explicitly selects the
+    /// local/devnet legacy randomness harness and is rejected for production
+    /// settlement by the verified instruction.
+    pub randomness_program: Pubkey,
     pub buyback_wallet: Pubkey,
     pub motherlode_wallet: Pubkey,
     pub admin_fee_wallet: Pubkey,
@@ -1347,6 +1646,7 @@ pub struct ProtocolConfig {
     pub pending_admin: Pubkey,
     pub mint: Pubkey,
     pub randomness_authority: Pubkey,
+    pub randomness_program: Pubkey,
     pub buyback_wallet: Pubkey,
     pub motherlode_wallet: Pubkey,
     pub admin_fee_wallet: Pubkey,
@@ -1451,6 +1751,17 @@ pub struct OpenRound<'info> {
     pub system_program: Program<'info, System>,
 }
 #[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct BindRoundRandomness<'info> {
+    #[account(seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[ROUND_SEED, &round_id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    /// CHECK: owner, discriminator and freshness are validated in the handler.
+    pub randomness_account: UncheckedAccount<'info>,
+    pub authority: Signer<'info>,
+}
+#[derive(Accounts)]
 #[instruction(round_id: u64, nonce: u64)]
 pub struct Deploy<'info> {
     #[account(seeds=[CONFIG_SEED], bump=config.bump)]
@@ -1523,6 +1834,25 @@ pub struct SettleRound<'info> {
     pub liquidity_pool: UncheckedAccount<'info>,
     pub randomness_authority: Signer<'info>,
     /// CHECK: Address constrained to immutable configuration.
+    #[account(mut)]
+    pub buyback_wallet: UncheckedAccount<'info>,
+}
+#[derive(Accounts)]
+pub struct SettleRoundVerified<'info> {
+    #[account(mut, seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
+    pub stake_pool: Box<Account<'info, StakePool>>,
+    #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(seeds=[LIQUIDITY_GATE_SEED], bump=liquidity_gate.bump)]
+    pub liquidity_gate: Account<'info, LiquidityGate>,
+    /// CHECK: pool key and owner are checked against LiquidityGate.
+    pub liquidity_pool: UncheckedAccount<'info>,
+    /// CHECK: owner, discriminator, account binding and freshness are checked
+    /// by parse_switchboard_randomness and the settlement handler.
+    pub randomness_account: UncheckedAccount<'info>,
+    /// CHECK: constrained to the immutable configured fee destination.
     #[account(mut)]
     pub buyback_wallet: UncheckedAccount<'info>,
 }

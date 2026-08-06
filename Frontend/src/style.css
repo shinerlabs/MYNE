@@ -1342,6 +1342,43 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   font-weight: 570;
 }
 .board-footer > button b { font-size: 11px; }
+.switchboard-proof-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: #a8a8ad;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: .01em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .2s ease;
+}
+.switchboard-proof-trigger:hover,
+.switchboard-proof-trigger:focus-visible { color: #f0f0f0; }
+.switchboard-proof-trigger > b { margin-left: 1px; color: #8d8d94; font-size: 12px; font-weight: 500; }
+.switchboard-proof-trigger > img { width: 42px; height: auto; max-height: 12px; object-fit: contain; object-position: left center; }
+.switchboard-mark { position: relative; display: inline-grid; grid-template-columns: repeat(3, 4px); gap: 2px; align-items: end; width: 16px; height: 13px; color: #f1f1f1; }
+.switchboard-mark i { display: block; width: 4px; height: 4px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px rgba(255,255,255,.2); }
+.switchboard-mark i:nth-child(2) { height: 8px; margin-bottom: 2px; }
+.switchboard-mark i:nth-child(3) { height: 12px; }
+.switchboard-proof-brand { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; color: #dedee2; }
+.switchboard-proof-brand img { width: 132px; height: auto; max-height: 30px; object-fit: contain; object-position: left center; }
+.switchboard-mark.large { width: 24px; height: 19px; grid-template-columns: repeat(3, 6px); gap: 3px; }
+.switchboard-mark.large i { width: 6px; height: 6px; }
+.switchboard-mark.large i:nth-child(2) { height: 12px; margin-bottom: 3px; }
+.switchboard-mark.large i:nth-child(3) { height: 18px; }
+.switchboard-proof-dialog { max-width: 420px; }
+.switchboard-proof-panel { padding-top: 24px; }
+.switchboard-proof-rows { margin-top: 17px; }
+.switchboard-proof-rows dd { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.switchboard-proof-note { margin: 14px 0 0; color: #9c9ca2; font-size: 10.5px; line-height: 1.5; }
+.switchboard-proof-rows dd.proof-ok { color: #c7e5bb; }
+.switchboard-doc-link { display: block; margin-top: 15px; color: #aeb4c0; font-size: 10px; text-decoration: underline; text-underline-offset: 3px; }
+.switchboard-doc-link:hover { color: #f0f0f0; }
 
 /* Right rail */
 .control-column { position: relative; display: flex; flex-direction: column; gap: 13px; }
@@ -2908,6 +2945,14 @@ body[data-route="mine"] .deployed-stat:focus-visible .deployed-usd-value {
 .market-pill .header-sol { width: calc(23px * var(--eth-scale)); height: calc(23px * var(--eth-scale)); }
 .market-pill b { color: #fdfdfd; font-size: 12px; font-weight: 620; }
 .connect-header { height: var(--control-md); padding: 0 19px; font-size: 11px; font-weight: 680; letter-spacing: .01em; }
+.connect-header:not(.connected) {
+  width: 88px;
+  padding-inline: 0;
+  font-size: 17px;
+  font-weight: 780;
+  letter-spacing: -.02em;
+  box-sizing: border-box;
+}
 
 .feature-hero h1 { font-weight: 590; line-height: .98; }
 .feature-hero p,
@@ -6088,6 +6133,8 @@ img.icon-hammer { width: 16px; height: 16px; object-fit: contain; vertical-align
    comparing cells against each other, so a clipped fifth column costs more than small type. */
 @media (max-width: 560px) {
   .board-panel { overflow: visible; }
+  .board-footer { gap: 10px; padding-inline: 12px; }
+  .switchboard-proof-trigger { font-size: 8.5px; }
   /* Summary row: the three stats share a 3-column grid with NO column gap, and the middle cell
      carries a bordered box. As the viewport narrowed the DEPLOYED value ran straight into that
      border — measured clearance was 9px at 390, 1px at 360 and -10px at 320, i.e. overlapping on

@@ -22,12 +22,17 @@ single-developer operating model and its key-management requirements.
 
 ## Critical blockers
 
-### 1. Randomness is trusted, not oracle-backed
+### 1. Randomness provider integration is in progress
 
-`settle_round` accepts a 32-byte value from a configured signer. That signer can choose the tile,
-mode, Solo winner and Motherlode result. This is acceptable only for local/devnet rehearsal. A
-mainnet deployment needs a verifiable randomness provider and a request/fulfilment binding with
-replay, freshness and duplicate-fulfilment protection.
+The production path now binds a Switchboard On-Demand randomness account before deployments,
+parses the pinned account discriminator/owner, requires a committed seed, and consumes the value
+only in its reveal slot. `settle_round` remains available only when the configured provider is the
+default key, which is an explicit local/devnet legacy mode. The keeper still needs to create and
+commit a fresh Switchboard account, submit the reveal and call `settle_round_verified` in the same
+slot. `scripts/switchboard-round-keeper.mjs` now rehearses account creation, commit, round opening
+and binding; its final reveal/settlement transaction still requires an explicitly approved
+production worker. Devnet tests must cover stale reveals, wrong account binding, wrong owner,
+replay and missed-reveal recovery before this gate can be closed.
 
 ### 2. The liquidity gate does not parse or prove a MYNE/SOL Meteora pool
 

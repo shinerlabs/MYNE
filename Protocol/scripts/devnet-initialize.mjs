@@ -35,6 +35,8 @@ assert.equal(
 assert.ok(process.env.DEVNET_RANDOMNESS_AUTHORITY, 'Set DEVNET_RANDOMNESS_AUTHORITY to a devnet public key');
 const randomnessAuthority = new PublicKey(process.env.DEVNET_RANDOMNESS_AUTHORITY);
 assert.ok(!randomnessAuthority.equals(PublicKey.default), 'Randomness authority cannot be the default key');
+assert.ok(process.env.DEVNET_RANDOMNESS_PROGRAM, 'Set DEVNET_RANDOMNESS_PROGRAM to the Switchboard On-Demand devnet program');
+const randomnessProgram = new PublicKey(process.env.DEVNET_RANDOMNESS_PROGRAM);
 for (const name of ['DEVNET_BUYBACK_WALLET', 'DEVNET_MOTHERLODE_WALLET']) {
   assert.ok(process.env[name], `Set ${name} to the intended devnet fee destination`);
 }
@@ -129,6 +131,7 @@ if (mint.mintAuthority?.equals(payer.publicKey)) {
 const signature = await program.methods
   .initializeProtocol({
     randomnessAuthority,
+    randomnessProgram,
     buybackWallet: new PublicKey(process.env.DEVNET_BUYBACK_WALLET),
     motherlodeWallet: new PublicKey(process.env.DEVNET_MOTHERLODE_WALLET),
     // Legacy config field retained for account-layout compatibility; no mining fee is sent here.
