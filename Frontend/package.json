@@ -1,0 +1,33 @@
+{
+  "name": "myne-protocol-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "sync:solana": "node scripts/sync-solana-idl.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "dev": "vite",
+    "build": "vite build && node scripts/compress-assets.mjs",
+    "build:hosted": "vite build --mode hosted && node scripts/compress-assets.mjs"
+  },
+  "dependencies": {
+    "@anchor-lang/core": "1.0.2",
+    "@fontsource-variable/dm-sans": "latest",
+    "@fontsource-variable/roboto-mono": "latest",
+    "@supabase/supabase-js": "^2.110.7",
+    "@solana/web3.js": "^1.98.4",
+    "buffer": "6.0.3",
+    "viem": "^2.55.4"
+  },
+  "devDependencies": {
+    "vite": "latest"
+  },
+  "pnpm": {
+    "ignoredBuiltDependencies": [
+      "bigint-buffer",
+      "bufferutil",
+      "utf-8-validate"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "MYNE",
+  "short_name": "MYNE",
+  "description": "Mine MYNE and earn SOL staking rewards on Solana.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080808",
+  "theme_color": "#0b0b0b",
+  "icons": [
+    {
+      "src": "/myne-token.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

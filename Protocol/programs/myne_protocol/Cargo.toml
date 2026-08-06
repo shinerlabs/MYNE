@@ -1,0 +1,27 @@
+[package]
+name = "myne-protocol"
+version = "0.1.0"
+description = "MYNE protocol program for Solana"
+edition = "2021"
+license = "UNLICENSED"
+rust-version = "1.89"
+
+[lib]
+crate-type = ["cdylib"]
+name = "myne_protocol"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }
+solana-sha256-hasher = "=3.1.0"
+
+[lints]
+workspace = true

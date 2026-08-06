@@ -1,0 +1,31 @@
+@import '@fontsource-variable/dm-sans';
+@import '@fontsource-variable/roboto-mono';
+
+:root { color-scheme: dark; font-family: "DM Sans Variable", sans-serif; background: #080a0c; color: #f3f1e8; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(circle at 68% 0%, rgba(111,255,179,.09), transparent 34%), #080a0c; }
+body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .18; background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px); background-size: 48px 48px; mask-image: linear-gradient(to bottom, black, transparent 72%); }
+.shell { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 68px 0 38px; position: relative; }
+.hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; padding-bottom: 42px; }
+.eyebrow, small, header i { font: 650 11px/1.2 "Roboto Mono Variable", monospace; letter-spacing: .16em; color: #7cf5b5; }
+h1 { margin: 14px 0 16px; font-size: clamp(54px, 8vw, 100px); line-height: .84; letter-spacing: -.065em; font-weight: 640; }
+h1 span { color: #858b88; }
+.lede { max-width: 580px; margin: 0; color: #a8aeab; font-size: 18px; line-height: 1.6; }
+.pulse-card { min-width: 210px; display: flex; gap: 14px; align-items: center; padding: 18px; border: 1px solid #232a27; background: rgba(14,18,16,.82); border-radius: 16px; }
+.pulse { width: 12px; height: 12px; border-radius: 50%; background: #ff625c; box-shadow: 0 0 18px rgba(255,98,92,.55); }
+.pulse.online { background: #62f5a7; box-shadow: 0 0 18px rgba(98,245,167,.6); }
+.pulse-card div { display: grid; gap: 5px; }.pulse-card strong { font-size: 15px; }
+.notice { display: grid; grid-template-columns: 220px 1fr; gap: 24px; padding: 17px 20px; border: 1px solid #2a312e; border-radius: 12px; background: #101411; color: #9ea5a1; font-size: 14px; line-height: 1.45; }
+.notice strong { color: #f1eee4; }
+.status-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin: 16px 0; }
+.status-card, .panel { border: 1px solid #252b29; background: rgba(13,16,15,.86); border-radius: 16px; }
+.status-card { min-height: 142px; padding: 20px; display: flex; flex-direction: column; }
+.status-card strong { margin-top: auto; font-size: 24px; letter-spacing: -.03em; }.status-card span { color: #737b77; margin-top: 5px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-layout { display: grid; grid-template-columns: 1.12fr .88fr; gap: 16px; }
+.panel { overflow: hidden; }.panel > header { height: 54px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid #252b29; font: 650 12px/1 "Roboto Mono Variable", monospace; letter-spacing: .1em; }
+.panel header i { color: #616965; font-style: normal; font-size: 9px; }
+dl { margin: 0; padding: 9px 20px 16px; }dl div { padding: 15px 0; border-bottom: 1px solid #1d2220; }dl div:last-child { border: 0; }dt { color: #737b77; font-size: 12px; margin-bottom: 8px; }dd { margin: 0; font: 560 12px/1.4 "Roboto Mono Variable", monospace; overflow-wrap: anywhere; color: #d4d7d5; }
+.metric-grid { display: grid; grid-template-columns: 1fr 1fr; }.metric-grid > div { min-height: 120px; padding: 20px; display: flex; flex-direction: column; border-bottom: 1px solid #252b29; border-right: 1px solid #252b29; }.metric-grid > div:nth-child(even) { border-right: 0; }.metric-grid > div:nth-last-child(-n+2) { border-bottom: 0; }.metric-grid strong { margin-top: auto; font: 650 28px/1 "Roboto Mono Variable", monospace; }.metric-grid span { color: #69716d; font: 600 10px/1 "Roboto Mono Variable", monospace; margin-top: 7px; letter-spacing: .12em; }
+footer { display: flex; justify-content: space-between; align-items: center; margin-top: 22px; color: #626a66; font: 550 12px/1 "Roboto Mono Variable", monospace; }button { border: 1px solid #32433a; border-radius: 999px; padding: 11px 17px; background: #14251c; color: #80f2b5; font: 650 11px/1 "Roboto Mono Variable", monospace; cursor: pointer; }button:hover { background: #193525; }
+@media (max-width: 850px) { .hero { display: grid; }.pulse-card { width: 100%; }.status-grid { grid-template-columns: 1fr 1fr; }.detail-layout { grid-template-columns: 1fr; }.notice { grid-template-columns: 1fr; gap: 5px; } }
+@media (max-width: 520px) { .shell { width: min(100% - 24px, 1180px); padding-top: 34px; }h1 { font-size: 52px; }.status-grid { grid-template-columns: 1fr; }.metric-grid { grid-template-columns: 1fr; }.metric-grid > div { border-right: 0; }.metric-grid > div:nth-last-child(2) { border-bottom: 1px solid #252b29; }footer { align-items: flex-start; gap: 18px; flex-direction: column; } }

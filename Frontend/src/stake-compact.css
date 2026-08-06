@@ -1,0 +1,500 @@
+/* Single-screen staking dashboard. Protocol explanations belong on About. */
+body[data-route="stake"] .staking-shell.page-view.active {
+  width: min(920px, calc(100vw - 40px));
+  max-width: 920px;
+  min-height: 0;
+  margin: 0 auto;
+  padding: 8px 0 34px;
+}
+
+body[data-route="stake"] .staking-hero {
+  min-height: 76px;
+  height: 76px;
+  padding: 0;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+body[data-route="stake"] .staking-hero .eyebrow {
+  display: block;
+  margin-bottom: 5px;
+  color: #7f8289;
+  font-size: 8px;
+  letter-spacing: .18em;
+}
+body[data-route="stake"] .staking-hero > div {
+  flex: 0 0 auto;
+  width: auto;
+  text-align: left;
+}
+body[data-route="stake"] .staking-hero h1 {
+  margin: 0;
+  font: 750 46px/.9 var(--font-number);
+  letter-spacing: -.05em;
+}
+
+body[data-route="stake"] .staking-hero p {
+  margin: 5px 0 0;
+  color: #8e9198;
+  font: 600 10px/1.2 var(--font-sans);
+  letter-spacing: .03em;
+}
+
+body[data-route="stake"] .staking-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  height: 58px;
+  margin: 0 0 8px;
+}
+
+body[data-route="stake"] .staking-metrics article,
+body[data-route="stake"] .staking-metrics article:first-child {
+  min-height: 58px;
+  height: 58px;
+  padding: 8px 10px;
+  gap: 3px;
+}
+
+body[data-route="stake"] .staking-metrics strong { font-size: 17px; }
+body[data-route="stake"] .staking-metrics span { font-size: 7px; }
+
+body[data-route="stake"] .eth-claim-hero {
+  grid-template-columns: minmax(0, 1fr) 330px;
+  align-items: center;
+  gap: 22px;
+  min-height: 174px;
+  height: 174px;
+  margin: 0 0 8px;
+  padding: 18px 24px;
+  overflow: hidden;
+}
+
+body[data-route="stake"] .eth-claim-hero > .eth-claim-main {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  align-items: center !important;
+  gap: 16px !important;
+  justify-content: flex-start !important;
+}
+
+body[data-route="stake"] .eth-claim-logo { width: 68px; height: 68px; }
+body[data-route="stake"] #stake-claimable-eth {
+  margin: 3px 0 2px;
+  font-size: clamp(44px, 7vw, 66px);
+}
+
+body[data-route="stake"] #stake-reward-updated { font-size: 9px; }
+
+body[data-route="stake"] .eth-claim-actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+body[data-route="stake"] .eth-claim-actions > .eth-lifetime {
+  padding: 0 2px 2px;
+}
+
+body[data-route="stake"] .eth-claim-actions > .eth-lifetime strong { font-size: 22px; }
+body[data-route="stake"] .eth-claim-actions > .eth-lifetime small { display: none; }
+body[data-route="stake"] .eth-claim-actions button {
+  min-height: 34px;
+  height: 34px;
+  padding: 0 12px;
+}
+
+body[data-route="stake"] #claim-stake-rewards { grid-column: 1 / -1; }
+
+body[data-route="stake"] .staking-share-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+body[data-route="stake"] .staking-share-group > span {
+  color: #73767d;
+  font: 700 7px/1 var(--font-sans);
+  letter-spacing: .12em;
+  white-space: nowrap;
+}
+
+body[data-route="stake"] .staking-share-group > div {
+  display: flex;
+  gap: 5px;
+}
+
+body[data-route="stake"] .staking-social-share {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  height: 34px;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: rgba(255,255,255,.075);
+  color: #f7f7f7;
+  text-decoration: none;
+  font: 700 10px/1 var(--number-font);
+  letter-spacing: .02em;
+  transition: background-color .18s ease, color .18s ease, opacity .18s ease;
+}
+
+body[data-route="stake"] .staking-social-share svg { width: 14px; height: 14px; }
+body[data-route="stake"] .staking-social-share b { font: 750 9px/1 var(--font-sans); letter-spacing: .08em; }
+body[data-route="stake"] .staking-social-share:hover { background: rgba(255,255,255,.13); color: #fff; }
+body[data-route="stake"] .staking-social-share[aria-disabled="true"] { opacity: .7; cursor: not-allowed; }
+
+body[data-route="stake"] .staking-position-strip {
+  height: 64px;
+  margin: 0 0 8px;
+}
+
+body[data-route="stake"] .staking-position-strip article {
+  height: 64px;
+  padding: 9px 14px;
+}
+
+body[data-route="stake"] .staking-position-strip strong {
+  margin: 3px 0 0;
+  font-size: 17px;
+}
+
+body[data-route="stake"] .staking-position-strip small { display: none; }
+
+.staking-history {
+  height: 142px;
+  margin: 0 0 8px;
+  padding: 12px 16px 9px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.018)) !important;
+  box-shadow: none;
+}
+
+.staking-history > header,
+.staking-history > footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.staking-history > footer { padding: 0 5px; }
+
+.staking-history > header > div { display: flex; align-items: baseline; gap: 10px; }
+.staking-history > header span,
+.staking-history > header small,
+.staking-history > footer span {
+  color: #72757b;
+  font: 700 7px/1 var(--font-sans);
+  letter-spacing: .13em;
+}
+
+.staking-history > header strong {
+  color: #f2f2f3;
+  font: 750 16px/1 var(--font-number);
+  letter-spacing: -.03em;
+}
+
+.staking-history-plot {
+  display: grid;
+  place-items: center;
+  height: 91px;
+  color: #72757b;
+  font-size: 9px;
+}
+
+.staking-history-plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.staking-history-grid path { fill: none; stroke: rgba(255,255,255,.055); stroke-width: 1; }
+.staking-history-area { pointer-events: none; }
+.staking-history-line {
+  fill: none;
+  stroke: #e8e9eb;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 5px rgba(185,225,255,.20));
+}
+.staking-history-last {
+  fill: #fff;
+  stroke: #bfeaff;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 5px rgba(191,234,255,.65));
+}
+
+body[data-route="stake"] .staking-layout {
+  display: block;
+  margin: 0;
+}
+
+body[data-route="stake"] .stake-composer {
+  display: grid;
+  grid-template-columns: 152px minmax(0, 1fr) 230px;
+  grid-template-areas:
+    "mode tier tier"
+    "label label label"
+    "amount amount quick"
+    "submit submit submit";
+  align-items: center;
+  gap: 7px 10px;
+  width: 100%;
+  height: 246px;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #111 0%, #0d0d0d 100%) !important;
+  box-shadow: none;
+}
+
+body[data-route="stake"] .stake-composer .stake-mode-tabs {
+  grid-area: mode;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  height: 38px;
+  margin: 0;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgba(255,255,255,.035);
+}
+
+body[data-route="stake"] .stake-composer .stake-mode-tabs button {
+  min-height: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+body[data-route="stake"] .stake-composer .stake-mode-tabs button.active {
+  border: 0;
+  background: rgba(255,255,255,.085);
+  color: #fff;
+  box-shadow: none;
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs {
+  grid-area: tier;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  height: 66px;
+  margin: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(255,255,255,.03);
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs button {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 60px;
+  height: 60px;
+  padding: 0 16px;
+  border: 1px solid rgba(255,255,255,.055);
+  border-radius: 10px;
+  background: rgba(255,255,255,.018);
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs button.active {
+  border: 1px solid rgba(255,255,255,.18) !important;
+  outline: 0 !important;
+  background: rgba(255,255,255,.075) !important;
+  box-shadow: none !important;
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs button.active::after {
+  content: "";
+  position: absolute;
+  inset: auto 12px 1px;
+  height: 1px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.72);
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-tier-burn {
+  border: 1px solid rgba(255,255,255,.055);
+  background: transparent;
+  box-shadow: none;
+  opacity: .72;
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-tier-burn:hover,
+body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-tier-burn.active {
+  border: 1px solid transparent !important;
+  outline: 0 !important;
+  background: rgba(255,255,255,.045);
+  box-shadow: none !important;
+  opacity: 1;
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-tier-burn.active {
+  background: var(--gld-spectrum-soft) !important;
+  box-shadow: none;
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-tier-burn.active::after {
+  background: var(--gld-spectrum);
+  box-shadow: 0 0 7px rgba(150,220,255,.35);
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs button > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+body[data-route="stake"] .stake-composer .stake-tier-tabs button b { font-size: 8px; }
+body[data-route="stake"] .stake-composer .stake-tier-tabs button small {
+  color: #777a81;
+  font: 600 7px/1 var(--font-sans);
+  letter-spacing: .05em;
+}
+body[data-route="stake"] .stake-composer .stake-tier-tabs button strong {
+  color: #d9d9dc;
+  font: 760 17px var(--font-number);
+  letter-spacing: -.02em;
+  white-space: nowrap;
+}
+
+body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-burn-apy {
+  background: var(--gld-spectrum);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 7px rgba(207, 210, 255, .16));
+}
+
+body[data-route="stake"] .stake-amount-label {
+  grid-area: label;
+  height: 14px;
+  margin: 0;
+  font-size: 9px;
+}
+
+body[data-route="stake"] .stake-amount {
+  grid-area: amount;
+  min-height: 62px;
+  height: 62px;
+  margin: 0;
+  padding: 7px 13px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+  box-shadow: none;
+}
+
+body[data-route="stake"] .stake-amount:focus-within {
+  border: 0;
+  background: rgba(255,255,255,.055);
+  box-shadow: none;
+}
+
+body[data-route="stake"] .stake-amount input { font-size: 31px; }
+
+body[data-route="stake"] .stake-quick-actions {
+  grid-area: quick;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  height: 44px;
+  margin: 0;
+  padding: 3px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+}
+
+body[data-route="stake"] .stake-quick-actions button {
+  min-height: 38px;
+  height: 38px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: transparent;
+  font-size: 10px;
+}
+
+body[data-route="stake"] .stake-submit {
+  grid-area: submit;
+  min-height: 42px;
+  height: 42px;
+  margin: 0;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255,255,255,.06);
+  box-shadow: none;
+}
+
+body[data-route="stake"] .stake-submit.ready {
+  background: #f1f1f1;
+  color: #111;
+  box-shadow: none;
+}
+
+body[data-route="stake"] .stake-composer .unstake-policy,
+body[data-route="stake"] .stake-composer .stake-caution,
+body[data-route="stake"] .staking-model { display: none !important; }
+
+body[data-route="stake"] .network-footer {
+  position: fixed;
+  min-height: 24px;
+  height: 24px;
+  padding: 0;
+}
+
+@media (max-width: 760px) {
+  body[data-route="stake"] .staking-shell.page-view.active {
+    width: min(100% - 18px, 920px);
+    padding-top: 4px;
+  }
+
+  body[data-route="stake"] .staking-hero { height: 62px; min-height: 62px; }
+  body[data-route="stake"] .staking-hero h1 { font-size: 28px; }
+  body[data-route="stake"] .staking-metrics { grid-template-columns: repeat(4, minmax(0,1fr)); height: 52px; }
+  body[data-route="stake"] .staking-metrics article,
+  body[data-route="stake"] .staking-metrics article:first-child { height: 52px; min-height: 52px; padding: 6px 3px; }
+  body[data-route="stake"] .staking-metrics strong { font-size: 13px; gap: 3px; }
+  body[data-route="stake"] .staking-metrics span { font-size: 5.5px; letter-spacing: .08em; }
+
+  body[data-route="stake"] .eth-claim-hero {
+    grid-template-columns: minmax(0, 1fr) auto;
+    height: 150px;
+    min-height: 150px;
+    padding: 14px;
+    gap: 10px;
+  }
+
+  body[data-route="stake"] .eth-claim-logo { width: 48px; height: 48px; }
+  body[data-route="stake"] #stake-claimable-eth { font-size: clamp(35px,10vw,48px); }
+  body[data-route="stake"] .eth-claim-actions { min-width: 0; width: 190px; grid-template-columns: 1fr 1fr; }
+  body[data-route="stake"] .eth-claim-actions > .eth-lifetime,
+  body[data-route="stake"] .staking-share-group > span { display: none; }
+  body[data-route="stake"] #claim-stake-rewards { width: 100%; }
+  body[data-route="stake"] .staking-social-share { padding: 0; }
+  body[data-route="stake"] .staking-position-strip { grid-template-columns: repeat(4,1fr); height: 58px; }
+  body[data-route="stake"] .staking-position-strip article { height: 58px; padding: 8px 6px; }
+  body[data-route="stake"] .staking-position-strip strong { font-size: 14px; }
+  body[data-route="stake"] .staking-position-strip span { font-size: 5.5px; }
+  body[data-route="stake"] .staking-history { height: 126px; padding: 10px 11px 8px; }
+  body[data-route="stake"] .staking-history-plot { height: 77px; }
+  body[data-route="stake"] .staking-history > header > div { gap: 6px; }
+  body[data-route="stake"] .staking-history > header strong { font-size: 13px; }
+
+  body[data-route="stake"] .stake-composer {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "mode tier"
+      "label label"
+      "amount amount"
+      "quick quick"
+      "submit submit";
+    height: 280px;
+  }
+
+  body[data-route="stake"] .stake-quick-actions { height: 40px; }
+  body[data-route="stake"] .stake-quick-actions button { min-height: 34px; height: 34px; }
+}

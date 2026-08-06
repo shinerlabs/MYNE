@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>MYNE Local Solana Viewer</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/src/local-viewer.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">LOCAL SOLANA VALIDATOR</p>
+          <h1>MYNE protocol<br /><span>live diagnostics</span></h1>
+          <p class="lede">A direct, read-only view of the deployed Anchor program and its local feature state.</p>
+        </div>
+        <div class="pulse-card">
+          <span class="pulse" id="pulse"></span>
+          <div><small>RPC STATUS</small><strong id="rpc-status">Connecting…</strong></div>
+        </div>
+      </header>
+
+      <section class="notice">
+        <strong>Local feature bundle</strong>
+        <span>Mining receipts, staking, MYNE claims, referrals and balance-funded auto-round plans are enabled. Meteora swaps remain separate until a pool is configured.</span>
+      </section>
+
+      <section class="status-grid">
+        <article class="status-card">
+          <small>PROGRAM</small><strong id="program-status">Checking</strong><span id="program-owner">—</span>
+        </article>
+        <article class="status-card">
+          <small>CONFIG PDA</small><strong id="config-status">Checking</strong><span id="config-size">—</span>
+        </article>
+        <article class="status-card">
+          <small>PROTOCOL</small><strong id="pause-status">—</strong><span>Version <b id="version">—</b></span>
+        </article>
+        <article class="status-card">
+          <small>LOCAL SLOT</small><strong id="slot">—</strong><span id="updated">Awaiting RPC</span>
+        </article>
+      </section>
+
+      <section class="detail-layout">
+        <article class="panel identities">
+          <header><span>ON-CHAIN IDENTITIES</span><i>BASE58</i></header>
+          <dl>
+            <div><dt>Program ID</dt><dd id="program-id"></dd></div>
+            <div><dt>Config PDA</dt><dd id="config-pda"></dd></div>
+            <div><dt>Admin</dt><dd id="admin">—</dd></div>
+            <div><dt>MYNE Mint</dt><dd id="mint">—</dd></div>
+            <div><dt>Randomness Authority</dt><dd id="randomness">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel economics">
+          <header><span>IMMUTABLE DEVNET ECONOMICS</span><i>CONFIG V2</i></header>
+          <div class="metric-grid">
+            <div><small>GENESIS</small><strong id="genesis">—</strong><span>MYNE</span></div>
+            <div><small>HARD CAP</small><strong id="max">—</strong><span>MYNE</span></div>
+            <div><small>MINIMUM ROUND</small><strong id="minimum">—</strong><span>SOL</span></div>
+            <div><small>ROUND</small><strong id="round">—</strong><span>SECONDS</span></div>
+            <div><small>BETTING</small><strong id="betting">—</strong><span>SECONDS</span></div>
+            <div><small>UNSTAKE DELAY</small><strong id="unstake">—</strong><span>DAYS</span></div>
+          </div>
+        </article>
+      </section>
+
+      <footer><span id="rpc-url">http://127.0.0.1:8899</span><button id="refresh" type="button">Refresh chain state</button></footer>
+    </main>
+    <script type="module" src="/src/local-bootstrap.js"></script>
+  </body>
+</html>

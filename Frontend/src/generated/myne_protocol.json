@@ -1,0 +1,3560 @@
+{
+  "address": "D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e",
+  "metadata": {
+    "name": "myne_protocol",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "MYNE protocol program for Solana"
+  },
+  "instructions": [
+    {
+      "name": "accept_admin",
+      "discriminator": [
+        112,
+        42,
+        45,
+        90,
+        116,
+        181,
+        13,
+        170
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pending_admin",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "burn_stake",
+      "discriminator": [
+        97,
+        166,
+        96,
+        180,
+        131,
+        84,
+        161,
+        225
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_tokens",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "stake_position"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "cancel_auto_plan",
+      "discriminator": [
+        172,
+        71,
+        42,
+        50,
+        206,
+        147,
+        238,
+        6
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "auto_plan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  111,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "auto_plan"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_myne",
+      "discriminator": [
+        43,
+        88,
+        125,
+        88,
+        167,
+        88,
+        130,
+        209
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "miner",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "referrer_miner",
+          "writable": true,
+          "optional": true
+        },
+        {
+          "name": "destination_tokens",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "writable": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "miner"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_receipt",
+      "discriminator": [
+        152,
+        17,
+        220,
+        46,
+        22,
+        147,
+        138,
+        116
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "miner",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.nonce",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "miner",
+            "stake_position"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_staking_rewards",
+      "discriminator": [
+        229,
+        141,
+        170,
+        69,
+        111,
+        94,
+        6,
+        72
+      ],
+      "accounts": [
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "stake_position"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "configure_auto_plan",
+      "discriminator": [
+        115,
+        165,
+        177,
+        197,
+        152,
+        153,
+        255,
+        131
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "auto_plan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  111,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "auto_plan"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amounts",
+          "type": {
+            "array": [
+              "u64",
+              25
+            ]
+          }
+        },
+        {
+          "name": "active",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "create_auto_plan",
+      "discriminator": [
+        5,
+        235,
+        23,
+        142,
+        225,
+        222,
+        54,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "auto_plan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  111,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amounts",
+          "type": {
+            "array": [
+              "u64",
+              25
+            ]
+          }
+        },
+        {
+          "name": "deposit_lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "deploy",
+      "discriminator": [
+        67,
+        36,
+        143,
+        118,
+        36,
+        164,
+        92,
+        217
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "miner",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "miner"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        },
+        {
+          "name": "amounts",
+          "type": {
+            "array": [
+              "u64",
+              25
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "execute_auto_plan",
+      "discriminator": [
+        65,
+        249,
+        196,
+        162,
+        148,
+        160,
+        23,
+        152
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "auto_plan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  111,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "auto_plan.authority",
+                "account": "AutoPlan"
+              }
+            ]
+          }
+        },
+        {
+          "name": "miner",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "auto_plan.authority",
+                "account": "AutoPlan"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              },
+              {
+                "kind": "account",
+                "path": "auto_plan.authority",
+                "account": "AutoPlan"
+              },
+              {
+                "kind": "arg",
+                "path": "nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executor",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        },
+        {
+          "name": "nonce",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "fund_auto_plan",
+      "discriminator": [
+        15,
+        37,
+        20,
+        108,
+        140,
+        64,
+        169,
+        248
+      ],
+      "accounts": [
+        {
+          "name": "auto_plan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  111,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "auto_plan"
+          ]
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "fund_staking_rewards",
+      "discriminator": [
+        107,
+        76,
+        182,
+        217,
+        248,
+        168,
+        136,
+        146
+      ],
+      "accounts": [
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "funder",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "lamports",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_protocol",
+      "discriminator": [
+        188,
+        233,
+        252,
+        106,
+        134,
+        146,
+        202,
+        91
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "program"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "upgrade_authority",
+          "signer": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "args",
+          "type": {
+            "defined": {
+              "name": "InitializeArgs"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "open_round",
+      "discriminator": [
+        66,
+        235,
+        123,
+        240,
+        8,
+        35,
+        185,
+        159
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "propose_admin",
+      "discriminator": [
+        121,
+        214,
+        199,
+        212,
+        87,
+        39,
+        117,
+        234
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "pending_admin",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "refund_receipt",
+      "discriminator": [
+        185,
+        54,
+        110,
+        2,
+        162,
+        27,
+        187,
+        111
+      ],
+      "accounts": [
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.nonce",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "register_miner",
+      "discriminator": [
+        101,
+        185,
+        46,
+        223,
+        72,
+        27,
+        180,
+        14
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "miner",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "referrer_miner",
+          "optional": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "referrer",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "request_unstake",
+      "discriminator": [
+        44,
+        154,
+        110,
+        253,
+        160,
+        202,
+        54,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "stake_position"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_randomness_authority",
+      "discriminator": [
+        110,
+        22,
+        161,
+        52,
+        103,
+        250,
+        175,
+        57
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "settle_round",
+      "discriminator": [
+        40,
+        101,
+        18,
+        1,
+        31,
+        129,
+        52,
+        77
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "randomness_authority",
+          "signer": true
+        },
+        {
+          "name": "buyback_wallet",
+          "writable": true
+        },
+        {
+          "name": "admin_fee_wallet",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "stake_standard",
+      "discriminator": [
+        216,
+        204,
+        39,
+        29,
+        77,
+        171,
+        118,
+        62
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_tokens",
+          "writable": true
+        },
+        {
+          "name": "vault_tokens",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "stake_position"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_unstaked",
+      "discriminator": [
+        19,
+        202,
+        68,
+        255,
+        216,
+        40,
+        205,
+        61
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "owner_tokens",
+          "writable": true
+        },
+        {
+          "name": "vault_tokens",
+          "writable": true
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "stake_position"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AutoPlan",
+      "discriminator": [
+        247,
+        37,
+        142,
+        133,
+        52,
+        6,
+        134,
+        89
+      ]
+    },
+    {
+      "name": "BetReceipt",
+      "discriminator": [
+        220,
+        192,
+        65,
+        5,
+        23,
+        202,
+        146,
+        102
+      ]
+    },
+    {
+      "name": "Miner",
+      "discriminator": [
+        223,
+        113,
+        15,
+        54,
+        123,
+        122,
+        140,
+        100
+      ]
+    },
+    {
+      "name": "MiningPool",
+      "discriminator": [
+        134,
+        149,
+        193,
+        160,
+        11,
+        139,
+        229,
+        253
+      ]
+    },
+    {
+      "name": "ProtocolConfig",
+      "discriminator": [
+        207,
+        91,
+        250,
+        28,
+        152,
+        179,
+        215,
+        209
+      ]
+    },
+    {
+      "name": "Round",
+      "discriminator": [
+        87,
+        127,
+        165,
+        51,
+        73,
+        78,
+        116,
+        174
+      ]
+    },
+    {
+      "name": "StakePool",
+      "discriminator": [
+        121,
+        34,
+        206,
+        21,
+        79,
+        127,
+        255,
+        28
+      ]
+    },
+    {
+      "name": "StakePosition",
+      "discriminator": [
+        78,
+        165,
+        30,
+        111,
+        171,
+        125,
+        11,
+        220
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AdminAccepted",
+      "discriminator": [
+        174,
+        12,
+        76,
+        139,
+        158,
+        99,
+        110,
+        254
+      ]
+    },
+    {
+      "name": "AdminProposed",
+      "discriminator": [
+        129,
+        249,
+        226,
+        227,
+        199,
+        82,
+        110,
+        243
+      ]
+    },
+    {
+      "name": "AutoPlanCancelled",
+      "discriminator": [
+        57,
+        125,
+        254,
+        149,
+        59,
+        0,
+        66,
+        77
+      ]
+    },
+    {
+      "name": "AutoPlanConfigured",
+      "discriminator": [
+        219,
+        159,
+        35,
+        91,
+        65,
+        99,
+        51,
+        136
+      ]
+    },
+    {
+      "name": "AutoPlanExecuted",
+      "discriminator": [
+        91,
+        37,
+        151,
+        51,
+        95,
+        156,
+        85,
+        49
+      ]
+    },
+    {
+      "name": "AutoPlanFunded",
+      "discriminator": [
+        201,
+        155,
+        136,
+        83,
+        105,
+        133,
+        107,
+        100
+      ]
+    },
+    {
+      "name": "DeploymentCreated",
+      "discriminator": [
+        208,
+        175,
+        247,
+        77,
+        32,
+        12,
+        225,
+        13
+      ]
+    },
+    {
+      "name": "MinerRegistered",
+      "discriminator": [
+        40,
+        91,
+        92,
+        195,
+        9,
+        137,
+        86,
+        194
+      ]
+    },
+    {
+      "name": "MyneClaimed",
+      "discriminator": [
+        140,
+        19,
+        81,
+        0,
+        151,
+        148,
+        140,
+        234
+      ]
+    },
+    {
+      "name": "PauseChanged",
+      "discriminator": [
+        238,
+        188,
+        213,
+        78,
+        134,
+        209,
+        178,
+        218
+      ]
+    },
+    {
+      "name": "ProtocolInitialized",
+      "discriminator": [
+        173,
+        122,
+        168,
+        254,
+        9,
+        118,
+        76,
+        132
+      ]
+    },
+    {
+      "name": "RandomnessAuthorityChanged",
+      "discriminator": [
+        87,
+        247,
+        177,
+        174,
+        70,
+        93,
+        152,
+        47
+      ]
+    },
+    {
+      "name": "ReceiptClaimed",
+      "discriminator": [
+        210,
+        101,
+        8,
+        103,
+        212,
+        100,
+        136,
+        159
+      ]
+    },
+    {
+      "name": "ReceiptRefunded",
+      "discriminator": [
+        190,
+        53,
+        168,
+        229,
+        235,
+        165,
+        171,
+        96
+      ]
+    },
+    {
+      "name": "RoundOpened",
+      "discriminator": [
+        99,
+        173,
+        228,
+        72,
+        142,
+        57,
+        109,
+        178
+      ]
+    },
+    {
+      "name": "RoundSettled",
+      "discriminator": [
+        249,
+        225,
+        66,
+        54,
+        157,
+        200,
+        234,
+        222
+      ]
+    },
+    {
+      "name": "StakeChanged",
+      "discriminator": [
+        242,
+        117,
+        195,
+        222,
+        185,
+        209,
+        114,
+        219
+      ]
+    },
+    {
+      "name": "StakingRewardsClaimed",
+      "discriminator": [
+        251,
+        169,
+        50,
+        96,
+        7,
+        92,
+        141,
+        137
+      ]
+    },
+    {
+      "name": "StakingRewardsFunded",
+      "discriminator": [
+        186,
+        208,
+        216,
+        161,
+        231,
+        1,
+        34,
+        90
+      ]
+    },
+    {
+      "name": "UnstakeRequested",
+      "discriminator": [
+        21,
+        253,
+        177,
+        85,
+        129,
+        206,
+        42,
+        152
+      ]
+    },
+    {
+      "name": "UnstakeWithdrawn",
+      "discriminator": [
+        229,
+        15,
+        35,
+        180,
+        1,
+        18,
+        16,
+        19
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "ArithmeticOverflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidFeeSchedule",
+      "msg": "The configured fee destinations do not sum to the advertised fee"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidAuthority",
+      "msg": "Authority cannot be the default public key"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidTiming",
+      "msg": "Timing parameters are invalid"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidSupply",
+      "msg": "Supply parameters are invalid"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidPendingAdmin",
+      "msg": "No pending administrator matches this signer"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidProgramData",
+      "msg": "The executable program is not linked to the supplied ProgramData account"
+    },
+    {
+      "code": 6007,
+      "name": "InvalidUpgradeAuthority",
+      "msg": "The initializer is not the program upgrade authority"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidTokenProgram",
+      "msg": "The mint is not owned by the supplied token program"
+    },
+    {
+      "code": 6009,
+      "name": "InvalidMintDecimals",
+      "msg": "The MYNE mint must use nine decimals"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidMintAuthority",
+      "msg": "The MYNE mint authority must be the protocol config PDA"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidFreezeAuthority",
+      "msg": "The MYNE mint must not have a freeze authority"
+    },
+    {
+      "code": 6012,
+      "name": "ProtocolPaused",
+      "msg": "The protocol is paused"
+    },
+    {
+      "code": 6013,
+      "name": "DeploymentTooSmall",
+      "msg": "The supplied amount is below the minimum deployment"
+    },
+    {
+      "code": 6014,
+      "name": "BettingClosed",
+      "msg": "This round is not accepting deployments"
+    },
+    {
+      "code": 6015,
+      "name": "RoundNotReady",
+      "msg": "This round is not ready for settlement"
+    },
+    {
+      "code": 6016,
+      "name": "RoundAlreadySettled",
+      "msg": "This round has already settled"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidRandomnessAuthority",
+      "msg": "The randomness signer is not authorized"
+    },
+    {
+      "code": 6018,
+      "name": "ReceiptAlreadyProcessed",
+      "msg": "The receipt has already been processed"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidReceiptAuthority",
+      "msg": "The receipt authority is invalid"
+    },
+    {
+      "code": 6020,
+      "name": "InsufficientBalance",
+      "msg": "The requested token or SOL amount is unavailable"
+    },
+    {
+      "code": 6021,
+      "name": "InvalidReferrer",
+      "msg": "The supplied referrer is invalid"
+    },
+    {
+      "code": 6022,
+      "name": "CooldownActive",
+      "msg": "The staking cooldown has not completed"
+    },
+    {
+      "code": 6023,
+      "name": "InvalidStakeAuthority",
+      "msg": "The staking position does not match this authority"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidFeeDestination",
+      "msg": "The provided fee destination does not match protocol configuration"
+    },
+    {
+      "code": 6025,
+      "name": "InvalidRound",
+      "msg": "The round ID does not match this account"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidRoundSchedule",
+      "msg": "Only the current scheduled round can be opened"
+    },
+    {
+      "code": 6027,
+      "name": "AutoPlanAlreadyExecuted",
+      "msg": "This automation plan already executed for the round"
+    },
+    {
+      "code": 6028,
+      "name": "AutoPlanInactive",
+      "msg": "This automation plan is inactive"
+    }
+  ],
+  "types": [
+    {
+      "name": "AdminAccepted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AdminProposed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AutoPlan",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          },
+          {
+            "name": "amounts",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
+            "name": "balance_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "next_nonce",
+            "type": "u64"
+          },
+          {
+            "name": "last_round",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AutoPlanCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "returned_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AutoPlanConfigured",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "per_round_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "balance_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AutoPlanExecuted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "executor",
+            "type": "pubkey"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "total_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "balance_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AutoPlanFunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "balance_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BetReceipt",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "amounts",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
+            "name": "cumulative_starts",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
+            "name": "total_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "claimed",
+            "type": "bool"
+          },
+          {
+            "name": "refunded",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DeploymentCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "total_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InitializeArgs",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "randomness_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyback_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "motherlode_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin_fee_wallet",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Miner",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "referrer",
+            "type": "pubkey"
+          },
+          {
+            "name": "unclaimed_myne",
+            "type": "u64"
+          },
+          {
+            "name": "passive_reward_debt",
+            "type": "u128"
+          },
+          {
+            "name": "lifetime_deployed_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "lifetime_sol_claimed",
+            "type": "u64"
+          },
+          {
+            "name": "lifetime_myne_claimed",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MinerRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "referrer",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MiningPool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "total_unclaimed",
+            "type": "u64"
+          },
+          {
+            "name": "reward_per_unclaimed",
+            "type": "u128"
+          },
+          {
+            "name": "undistributed_base_units",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MyneClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "gross_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "net_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "fee_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "referral_base_units",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PauseChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "randomness_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyback_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "motherlode_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin_fee_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "initialized_at",
+            "type": "i64"
+          },
+          {
+            "name": "genesis_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "max_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "minimum_round_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "round_duration_seconds",
+            "type": "u64"
+          },
+          {
+            "name": "betting_duration_seconds",
+            "type": "u64"
+          },
+          {
+            "name": "unstake_delay_seconds",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_burn_base_units",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "genesis_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "max_tokens",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RandomnessAuthorityChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "randomness_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReceiptClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "sol_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "myne_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_base_units",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ReceiptRefunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Round",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "opened_at",
+            "type": "i64"
+          },
+          {
+            "name": "betting_ends_at",
+            "type": "i64"
+          },
+          {
+            "name": "settles_at",
+            "type": "i64"
+          },
+          {
+            "name": "refund_at",
+            "type": "i64"
+          },
+          {
+            "name": "settled",
+            "type": "bool"
+          },
+          {
+            "name": "winning_tile",
+            "type": "u8"
+          },
+          {
+            "name": "solo_mode",
+            "type": "bool"
+          },
+          {
+            "name": "motherlode_hit",
+            "type": "bool"
+          },
+          {
+            "name": "randomness",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "solo_sample",
+            "type": "u64"
+          },
+          {
+            "name": "tile_lamports",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
+            "name": "tile_receipts",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
+            "name": "gross_deployed_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "prize_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_payout_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "claimed_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "base_emission",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_emission",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundOpened",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "betting_ends_at",
+            "type": "i64"
+          },
+          {
+            "name": "settles_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "winning_tile",
+            "type": "u8"
+          },
+          {
+            "name": "solo_mode",
+            "type": "bool"
+          },
+          {
+            "name": "motherlode_hit",
+            "type": "bool"
+          },
+          {
+            "name": "prize_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_payout_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakeChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "standard_delta",
+            "type": "i128"
+          },
+          {
+            "name": "burn_delta",
+            "type": "i128"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakePool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "total_standard",
+            "type": "u64"
+          },
+          {
+            "name": "total_burn",
+            "type": "u64"
+          },
+          {
+            "name": "total_weight",
+            "type": "u64"
+          },
+          {
+            "name": "reward_per_weight",
+            "type": "u128"
+          },
+          {
+            "name": "undistributed_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "total_funded_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "total_claimed_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakePosition",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "standard_principal",
+            "type": "u64"
+          },
+          {
+            "name": "burn_principal",
+            "type": "u64"
+          },
+          {
+            "name": "reward_weight",
+            "type": "u64"
+          },
+          {
+            "name": "reward_debt",
+            "type": "u128"
+          },
+          {
+            "name": "pending_sol",
+            "type": "u64"
+          },
+          {
+            "name": "cooldown_amount",
+            "type": "u64"
+          },
+          {
+            "name": "cooldown_unlock_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakingRewardsClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "StakingRewardsFunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "funder",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnstakeRequested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "unlock_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnstakeWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

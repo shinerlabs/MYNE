@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>GLD</title>
+  <rect width="64" height="64" rx="14" fill="#121212"/>
+  <g fill="#ead18a">
+    <path d="M13 17.5 18.3 9h27.4L51 17.5 45.7 26H18.3L13 17.5Z"/>
+    <path d="M13 46.5 18.3 38h27.4l5.3 8.5-5.3 8.5H18.3L13 46.5Z"/>
+  </g>
+  <g fill="#b9974d" opacity=".72">
+    <path d="m13 17.5 5.3-8.5h10.2l-9.1 17H18.3L13 17.5Z"/>
+    <path d="m51 46.5-5.3 8.5H35.5l9.1-17h1.1l5.3 8.5Z"/>
+  </g>
+</svg>

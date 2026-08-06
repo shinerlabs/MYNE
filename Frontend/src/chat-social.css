@@ -1,0 +1,317 @@
+/* Chat social layer: replies, reactions, profile cards, profile editor.
+   Scoped to new class names so it layers on top of style.css without
+   fighting the existing chat styling. */
+
+/* ------------------------------------------------------------- messages */
+.chat-message {
+  position: relative;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .22s ease, transform .22s ease;
+}
+.chat-message.entered { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-message { transition: none; opacity: 1; transform: none; }
+}
+.chat-message.flash { animation: chat-flash 1.2s ease; }
+@keyframes chat-flash {
+  0%, 100% { background: transparent; }
+  25% { background: rgba(219, 219, 219, .14); }
+}
+.chat-message-col { min-width: 0; flex: 1; }
+.chat-avatar { overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
+.chat-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-message header b { cursor: pointer; color: #858585; }
+.chat-message header b:hover { text-decoration: underline; color: #9c9c9c; }
+
+/* hover actions (reply / react) — hidden until message hover */
+.chat-msg-actions {
+  margin-left: auto; display: inline-flex; gap: 2px;
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s ease;
+}
+.chat-message:hover .chat-msg-actions,
+.chat-message:focus-within .chat-msg-actions {
+  opacity: 1; pointer-events: auto;
+}
+@media (hover: none) {
+  /* Touch: keep reachable without hover */
+  .chat-msg-actions { opacity: 1; pointer-events: auto; }
+}
+.chat-msg-actions button {
+  background: transparent; border: 0; cursor: pointer; color: inherit;
+  opacity: .75; font-size: 13px; line-height: 1; padding: 2px 4px; border-radius: 5px;
+}
+.chat-msg-actions button:hover { opacity: 1; background: rgba(255, 255, 255, .08); }
+.chat-message time { margin-left: 6px; }
+
+/* quoted parent */
+.chat-quote {
+  display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left;
+  margin: 3px 0 5px; padding: 4px 8px; cursor: pointer;
+  background: rgba(255, 255, 255, .035); border: 0;
+  border-left: 2px solid rgba(219, 219, 219, .55); border-radius: 0 5px 5px 0;
+  color: inherit; font: inherit;
+}
+.chat-quote:hover { background: rgba(255, 255, 255, .07); }
+.chat-quote b { font-size: 11px; color: #dbdbdb; font-weight: 600; }
+.chat-quote span {
+  font-size: 11.5px; opacity: .6;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ------------------------------------------------------------ reactions */
+.chat-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.chat-reaction {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px 2px; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, .06); border: 1px solid transparent;
+  color: inherit; font-size: 12px; line-height: 1.5;
+  transition: transform .12s ease, background .15s ease;
+}
+.chat-reaction:hover { background: rgba(255, 255, 255, .11); transform: translateY(-1px); }
+.chat-reaction:active { transform: scale(.94); }
+.chat-reaction.mine { background: rgba(219, 219, 219, .16); border-color: rgba(219, 219, 219, .45); }
+.chat-reaction b { font-weight: 600; font-size: 11px; opacity: .8; }
+
+/* floating emoji on new reaction */
+.reaction-fly {
+  position: absolute; right: 14px; bottom: 8px; pointer-events: none;
+  font-size: 17px; animation: reaction-rise 1s cubic-bezier(.3, .7, .4, 1) forwards;
+}
+@keyframes reaction-rise {
+  0%   { opacity: 0; transform: translate(0, 4px) scale(.6); }
+  20%  { opacity: 1; transform: translate(calc(var(--drift) * .3), -8px) scale(1.15); }
+  100% { opacity: 0; transform: translate(var(--drift), -46px) scale(.9); }
+}
+@media (prefers-reduced-motion: reduce) { .reaction-fly { display: none; } }
+
+.emoji-picker {
+  position: fixed; z-index: 60; display: flex; gap: 2px; padding: 5px;
+  background: #17171a; border: 1px solid #2a2a2e; border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+}
+.emoji-picker button {
+  background: transparent; border: 0; cursor: pointer;
+  font-size: 18px; line-height: 1; padding: 4px 5px; border-radius: 7px;
+  transition: transform .1s ease, background .12s ease;
+}
+.emoji-picker button:hover { background: rgba(255, 255, 255, .1); transform: scale(1.22); }
+
+/* --------------------------------------------------------------- replies */
+.chat-reply-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 12px 6px; padding: 6px 9px;
+  background: rgba(255, 255, 255, .045); border-left: 2px solid #dbdbdb;
+  border-radius: 0 7px 7px 0;
+  animation: reply-bar-in .18s ease;
+}
+@keyframes reply-bar-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.chat-reply-bar div { min-width: 0; display: flex; flex-direction: column; }
+.chat-reply-bar b { font-size: 11px; color: #dbdbdb; }
+.chat-reply-bar span {
+  font-size: 11.5px; opacity: .55;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-reply-bar button {
+  margin-left: auto; background: transparent; border: 0; color: inherit;
+  cursor: pointer; opacity: .5; font-size: 12px; padding: 3px 5px;
+}
+.chat-reply-bar button:hover { opacity: 1; }
+
+/* ------------------------------------------------- not-connected gate */
+.chat-gate {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+  margin: 0 12px 7px; padding: 9px 11px;
+  background: rgba(219, 219, 219, .07); border: 1px solid rgba(219, 219, 219, .22);
+  border-radius: 9px;
+}
+.chat-gate span { font-size: 12px; opacity: .75; flex: 1; min-width: 150px; }
+.chat-gate button {
+  background: #dbdbdb; color: #131313; border: 0; border-radius: 7px;
+  padding: 5px 11px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.chat-gate button:hover { background: #f2f2f2; }
+
+#connect-wallet.nudge { animation: connect-nudge .55s ease; }
+@keyframes connect-nudge {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+/* scrollback status */
+.chat-history-status {
+  padding: 8px 12px; text-align: center;
+  font-size: 11px; letter-spacing: .04em; opacity: .4;
+}
+.chat-history-status.start {
+  opacity: .3; text-transform: uppercase;
+  border-bottom: 1px solid rgba(255, 255, 255, .07); margin-bottom: 4px;
+}
+
+/* new-message pip */
+.chat-new-pip {
+  position: absolute; bottom: 66px; left: 50%; transform: translateX(-50%);
+  z-index: 5; background: #dbdbdb; color: #131313; border: 0;
+  border-radius: 999px; padding: 4px 12px; font-size: 11.5px; font-weight: 600;
+  cursor: pointer; box-shadow: 0 5px 16px rgba(0, 0, 0, .45);
+}
+
+/* The Profile button turned this row into a flex container, so the existing
+   label + channel name need an explicit gap again. */
+.channel-context { display: flex; align-items: center; gap: 7px; }
+
+
+/* --------------------------------------------------------- profile card */
+.chat-profile-card {
+  position: fixed; z-index: 1200; width: 272px; padding: 13px;
+  background: #111111; border: 1px solid #282828; border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .75);
+  opacity: 1;
+}
+.chat-profile-card header { display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
+.chat-profile-card header .chat-avatar { width: 38px; height: 38px; border-radius: 50%; flex: none; }
+.chat-profile-card header div { min-width: 0; display: flex; flex-direction: column; }
+.chat-profile-card header b { font-size: 13.5px; }
+.chat-profile-card header span { font-size: 11px; opacity: .5; font-family: ui-monospace, monospace; }
+/* Address + copy. The row keeps its own opacity so the button can sit at full strength — a
+   50%-faded control reads as disabled. */
+.chat-profile-card .chat-profile-addr { display: flex; align-items: center; gap: 5px; opacity: 1; }
+.chat-profile-card .chat-profile-addr code { font: inherit; opacity: .5; }
+.chat-profile-copy {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255,255,255,.05);
+  color: #858585;
+  cursor: pointer;
+  transition: .15s;
+}
+.chat-profile-copy:hover { background: rgba(255,255,255,.09); color: #d5d5d5; }
+.chat-profile-copy svg { width: 11px; height: 11px; fill: currentColor; }
+/* Confirmation on the control itself: the toast can be missed on a phone, and the button is
+   where the user is already looking. */
+.chat-profile-copy.copied { background: rgba(217, 217, 217,.16); color: var(--gold-bright); }
+.chat-profile-bio { font-size: 12px; opacity: .72; margin: 0 0 9px; line-height: 1.45; }
+.chat-profile-stats { display: flex; gap: 14px; margin-bottom: 11px; }
+.chat-profile-stats span { display: flex; flex-direction: column; }
+.chat-profile-stats strong { font-size: 14px; }
+.chat-profile-stats small { font-size: 9.5px; opacity: .45; letter-spacing: .06em; }
+.chat-profile-action {
+  width: 100%; padding: 7px; border-radius: 8px; cursor: pointer;
+  background: #dbdbdb; color: #131313; border: 0; font-weight: 600; font-size: 12.5px;
+}
+.chat-profile-action:hover { background: #f2f2f2; }
+.chat-profile-action.is-following {
+  background: transparent; color: inherit; border: 1px solid rgba(255, 255, 255, .18);
+}
+.chat-profile-action.is-following:hover { border-color: #e5645e; color: #e5645e; }
+.chat-profile-card .muted { font-size: 12px; opacity: .5; }
+
+/* ------------------------------------------------------- profile editor */
+.profile-editor-backdrop {
+  position: fixed; inset: 0; z-index: 80; display: grid; place-items: center;
+  background: rgba(0, 0, 0, .62); backdrop-filter: blur(3px);
+  animation: fade-in .16s ease;
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.profile-editor {
+  width: min(400px, calc(100vw - 32px)); padding: 21px;
+  background: #131316; border: 1px solid #2a2a2e; border-radius: 15px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .6);
+}
+.profile-editor h2 { margin: 0 0 15px; font-size: 16px; }
+.profile-editor-avatar { display: flex; align-items: center; gap: 12px; margin-bottom: 15px; }
+.profile-editor-avatar .chat-avatar {
+  width: 60px; height: 60px; border-radius: 50%; flex: none; font-size: 17px;
+  background: #26262b; display: inline-flex; align-items: center; justify-content: center;
+}
+.profile-editor-avatar button {
+  background: transparent; border: 1px solid rgba(255, 255, 255, .16); color: inherit;
+  border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+}
+.profile-editor-avatar button:hover { border-color: rgba(219, 219, 219, .5); }
+.profile-editor label {
+  display: block; margin-bottom: 13px; font-size: 11px;
+  letter-spacing: .05em; opacity: .55; text-transform: uppercase;
+}
+.profile-editor input[type="text"], .profile-editor textarea {
+  display: block; width: 100%; margin-top: 5px; padding: 8px 10px;
+  background: #0e0e10; border: 1px solid #2a2a2e; border-radius: 8px;
+  color: #e6e6e6; font: inherit; font-size: 13.5px; text-transform: none;
+  letter-spacing: normal; resize: vertical;
+}
+.profile-editor input[type="text"]:focus, .profile-editor textarea:focus {
+  outline: none; border-color: rgba(219, 219, 219, .55);
+}
+.profile-editor-error {
+  margin: 0 0 11px; padding: 7px 9px; border-radius: 7px; font-size: 12px;
+  background: rgba(229, 100, 94, .12); color: #e5645e;
+}
+.profile-editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.profile-editor-actions button {
+  padding: 7px 15px; border-radius: 8px; font-size: 13px; cursor: pointer;
+  background: transparent; border: 1px solid rgba(255, 255, 255, .16); color: inherit;
+}
+.profile-editor-actions .primary { background: #dbdbdb; border-color: #dbdbdb; color: #131313; font-weight: 600; }
+.profile-editor-actions .primary:hover { background: #f2f2f2; }
+.profile-editor-actions button:disabled { opacity: .55; cursor: default; }
+.news-admin {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 10px 10px 8px; border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.news-admin[hidden] { display: none !important; }
+.news-admin input[type="text"],
+.news-admin textarea,
+.news-admin select {
+  width: 100%; box-sizing: border-box;
+  padding: 8px 10px; border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.1);
+  background: rgba(0,0,0,.35); color: #e4e4e4;
+  font: inherit; font-size: 12px;
+}
+.news-admin textarea { resize: vertical; min-height: 52px; }
+.news-admin-row { display: flex; align-items: center; gap: 8px; }
+.news-admin-row select { width: auto; flex: 1; }
+.news-pin { display: inline-flex; align-items: center; gap: 5px; color: #858585; font-size: 11px; white-space: nowrap; }
+.news-admin-row #news-post {
+  padding: 7px 12px; border: 0; border-radius: 8px; cursor: pointer;
+  background: #dbdbdb; color: #131313; font-weight: 650; font-size: 12px;
+}
+.news-admin-row #news-post:hover { background: #f2f2f2; }
+.news-card { position: relative; margin-bottom: 8px; padding: 13px; border-radius: 12px; background: rgba(255,255,255,.021); box-shadow: inset 0 1px 0 rgba(255,255,255,.035); }
+.news-card.pinned { background: linear-gradient(135deg, rgba(217, 217, 217,.075), rgba(255,255,255,.018)); box-shadow: inset 0 0 0 1px rgba(217, 217, 217,.13), inset 0 1px 0 rgba(255,255,255,.04); }
+.news-card header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.news-card header span { color: #858585; font-size: 7px; font-weight: 700; letter-spacing: .12em; }
+.news-card time { color: #4e4e4e; font: 470 7px "Roboto Mono Variable", monospace; }
+.news-card h3 { margin: 8px 0 4px; color: #d4d4d4; font-size: 11px; line-height: 1.25; }
+.news-card p { margin: 0; color: #77746d; font-size: 10px; line-height: 1.45; }
+.news-card > button[data-route] { margin-top: 9px; padding: 0; border: 0; background: none; color: #939393; font-size: 8px; font-weight: 600; }
+.news-card-delete {
+  position: absolute; top: 8px; right: 8px;
+  width: 22px; height: 22px; border: 0; border-radius: 6px;
+  background: transparent; color: #666666; cursor: pointer; font-size: 12px;
+  opacity: 0; transition: opacity .15s ease, color .15s ease;
+}
+.news-card:hover .news-card-delete { opacity: 1; }
+.news-card-delete:hover { color: #e5645e; }
+
+
+/* Profile card carries two stat rows: on-chain balances (authoritative, read
+   straight from the contracts) above social counts. Separate them so the
+   distinction is legible rather than one undifferentiated six-stat block. */
+.chat-profile-stats.onchain strong { color: #d5d5d5; font-family: ui-monospace, monospace; }
+.chat-profile-stats.onchain {
+  padding-bottom: 9px;
+  margin-bottom: 9px;
+  border-bottom: 1px solid rgba(255, 255, 255, .07);
+}

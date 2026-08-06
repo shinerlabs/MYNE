@@ -1,0 +1,42 @@
+{
+  "name": "solana-ai-kit",
+  "version": "2.1.0",
+  "description": "Security-focused Solana development workflows and official documentation access for Codex.",
+  "author": {
+    "name": "SuperteamBR",
+    "url": "https://github.com/solanabr"
+  },
+  "homepage": "https://github.com/solanabr/solana-ai-kit",
+  "repository": "https://github.com/solanabr/solana-ai-kit",
+  "license": "MIT",
+  "keywords": [
+    "solana",
+    "anchor",
+    "pinocchio",
+    "rust",
+    "web3",
+    "blockchain"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Solana AI Kit",
+    "shortDescription": "Build and review secure Solana applications.",
+    "longDescription": "Adds a focused Solana engineering workflow for Anchor, Pinocchio, Rust programs, and TypeScript clients, with security gates and access to the official Solana MCP documentation server.",
+    "developerName": "SuperteamBR",
+    "category": "Development",
+    "capabilities": [
+      "Read",
+      "Write",
+      "MCP"
+    ],
+    "websiteURL": "https://github.com/solanabr/solana-ai-kit",
+    "brandColor": "#14F195",
+    "logo": "./assets/logo.png",
+    "defaultPrompt": [
+      "Review this Solana program for account-validation and arithmetic risks.",
+      "Build this feature with Anchor and add meaningful tests.",
+      "Help me create a type-safe Solana client with @solana/kit."
+    ]
+  }
+}

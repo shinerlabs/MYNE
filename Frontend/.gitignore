@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.vite/
+*.local
+
+# Local configuration. Only the documented template belongs in source control.
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# Generated staking statement previews and exports.
+output/
+tmp/
+
+# Operating-system and editor metadata.
+.DS_Store
+*.swp

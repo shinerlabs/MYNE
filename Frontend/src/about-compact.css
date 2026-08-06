@@ -1,0 +1,182 @@
+/* Branded About layout: compact reading panel with persistent chapter index on the right. */
+body[data-route="about"] .about-shell.page-view.active {
+  width: min(1120px, calc(100vw - 48px));
+  max-width: 1120px;
+  padding: 28px 0 48px;
+}
+
+body[data-route="about"] .about-shell > .feature-hero {
+  display: none !important;
+  min-height: 92px;
+  margin: 0 0 12px;
+  padding: 0 4px;
+  align-items: center;
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 24px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-route="about"] .about-shell > .feature-hero h1 {
+  margin: 4px 0 0;
+  color: #f5f5f5;
+  font: 750 clamp(34px, 4vw, 48px)/1 var(--font-number);
+  letter-spacing: -.055em;
+}
+
+body[data-route="about"] .about-shell > .feature-hero p {
+  max-width: 560px;
+  margin: 8px 0 0;
+  color: #898b90;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+body[data-route="about"] .about-shell > .feature-hero .supply-seal {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 134px;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 13px;
+  background: rgba(255,255,255,.035);
+  box-shadow: none;
+}
+
+body[data-route="about"] .about-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 210px;
+  gap: 14px;
+  align-items: start;
+}
+
+body[data-route="about"] .about-content {
+  order: 1;
+  min-width: 0;
+  min-height: 560px;
+  padding: 28px 30px 32px;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(255,255,255,.026);
+  box-shadow: none;
+}
+
+body[data-route="about"] .about-section.active { animation: panel-rise .22s ease-out both; }
+body[data-route="about"] .about-section > .eyebrow { color: #777a80; font-size: 8px; letter-spacing: .13em; }
+body[data-route="about"] .about-section h2 {
+  max-width: 720px;
+  margin: 8px 0 12px;
+  font: 750 clamp(34px, 4.4vw, 48px)/1 var(--font-number);
+  letter-spacing: -.055em;
+}
+
+body[data-route="about"] .about-section .about-lead {
+  max-width: 760px;
+  margin: 0 0 22px;
+  color: #a8aaaf;
+  font: 500 14px/1.55 var(--font-sans);
+  letter-spacing: -.01em;
+}
+
+body[data-route="about"] .about-section p { line-height: 1.55; }
+
+body[data-route="about"] .about-staking-history {
+  height: 190px;
+  margin: 0 0 22px;
+  padding: 16px 18px 10px;
+  background: rgba(255,255,255,.025) !important;
+}
+
+body[data-route="about"] .about-staking-history .staking-history-plot { height: 132px; }
+body[data-route="about"] .about-staking-history > header strong { font-size: 19px; }
+
+body[data-route="about"] .about-nav {
+  order: 2;
+  position: sticky;
+  top: 96px;
+  bottom: auto;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 10px;
+  overflow: visible;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(255,255,255,.026);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+body[data-route="about"] .about-nav > span {
+  display: block;
+  padding: 7px 9px 9px;
+  color: #74767b;
+  font-size: 7px;
+  font-weight: 750;
+  letter-spacing: .16em;
+}
+
+body[data-route="about"] .about-nav-list {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body[data-route="about"] .about-nav button[data-about-section] {
+  position: relative;
+  min-height: 36px;
+  padding: 0 10px 0 13px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  box-shadow: none;
+  color: #8f9196;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+body[data-route="about"] .about-nav button[data-about-section]:hover { background: rgba(255,255,255,.045); color: #ececee; }
+body[data-route="about"] .about-nav button[data-about-section].active { background: rgba(255,255,255,.075); color: #f4f4f5; box-shadow: none; }
+body[data-route="about"] .about-nav button[data-about-section].active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--gld-spectrum);
+  box-shadow: 0 0 8px rgba(211,228,255,.45);
+}
+
+body[data-route="about"] .about-nav-toggle { display: none !important; }
+
+@media (max-width: 860px) {
+  body[data-route="about"] .about-shell.page-view.active { width: min(100% - 24px, 760px); padding-top: 18px; }
+  body[data-route="about"] .about-shell > .feature-hero { min-height: 80px; }
+  body[data-route="about"] .about-shell > .feature-hero .supply-seal { display: none; }
+  body[data-route="about"] .about-layout { display: flex; flex-direction: column; gap: 10px; }
+  body[data-route="about"] .about-content { order: 2; width: 100%; padding: 22px 18px 26px; }
+  body[data-route="about"] .about-nav { order: 1; position: sticky; top: 72px; width: 100%; padding: 6px; background: rgba(18,18,20,.96); backdrop-filter: blur(14px); }
+  body[data-route="about"] .about-nav > span { display: none; }
+  body[data-route="about"] .about-nav .about-nav-toggle { display: flex !important; width: 100%; min-height: 42px; padding: 0 12px; align-items: center; justify-content: space-between; border: 0; border-radius: 10px; background: rgba(255,255,255,.05); color: #f2f2f3; }
+  body[data-route="about"] .about-nav-list { display: none; padding: 5px 0 2px; }
+  body[data-route="about"] .about-nav.open .about-nav-list { display: flex; }
+  body[data-route="about"] .about-section h2 { font-size: clamp(34px, 10vw, 46px); }
+  body[data-route="about"] .about-section .about-lead { font-size: 13px; }
+  body[data-route="about"] .about-staking-history { height: 154px; padding: 12px 12px 8px; }
+  body[data-route="about"] .about-staking-history .staking-history-plot { height: 101px; }
+}
