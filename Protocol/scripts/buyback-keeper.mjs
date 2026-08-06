@@ -13,6 +13,11 @@ import { readFile } from 'node:fs/promises';
 import anchor from '@anchor-lang/core';
 import web3 from '@solana/web3.js';
 import * as splToken from '@solana/spl-token';
+import {
+  calculateSpend,
+  METEORA_DLMM_LABEL,
+  validateDirectMeteoraQuote,
+} from './buyback-policy.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const {
@@ -36,7 +41,6 @@ const {
 const PROGRAM_ID_TEXT = process.env.MYNE_PROGRAM_ID
   || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e';
 const PROGRAM_ID = new PublicKey(PROGRAM_ID_TEXT);
-const METEORA_LABEL = 'Meteora DLMM';
 const JUPITER_QUOTE_URL = process.env.JUPITER_QUOTE_URL || 'https://lite-api.jup.ag/swap/v1/quote';
 const JUPITER_SWAP_URL = process.env.JUPITER_SWAP_URL || 'https://lite-api.jup.ag/swap/v1/swap';
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
@@ -67,35 +71,28 @@ function readInteger(value, name) {
   return parsed;
 }
 
-function validateQuote(quote, poolAddress, inputLamports) {
-  assert.equal(quote.inputMint, NATIVE_MINT.toBase58(), 'Quote input is not native SOL');
-  assert.equal(Number(quote.inAmount), inputLamports, 'Quote input amount changed unexpectedly');
-  assert.ok(Number(quote.outAmount) > 0, 'Quote returned zero MYNE');
-  assert.ok(Array.isArray(quote.routePlan) && quote.routePlan.length === 1, 'Buyback must use one direct route');
-  const step = quote.routePlan[0];
-  assert.equal(step.swapInfo?.ammKey, poolAddress.toBase58(), 'Quote does not use the registered Meteora pool');
-  assert.equal(step.swapInfo?.label, METEORA_LABEL, 'Quote route is not Meteora DLMM');
-  return {
-    inputLamports,
-    outputBaseUnits: readInteger(quote.outAmount, 'quoted MYNE output'),
-    priceImpactPct: String(quote.priceImpactPct ?? 'unknown'),
-  };
-}
-
 async function fetchQuote(inputLamports, mint, poolAddress, slippageBps) {
   const params = new URLSearchParams({
     inputMint: NATIVE_MINT.toBase58(),
     outputMint: mint.toBase58(),
     amount: String(inputLamports),
     slippageBps: String(slippageBps),
-    dexes: METEORA_LABEL,
+    dexes: METEORA_DLMM_LABEL,
     onlyDirectRoutes: 'true',
     restrictIntermediateTokens: 'true',
   });
   const response = await fetch(`${JUPITER_QUOTE_URL}?${params}`);
   const body = await response.json().catch(() => ({}));
   assert.ok(response.ok, `Jupiter quote failed: ${body.error || response.status}`);
-  return { raw: body, checked: validateQuote(body, poolAddress, inputLamports) };
+  return {
+    raw: body,
+    checked: validateDirectMeteoraQuote(body, {
+      poolAddress: poolAddress.toBase58(),
+      inputLamports,
+      outputMint: mint.toBase58(),
+      maxPriceImpactPct: Number(process.env.MAX_PRICE_IMPACT_PCT || '5'),
+    }),
+  };
 }
 
 async function buildSwapTransaction(quote) {
@@ -156,9 +153,15 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const reserve = lamports(process.env.KEEPER_RESERVE_SOL || '0.25');
   const maxSpend = lamports(process.env.MAX_BUYBACK_SOL || '0.25');
   const balance = await provider.connection.getBalance(payer.publicKey, 'confirmed');
-  const spend = Math.min(maxSpend, Math.max(0, balance - reserve));
   const minimum = lamports(process.env.MIN_BUYBACK_SOL || '0.01');
-  if (spend < minimum) return { skipped: true, reason: 'below-minimum', balance, spend };
+  const spendPlan = calculateSpend({
+    balanceLamports: balance,
+    reserveLamports: reserve,
+    maxSpendLamports: maxSpend,
+    minimumLamports: minimum,
+  });
+  if (spendPlan.skipped) return { ...spendPlan, balance };
+  const spend = spendPlan.spendLamports;
   const slippageBps = readInteger(process.env.BUYBACK_SLIPPAGE_BPS || '100', 'BUYBACK_SLIPPAGE_BPS');
   assert.ok(slippageBps <= 500, 'BUYBACK_SLIPPAGE_BPS must be <= 500 (5%)');
   const { raw: quote, checked } = await fetchQuote(spend, configState.mint, poolAddress, slippageBps);
@@ -191,4 +194,3 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (!once) await sleep(intervalMs);
   } while (!once);
 }
-
