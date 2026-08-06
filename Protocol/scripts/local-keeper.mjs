@@ -11,22 +11,21 @@ const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, sendAn
 const { TOKEN_PROGRAM_ID, getOrCreateAssociatedTokenAccount, transfer } = splToken;
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const DEVNET_KEEPER_CONFIRMATION = PROGRAM_ID.toBase58();
+const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const provider = AnchorProvider.env();
 setProvider(provider);
-const isDevnet = /^https:\/\/(?:api\.devnet\.solana\.com|devnet\.rpcpool\.com)\/?$/i.test(provider.connection.rpcEndpoint);
+const isLocalnet = /^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/i.test(provider.connection.rpcEndpoint);
+const isDevnet = !isLocalnet;
 if (isDevnet) {
   assert.equal(
     process.env.ALLOW_DEVNET_KEEPER,
     DEVNET_KEEPER_CONFIRMATION,
     `Set ALLOW_DEVNET_KEEPER=${DEVNET_KEEPER_CONFIRMATION} to authorize Devnet demo transactions`,
   );
+  assert.equal(await provider.connection.getGenesisHash(), DEVNET_GENESIS_HASH, 'RPC is not Solana Devnet');
 } else {
-  assert.match(
-    provider.connection.rpcEndpoint,
-    /^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/,
-    'The demo keeper only accepts localnet or explicitly authorized Devnet',
-  );
+  assert.ok(isLocalnet, 'The demo keeper only accepts localnet or explicitly authorized Devnet');
 }
 const payer = provider.wallet.payer;
 assert.ok(payer, 'A file-backed local wallet is required');
