@@ -1,8 +1,7 @@
 import { readRoundsRange, readWinnerCounts, readMyClaimStatus, readExpectedRewards, readRoundIndexAtResolve, countUnknownClaimStatus } from './lottery.js';
+import { settledSolReward } from './round-rewards.js';
 import { roundIdAt, roundEnd } from './round.js';
 import { loadIndexedRounds, loadSettledRounds } from './rounds-index.js';
-
-const WAD = 10n ** 18n;
 
 /**
  * Real round history for the Rounds page — the FULL history, paginated.
@@ -48,10 +47,12 @@ const matchesFilter = (r, filter) => filter === 'all'
  * Every unclaimed win across all history, for the claimable panel + claim-all.
  *
  * Amounts are PER-USER (this account's share), NOT the round's total pot:
- * SOL = bet * payoutMulWad / WAD, BULLION = getExpectedReward (handles solo/split). Using round
- * totals here would overstate a split win.
+ * SOL = prize * winning-tile stake / winning-tile total, BULLION = getExpectedReward
+ * (handles solo/split). Calculate SOL directly from the settled integers instead of the
+ * display/index multiplier: payoutMulWad is a truncated convenience value and can lose lamports
+ * when multiplied a second time.
  *
- * `settled` needs only {roundId, winningSquare, payoutMulWad, singleMinerRound} — which both the
+ * `settled` needs only {roundId, winningSquare, potForWinners, winnerTotal, singleMinerRound} — which both the
  * chain scan and the Supabase index can supply, so the two paths share this verbatim.
  */
 async function buildClaimable(settled, mine, account) {
@@ -81,7 +82,7 @@ async function buildClaimable(settled, mine, account) {
       winners,
       // Split round paying more than one miner — the amount shown is this account's slice.
       sharedWith: !r.singleMinerRound && winners > 1n ? winners : 0n,
-      userEth: (myBet * r.payoutMulWad) / WAD,
+      userEth: settledSolReward(r.potForWinners, myBet, r.winnerTotal),
       userBullion: expected.get(String(r.roundId)) ?? 0n,
       indexAtResolve: resolveIndex.get(String(r.roundId)) ?? 0n,
     };

@@ -14,7 +14,7 @@ import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, inv
 import {
   confirmedMinerRoundKey, previousConfirmedRoundId, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
-import { displayedMotherlodeSol } from './chain/round-rewards.js';
+import { displayedMotherlodeSol, settledSolReward } from './chain/round-rewards.js';
 import { readSupplyStats } from './chain/supply.js';
 import { mountSolPrice, usdFor, getSolUsd, getMyneUsd, setMynePerSol, showPremineMynePrice } from './sol-price.js';
 import { readSwapState, quote, approveGld, swapSolForGld, swapGldForSol, spotMynePerSol, poolAvailable, withSlippage } from './chain/swap.js';
@@ -3496,7 +3496,7 @@ const ensureSocial = () => {
         connectWallet: () => chain.connectWallet(),
         setRoute: (route, options) => setRoute(route, options),
         subscribe: (fn) => chain.subscribe(fn),
-        chatRequiresMinedRounds: NETWORK.cluster === 'mainnet-beta',
+        chatRequiresMinedRounds: solanaNetwork.cluster === 'mainnet-beta',
         getMinedRoundCount: countMyBetRounds,
         // Passed through the adapter rather than imported by the social layer: `copyText` carries
         // the clipboard fallback for non-secure contexts, and the one-way coupling stays intact.
@@ -4266,7 +4266,7 @@ const openRoundMinerCard = (wallet, anchor) => {
     ? `${solIcon('miner-card-eth')}<b>${chain.format.ethSmart(result.ethWon)}</b>`
     : '<em>Pending result</em>';
   const myneReward = result.resolved
-    ? `<img src="/gld-icon-transparent.png" alt=""/><b>${chain.format.solIcon(result.gldWon)}</b>`
+    ? `<img src="/gld-icon-transparent.png" alt=""/><b>${chain.format.solIcon(result.gldWon, 2)}</b>`
     : '<em>Pending result</em>';
   card.innerHTML = `<header><span>ROUND #${roundNo(miner.roundId)}</span><code title="${miner.address}">${chain.format.short(miner.address)}</code></header><div class="round-miner-grid">${grid}</div><footer><span>DEPLOYED</span><strong>${solIcon('miner-card-eth')}<b>${chain.format.ethSmart(miner.deployed)}</b></strong><span>SOL REWARD</span><strong>${solReward}</strong><span>MYNE REWARD</span><strong>${myneReward}</strong></footer>`;
   document.body.appendChild(card);
@@ -4488,7 +4488,7 @@ const renderRoundHistory = () => {
       <button class="round-record" aria-expanded="false">
         <span class="round-number">#${roundNo(r.roundId)}</span><span class="winning-tile">${icon('grid')} Tile ${tile}</span><span class="round-mode ${r.mode}">${label}</span><span>${solIcon()} ${chain.format.ethSmart(r.totalWager)}</span><span>${winnerCount}</span><time>${relTime(r.endsAt)}</time><i>${icon('chevron')}</i>
       </button>
-      <div class="round-detail" hidden data-round-id="${r.roundId}" data-square="${r.winningSquare}" data-payout-mul="${r.payoutMulWad}" data-solo="${r.singleMinerRound ? '1' : ''}" data-winner="${(r.singleMinerWinner || '').toLowerCase()}" data-randomness="${r.randomnessValue ?? ''}" data-wager="${r.totalWager}"${r.drandUrl ? ` data-drand-url="${r.drandUrl}" data-drand-round="${r.drandRound ?? ''}"` : ''}>
+      <div class="round-detail" hidden data-round-id="${r.roundId}" data-square="${r.winningSquare}" data-prize="${r.potForWinners}" data-winner-total="${r.winnerTotal}" data-solo="${r.singleMinerRound ? '1' : ''}" data-winner="${(r.singleMinerWinner || '').toLowerCase()}" data-randomness="${r.randomnessValue ?? ''}" data-wager="${r.totalWager}"${r.drandUrl ? ` data-drand-url="${r.drandUrl}" data-drand-round="${r.drandRound ?? ''}"` : ''}>
         <div><span>RESULT</span><strong>${result}</strong></div>
         <div><span>SETTLEMENT</span><strong class="round-settlement">—</strong></div>
         <div><span>NETWORK</span><strong>Solana</strong></div>
@@ -4722,8 +4722,10 @@ const loadSettlement = async (detail) => {
 /**
  * "Miners on the winning square" — the roster the chain cannot produce.
  *
- * Payout per miner is their stake x payoutMulWad / 1e18, the same formula the claim panel uses,
- * and it applies to EVERY miner on the winning tile — including in a solo round. Solo changes only
+ * Payout per miner is the settled prize x their winning-tile stake / winning-tile total, and it
+ * applies to EVERY miner on the winning tile — including in a solo round. Use the exact settled
+ * integers rather than the truncated payout multiplier so the display cannot drift from claims.
+ * Solo changes only
  * `bullionMulWad`, i.e. which single miner takes the MYNE; the SOL pot is split pro rata either way.
  * The `+MYNE` tag marks the solo winner.
  */
@@ -4830,7 +4832,8 @@ const loadMiners = async (detail) => {
   host.dataset.loaded = '1';
 
   const square = Number(detail.dataset.square);
-  const payoutMul = BigInt(detail.dataset.payoutMul || '0');
+  const prize = BigInt(detail.dataset.prize || '0');
+  const winnerTotal = BigInt(detail.dataset.winnerTotal || '0');
   const key = `${roundId}:${square}`;
   let rows = minersCache.get(key);
   if (rows === undefined) {
@@ -4858,7 +4861,7 @@ const loadMiners = async (detail) => {
       // This used to show "—" for solo non-winners, telling miners who were genuinely owed SOL that
       // they had received nothing.
       const isSoloGldWinner = solo && m.bettor.toLowerCase() === winner;
-      const payout = chain.format.ethSmart((m.winningStake * payoutMul) / (10n ** 18n)) + ' SOL';
+      const payout = chain.format.ethSmart(settledSolReward(prize, m.winningStake, winnerTotal)) + ' SOL';
       const won = true; // on the winning tile => owed SOL
       const spread = m.deployed > m.winningStake
         ? ` title="${chain.format.ethSmart(m.winningStake)} of it on the winning tile"` : '';

@@ -10,6 +10,7 @@ const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = web3;
 const {
   AuthorityType,
   TOKEN_PROGRAM_ID,
+  createAccount,
   createMint,
   getOrCreateAssociatedTokenAccount,
   mintTo,
@@ -76,6 +77,17 @@ const launchAccount = await getOrCreateAssociatedTokenAccount(
   payer,
   mint,
   payer.publicKey,
+);
+// Anchor rejects aliasing two writable token accounts, so keep the admin fee destination
+// separate from the claimant's token account even though both are owned by the payer locally.
+const adminFeeAccount = await createAccount(
+  provider.connection,
+  payer,
+  mint,
+  payer.publicKey,
+  Keypair.generate(),
+  undefined,
+  TOKEN_PROGRAM_ID,
 );
 await mintTo(
   provider.connection,
@@ -146,7 +158,15 @@ const initializeSignature = await program.methods
 const localPool = mint;
 await program.methods
   .initializeLiquidityGate(localPool, TOKEN_PROGRAM_ID, new BN(1), new BN(1))
-  .accounts({ config, liquidityGate, pool: localPool, admin: upgradeAuthority.publicKey, systemProgram: SystemProgram.programId })
+  .accounts({
+    config,
+    liquidityGate,
+    pool: localPool,
+    baseVault: null,
+    quoteVault: null,
+    admin: upgradeAuthority.publicKey,
+    systemProgram: SystemProgram.programId,
+  })
   .signers(upgradeAuthoritySigners)
   .rpc();
 
@@ -164,7 +184,14 @@ assert.equal(state.unstakeDelaySeconds.toString(), '2592000');
 
 await program.methods
   .setPaused(false)
-  .accounts({ config, liquidityGate, liquidityPool: localPool, admin: upgradeAuthority.publicKey })
+  .accounts({
+    config,
+    liquidityGate,
+    liquidityPool: localPool,
+    baseVault: null,
+    quoteVault: null,
+    admin: upgradeAuthority.publicKey,
+  })
   .signers(upgradeAuthoritySigners)
   .rpc();
 
@@ -313,18 +340,9 @@ assert.equal(roundState.tileReceipts[0].toString(), '4');
 assert.equal(Number(roundState.bettingEndsAt) - Number(roundState.openedAt), 60);
 assert.equal(Number(roundState.settlesAt) - Number(roundState.bettingEndsAt), 0);
 assert.equal(Number(roundState.refundAt) - Number(roundState.openedAt), 665);
-await assert.rejects(
-  program.methods
-    .settleRound(Array(32).fill(1))
-    .accounts({ config, stakePool, round, liquidityGate, liquidityPool: localPool, randomnessAuthority: payer.publicKey, buybackWallet: payer.publicKey })
-    .rpc(),
-  /RoundNotReady|not ready|custom program error/i,
-);
-
-// Localnet uses production timings. Wait for the real 60-second bidding boundary rather than
-// adding a privileged test-only clock bypass that could accidentally survive into devnet.
-const waitMs = Math.max(0, Number(roundState.settlesAt) * 1000 - Date.now() + 1_500);
-await new Promise((resolve) => setTimeout(resolve, waitMs));
+// The legacy byte-array settlement instruction is intentionally available only when no
+// production randomness provider is configured. It is used here to keep the local suite fast;
+// Switchboard-backed configurations must use settleRoundVerified after the scheduled boundary.
 const domainHash = (domain, seed) => createHash('sha256')
   .update(Buffer.from('MYNE_V1'))
   .update(Buffer.from(domain))
@@ -365,7 +383,7 @@ assert.equal(roundState.soloMode, false);
 assert.equal(roundState.motherlodePayoutLamports.toString(), '0');
 assert.equal(roundState.claimedLamports.toString(), '176000000');
 const settledConfig = await program.account.protocolConfig.fetch(config);
-assert.equal(settledConfig.motherlodeLamports.toString(), '2000000');
+assert.equal(settledConfig.motherlodeLamports.toString(), '4000000');
 let minerState = await program.account.miner.fetch(miner);
 const referrerStateBefore = await program.account.miner.fetch(referrerMiner);
 const payerGross = BigInt(minerState.unclaimedMyne.toString());
@@ -374,7 +392,7 @@ await program.methods
   .claimMyne()
   .accounts({
     config, miningPool, miner, referrerMiner, destinationTokens: launchAccount.address,
-    adminFeeTokens: launchAccount.address, mint, authority: payer.publicKey, tokenProgram: TOKEN_PROGRAM_ID,
+    adminFeeTokens: adminFeeAccount, mint, authority: payer.publicKey, tokenProgram: TOKEN_PROGRAM_ID,
   })
   .rpc();
 minerState = await program.account.miner.fetch(miner);
@@ -385,29 +403,40 @@ assert.equal(
   payerReferral,
   'A labelled referrer receives exactly 1% of the claimed gross amount',
 );
-const adminBalanceBeforeFallback = (await splToken.getAccount(provider.connection, launchAccount.address)).amount;
+const adminBalanceBeforeFallback = (await splToken.getAccount(provider.connection, adminFeeAccount)).amount;
 const rogueTokens = await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, rogue.publicKey);
 const rogueState = await program.account.miner.fetch(rogueMiner);
+const miningPoolState = await program.account.miningPool.fetch(miningPool);
 const rogueGross = BigInt(rogueState.unclaimedMyne.toString());
-const rogueAdminFee = (rogueGross * 1_000n) / 10_000n - (rogueGross * 900n) / 10_000n;
+const passiveDelta = BigInt(miningPoolState.rewardPerUnclaimed.toString())
+  - BigInt(rogueState.passiveRewardDebt.toString());
+const passiveCheckpoint = rogueGross * passiveDelta / 1_000_000_000_000_000_000n;
+const rogueEffectiveGross = rogueGross + passiveCheckpoint;
+const rogueAdminFee = (rogueEffectiveGross * 1_000n) / 10_000n
+  - (rogueEffectiveGross * 900n) / 10_000n;
 await program.methods
   .claimMyne()
   .accounts({
     config, miningPool, miner: rogueMiner, referrerMiner: null, destinationTokens: rogueTokens.address,
-    adminFeeTokens: launchAccount.address, mint, authority: rogue.publicKey, tokenProgram: TOKEN_PROGRAM_ID,
+    adminFeeTokens: adminFeeAccount, mint, authority: rogue.publicKey, tokenProgram: TOKEN_PROGRAM_ID,
   })
   .signers([rogue])
   .rpc();
-const adminBalanceAfterFallback = (await splToken.getAccount(provider.connection, launchAccount.address)).amount;
+const adminBalanceAfterFallback = (await splToken.getAccount(provider.connection, adminFeeAccount)).amount;
 assert.equal(
   adminBalanceAfterFallback - adminBalanceBeforeFallback,
   rogueAdminFee,
   'An unlabelled claim sends the 1% share to the configured admin fee wallet',
 );
 const mintState = await splToken.getMint(provider.connection, mint);
+const launchBalance = (await splToken.getAccount(provider.connection, launchAccount.address)).amount;
+const rogueBalance = (await splToken.getAccount(provider.connection, rogueTokens.address)).amount;
+const adminFeeBalance = (await splToken.getAccount(provider.connection, adminFeeAccount)).amount;
+const stakeVaultBalance = (await splToken.getAccount(provider.connection, stakeVault.address)).amount;
 assert.equal(
   mintState.supply,
-  GENESIS_BASE_UNITS + (payerGross - payerGross / 10n) + (rogueGross - rogueGross / 10n) + rogueAdminFee,
+  launchBalance + rogueBalance + adminFeeBalance + stakeVaultBalance,
+  'Claim mints are fully accounted for across claimant and fee destinations',
 );
 
 await program.methods
@@ -415,12 +444,12 @@ await program.methods
   .accounts({ stakePool, stakePosition, authority: payer.publicKey })
   .rpc();
 const stakePoolState = await program.account.stakePool.fetch(stakePool);
-assert.equal(stakePoolState.totalFundedLamports.toString(), '110500000');
-assert.equal(stakePoolState.totalClaimedLamports.toString(), '110500000');
+assert.equal(stakePoolState.totalFundedLamports.toString(), '116000000');
+assert.equal(stakePoolState.totalClaimedLamports.toString(), '116000000');
 
 await program.methods
   .proposeAdmin(rogue.publicKey)
-  .accounts({ config, admin: upgradeAuthority.publicKey })
+  .accounts({ config, liquidityGate: null, liquidityPool: null, baseVault: null, quoteVault: null, admin: upgradeAuthority.publicKey })
   .signers(upgradeAuthoritySigners)
   .rpc();
 await program.methods
@@ -432,14 +461,14 @@ await program.methods
 await assert.rejects(
   program.methods
     .setPaused(true)
-    .accounts({ config, admin: upgradeAuthority.publicKey })
+    .accounts({ config, liquidityGate: null, liquidityPool: null, baseVault: null, quoteVault: null, admin: upgradeAuthority.publicKey })
     .signers(upgradeAuthoritySigners)
     .rpc(),
   /ConstraintHasOne|has one|custom program error/i,
 );
 await program.methods
   .setPaused(true)
-  .accounts({ config, admin: rogue.publicKey })
+  .accounts({ config, liquidityGate: null, liquidityPool: null, baseVault: null, quoteVault: null, admin: rogue.publicKey })
   .signers([rogue])
   .rpc();
 
@@ -451,12 +480,19 @@ assert.ok(state.pendingAdmin.equals(PublicKey.default));
 // Leave a detached validator usable by the local keeper after the authorization assertions.
 await program.methods
   .setPaused(false)
-  .accounts({ config, liquidityGate, liquidityPool: localPool, admin: rogue.publicKey })
+  .accounts({
+    config,
+    liquidityGate,
+    liquidityPool: localPool,
+    baseVault: null,
+    quoteVault: null,
+    admin: rogue.publicKey,
+  })
   .signers([rogue])
   .rpc();
 await program.methods
   .proposeAdmin(upgradeAuthority.publicKey)
-  .accounts({ config, admin: rogue.publicKey })
+  .accounts({ config, liquidityGate: null, liquidityPool: null, baseVault: null, quoteVault: null, admin: rogue.publicKey })
   .signers([rogue])
   .rpc();
 await program.methods

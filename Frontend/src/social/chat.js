@@ -74,7 +74,7 @@ export const setChatComposeEnabled = (enabled, placeholder, gateMessage = 'Conne
   chatSendButtonEl?.classList.toggle('chat-ready', enabled);
   if (chatHintEl) {
     chatHintEl.textContent = enabled
-      ? (getSession() ? 'Stickers · Enter send · Shift+Enter newline' : 'Guest chat · connect to unlock your profile')
+      ? (getSession() ? 'Stickers · Enter send · Shift+Enter newline' : 'Guest chat · connect to set your profile')
       : 'Chat unavailable';
   }
   const emptyCopy = document.querySelector('#chat-empty p');

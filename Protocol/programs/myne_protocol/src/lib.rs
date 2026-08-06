@@ -1469,7 +1469,10 @@ fn assert_liquidity_pool(
 
 #[cfg(test)]
 mod motherlode_tests {
-    use super::{motherlode_hit, motherlode_share, BURN_WEIGHT_MULTIPLIER, MOTHERLODE_ODDS};
+    use super::{
+        motherlode_hit, motherlode_share, mul_div, BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER,
+        MOTHERLODE_ODDS,
+    };
 
     #[test]
     fn motherlode_is_one_in_650_per_round() {
@@ -1484,6 +1487,31 @@ mod motherlode_tests {
         let (sol, myne) = motherlode_share(13_000, 200, 25, 100).unwrap();
         assert_eq!(sol, 3_250);
         assert_eq!(myne, 50);
+    }
+
+    #[test]
+    fn split_winning_rewards_follow_each_receipts_tile_contribution() {
+        let prize_lamports = 880_000_000;
+        let winning_tile_total = 1_000_000_000;
+        let larger_share = 900_000_000;
+        let smaller_share = 100_000_000;
+
+        assert_eq!(
+            mul_div(prize_lamports, larger_share, winning_tile_total).unwrap(),
+            792_000_000
+        );
+        assert_eq!(
+            mul_div(prize_lamports, smaller_share, winning_tile_total).unwrap(),
+            88_000_000
+        );
+        assert_eq!(
+            mul_div(BASE_ROUND_EMISSION, larger_share, winning_tile_total).unwrap(),
+            900_000_000
+        );
+        assert_eq!(
+            mul_div(BASE_ROUND_EMISSION, smaller_share, winning_tile_total).unwrap(),
+            100_000_000
+        );
     }
 
     #[test]
