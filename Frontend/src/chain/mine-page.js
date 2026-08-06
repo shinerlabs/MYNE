@@ -325,6 +325,7 @@ export const effectiveEthPerTile = (entered, tileCount = 1) => {
 
 export async function mine({
   tiles, ethPerTile, auto = false, plays = 1, fundRounds = 1, autoClaim = false,
+  rewardMode = 'accumulate',
 }) {
   if (!getAccount()) return connectWallet();
   if (!tiles.length) return notify('Select at least one tile');
@@ -335,7 +336,7 @@ export async function mine({
 
   // Auto-round doesn't bet directly — it prepays a plan the keeper executes each round, so
   // unlike a manual bet it can be set up while betting is closed (it starts next round).
-  if (auto) return configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoClaim });
+  if (auto) return configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoClaim, rewardMode });
 
   // The lottery rejects future round ids and rejects the current id after betting closes. A
   // finite one-play keeper plan is the safe on-chain queue: fund it now, execute next round.
@@ -359,7 +360,7 @@ export async function mine({
  * Set up an auto-round plan. `autoClaim` forces unlimited plays in the contract, so callers
  * must reconcile that beforehand rather than promising "N rounds with auto-claim".
  */
-async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoClaim, queueOnly = false }) {
+async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoClaim, rewardMode = 'accumulate', queueOnly = false }) {
   const unlimited = autoClaim || plays === UNLIMITED_PLAYS;
   const effectivePlays = unlimited ? UNLIMITED_PLAYS : plays;
 
@@ -389,7 +390,7 @@ async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoCla
     queueOnly
       ? 'Queuing bid for the next round…'
       : unlimited ? 'Setting up auto-round…' : `Setting up ${plays} auto rounds…`,
-    () => configurePlan({ tiles, ethPerTile, plays: effectivePlays, autoClaim, deposit }),
+    () => configurePlan({ tiles, ethPerTile, plays: effectivePlays, autoClaim, deposit, rewardMode }),
     async () => { await Promise.all([refreshPlan(), refreshMiner()]); },
   );
 }

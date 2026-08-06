@@ -3,6 +3,7 @@ import { PublicKey, Transaction } from '@solana/web3.js';
 
 import idl from '../generated/myne_protocol.json';
 import { PROGRAMS } from '../app-config.js';
+import { NETWORK } from '../app-config.js';
 import { connection } from './client.js';
 import { capabilitiesFromIdl } from './protocol-capabilities.js';
 
@@ -40,6 +41,7 @@ export const protocolPdas = Object.freeze({
   config: deriveProtocolConfigPda(),
   miningPool: PROGRAM_ID ? derivePda('mining_pool') : null,
   stakePool: PROGRAM_ID ? derivePda('stake_pool') : null,
+  liquidityGate: PROGRAM_ID ? derivePda('liquidity_gate') : null,
 });
 
 // Protocol configuration changes only through an admin transaction, so avoid fetching the same
@@ -49,6 +51,21 @@ const CONFIG_CACHE_MS = 15_000;
 let configCache = null;
 let configCacheAt = 0;
 let configRequest = null;
+const SWITCHBOARD_MAINNET_PROGRAM = 'SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv';
+
+function assertDeploymentMatchesConfig(config) {
+  if (PROGRAMS.tokenMint && !new PublicKey(config.mint).equals(new PublicKey(PROGRAMS.tokenMint))) {
+    throw new Error('Configured MYNE mint does not match the on-chain protocol config');
+  }
+  if (PROGRAMS.randomness && !new PublicKey(config.randomnessProgram).equals(new PublicKey(PROGRAMS.randomness))) {
+    throw new Error('Configured randomness program does not match the on-chain protocol config');
+  }
+  if (NETWORK.cluster === 'mainnet-beta'
+      && !new PublicKey(config.randomnessProgram).equals(new PublicKey(SWITCHBOARD_MAINNET_PROGRAM))) {
+    throw new Error('On-chain protocol is not locked to Switchboard mainnet randomness');
+  }
+  return config;
+}
 
 export async function fetchProtocolAccount(name, address) {
   const info = await connection.getAccountInfo(address, 'confirmed');
@@ -65,6 +82,7 @@ export async function getProtocolConfig({ force = false } = {}) {
     configRequest = fetchProtocolAccount('ProtocolConfig', protocolPdas.config)
       .then((config) => {
         if (!config) throw new Error('Protocol config is not initialized');
+        assertDeploymentMatchesConfig(config);
         configCache = config;
         configCacheAt = Date.now();
         return config;
@@ -137,6 +155,7 @@ export async function readProtocolStatus() {
 
   const config = coder.decode('ProtocolConfig', configAccount.data);
   if (!config.mint) throw new Error('Decoded protocol config is missing its mint');
+  assertDeploymentMatchesConfig(config);
   return {
     connected: true,
     slot,

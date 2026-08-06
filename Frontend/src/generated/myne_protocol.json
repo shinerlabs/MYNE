@@ -302,6 +302,212 @@
       "args": []
     },
     {
+      "name": "claim_auto_burn_receipt",
+      "docs": [
+        "Permissionless completion for receipts created by an Auto-burn plan.",
+        "The reward mode is committed into the receipt before the outcome is",
+        "known. Any keeper may execute this instruction, but SOL can only go to",
+        "the receipt owner and MYNE can only become that owner's non-withdrawable",
+        "5x virtual burn stake."
+      ],
+      "discriminator": [
+        107,
+        102,
+        255,
+        103,
+        109,
+        151,
+        239,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "miner",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "receipt.authority",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "receipt.authority",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.authority",
+                "account": "BetReceipt"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.nonce",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "writable": true
+        },
+        {
+          "name": "executor",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_myne",
       "discriminator": [
         43,
@@ -765,6 +971,10 @@
         {
           "name": "active",
           "type": "bool"
+        },
+        {
+          "name": "reward_mode",
+          "type": "u8"
         }
       ]
     },
@@ -848,6 +1058,10 @@
         {
           "name": "deposit_lamports",
           "type": "u64"
+        },
+        {
+          "name": "reward_mode",
+          "type": "u8"
         }
       ]
     },
@@ -3202,73 +3416,98 @@
     },
     {
       "code": 6023,
+      "name": "RandomnessNotCommitted",
+      "msg": "The randomness account was not committed to a future slot before betting"
+    },
+    {
+      "code": 6024,
       "name": "RandomnessCommittedTooLate",
       "msg": "The randomness commitment was created too late"
     },
     {
-      "code": 6024,
+      "code": 6025,
       "name": "ReceiptAlreadyProcessed",
       "msg": "The receipt has already been processed"
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "InvalidReceiptAuthority",
       "msg": "The receipt authority is invalid"
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "InsufficientBalance",
       "msg": "The requested token or SOL amount is unavailable"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "InvalidReferrer",
       "msg": "The supplied referrer is invalid"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "CooldownActive",
       "msg": "The staking cooldown has not completed"
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "InvalidStakeAuthority",
       "msg": "The staking position does not match this authority"
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "InvalidFeeDestination",
       "msg": "The provided fee destination does not match protocol configuration"
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "LiquidityPoolNotVerified",
       "msg": "A verified Meteora liquidity pool is required before unpausing"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "InvalidLiquidityPool",
       "msg": "The configured liquidity pool is invalid"
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "InvalidRound",
       "msg": "The round ID does not match this account"
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "InvalidRoundSchedule",
       "msg": "Only the current scheduled round can be opened"
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "AutoPlanAlreadyExecuted",
       "msg": "This automation plan already executed for the round"
     },
     {
-      "code": 6036,
+      "code": 6037,
       "name": "AutoPlanInactive",
       "msg": "This automation plan is inactive"
+    },
+    {
+      "code": 6038,
+      "name": "ProductionModeLocked",
+      "msg": "Production mode cannot be downgraded after mainnet randomness is selected"
+    },
+    {
+      "code": 6039,
+      "name": "InvalidStakeVault",
+      "msg": "The staking token account is not the canonical stake-pool vault"
+    },
+    {
+      "code": 6040,
+      "name": "InvalidRewardMode",
+      "msg": "The automation reward mode is invalid"
+    },
+    {
+      "code": 6041,
+      "name": "EmissionComplete",
+      "msg": "The fixed MYNE emission schedule has completed"
     }
   ],
   "types": [
@@ -3312,6 +3551,10 @@
           {
             "name": "active",
             "type": "bool"
+          },
+          {
+            "name": "reward_mode",
+            "type": "u8"
           },
           {
             "name": "amounts",
@@ -3473,6 +3716,14 @@
             "type": "u64"
           },
           {
+            "name": "reward_mode",
+            "docs": [
+              "0 = accumulate MYNE for a later user-signed claim; 1 = permissionless",
+              "auto-burn into the user's 5x virtual staking position."
+            ],
+            "type": "u8"
+          },
+          {
             "name": "claimed",
             "type": "bool"
           },
@@ -3551,6 +3802,10 @@
           },
           {
             "name": "motherlode_wallet",
+            "docs": [
+              "Reserved for account-layout compatibility. Protocol funds are never",
+              "transferred to this address."
+            ],
             "type": "pubkey"
           },
           {
@@ -3811,6 +4066,14 @@
           },
           {
             "name": "virtual_burn_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "total_emitted_base_units",
+            "docs": [
+              "Genesis plus every mining emission ever created, including virtual",
+              "burn rewards. Burns never reopen the hard issuance ceiling."
+            ],
             "type": "u64"
           }
         ]

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 
 import anchor from '@anchor-lang/core';
 import web3 from '@solana/web3.js';
@@ -18,6 +19,21 @@ const provider = AnchorProvider.env();
 setProvider(provider);
 const isLocalnet = /^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/i.test(provider.connection.rpcEndpoint);
 const isDevnet = !isLocalnet;
+
+// An OS-owned loopback listener is an automatically released process lock.
+// This prevents two demo keepers racing the same round (the cause of stale
+// local round/miner displays during testing) without leaving a stale lock file
+// behind after a crash.
+const lockPort = Number(process.env.MYNE_DEMO_KEEPER_LOCK_PORT || (isDevnet ? 17778 : 17777));
+const processLock = createServer();
+await new Promise((resolve, reject) => {
+  processLock.once('error', (error) => reject(new Error(
+    error?.code === 'EADDRINUSE'
+      ? `Another MYNE demo keeper is already running on lock port ${lockPort}`
+      : `Unable to acquire MYNE demo keeper lock: ${error.message}`,
+  )));
+  processLock.listen({ host: '127.0.0.1', port: lockPort, exclusive: true }, resolve);
+});
 if (isDevnet) {
   assert.equal(
     process.env.ALLOW_DEVNET_KEEPER,
@@ -275,6 +291,9 @@ async function executeAutoPlans(roundId) {
 }
 
 async function settleReadyRound(roundId, now, configState) {
+  // Switchboard-backed clusters are opened and settled exclusively by the
+  // verified Switchboard keeper. This demo process only supplies test bids.
+  if (!configState.randomnessProgram.equals(PublicKey.default)) return;
   const round = roundPda(roundId);
   const state = await program.account.round.fetchNullable(round);
   if (!state || state.settled) return;
@@ -315,12 +334,14 @@ async function tick() {
     const nowBig = BigInt(now);
     if (nowBig < initializedAt) return;
     const currentRoundId = (nowBig - initializedAt) / duration;
-    const round = await ensureRound(currentRoundId, now, configState);
+    const round = isDevnet
+      ? await program.account.round.fetchNullable(roundPda(currentRoundId))
+      : await ensureRound(currentRoundId, now, configState);
     await settleReadyRound(currentRoundId, now, configState);
     if (currentRoundId > 0n) await settleReadyRound(currentRoundId - 1n, now, configState);
     if (!round || now >= Number(round.bettingEndsAt)) return;
     await deployDemoMiners(currentRoundId);
-    await executeAutoPlans(currentRoundId);
+    if (!isDevnet) await executeAutoPlans(currentRoundId);
   } catch (error) {
     log('keeper-error', { message: error instanceof Error ? error.message.split('\n')[0] : String(error) });
   } finally {

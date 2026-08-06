@@ -31,7 +31,6 @@ test('buyback accepts only a direct route through the registered Meteora pool', 
     inAmount: '10000000',
     outAmount: '123456789',
     priceImpactPct: '0.12',
-    priceImpactPct: '0.12',
     routePlan: [{ swapInfo: { ammKey: poolAddress, label: METEORA_DLMM_LABEL } }],
   }, { poolAddress, inputLamports: 10000000, outputMint: 'Myne111111111111111111111111111111111111111' });
   assert.equal(checked.outputBaseUnits, '123456789');

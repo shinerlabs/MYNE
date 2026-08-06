@@ -3891,6 +3891,12 @@ body[data-route="mine"] .deploy-panel > .deploy.ready:hover {
   box-shadow: none;
 }
 
+/* Keep the auto-round control stable on hover: only the thumb/track state changes,
+   without adding a bright outline around the switch. */
+body[data-route="mine"] .configuration .auto-toggle:hover span {
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, .65), inset 0 0 0 1px rgba(255,255,255,0.0935);
+}
+
 /* Final cascade guard: center the wide Mine action regardless of panel grid rules. */
 html body[data-route="mine"] #deploy {
   display: flex !important;

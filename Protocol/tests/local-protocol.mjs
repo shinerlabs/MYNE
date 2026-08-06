@@ -112,6 +112,9 @@ await provider.connection.confirmTransaction(airdrop, 'confirmed');
 const referrer = Keypair.generate();
 const referrerAirdrop = await provider.connection.requestAirdrop(referrer.publicKey, LAMPORTS_PER_SOL);
 await provider.connection.confirmTransaction(referrerAirdrop, 'confirmed');
+const loser = Keypair.generate();
+const loserAirdrop = await provider.connection.requestAirdrop(loser.publicKey, LAMPORTS_PER_SOL);
+await provider.connection.confirmTransaction(loserAirdrop, 'confirmed');
 
 const initializeAccounts = {
   config,
@@ -171,7 +174,7 @@ await program.methods
   .rpc();
 
 let state = await program.account.protocolConfig.fetch(config);
-assert.equal(state.version, 3);
+assert.equal(state.version, 4);
 assert.equal(state.paused, true);
 assert.ok(state.admin.equals(upgradeAuthority.publicKey));
 assert.ok(state.mint.equals(mint));
@@ -219,6 +222,14 @@ const [rogueStakePosition] = PublicKey.findProgramAddressSync(
   [Buffer.from('stake_position'), rogue.publicKey.toBuffer()],
   PROGRAM_ID,
 );
+const [loserMiner] = PublicKey.findProgramAddressSync(
+  [Buffer.from('miner'), loser.publicKey.toBuffer()],
+  PROGRAM_ID,
+);
+const [loserStakePosition] = PublicKey.findProgramAddressSync(
+  [Buffer.from('stake_position'), loser.publicKey.toBuffer()],
+  PROGRAM_ID,
+);
 await program.methods
   .registerMiner(PublicKey.default)
   .accounts({
@@ -247,6 +258,14 @@ await program.methods
     referrerMiner: null, authority: rogue.publicKey, systemProgram: SystemProgram.programId,
   })
   .signers([rogue])
+  .rpc();
+await program.methods
+  .registerMiner(PublicKey.default)
+  .accounts({
+    config, miningPool, stakePool, miner: loserMiner, stakePosition: loserStakePosition,
+    referrerMiner: null, authority: loser.publicKey, systemProgram: SystemProgram.programId,
+  })
+  .signers([loser])
   .rpc();
 
 const stakeVault = await getOrCreateAssociatedTokenAccount(
@@ -294,23 +313,36 @@ await program.methods
   .rpc();
 
 const amounts = Array.from({ length: 25 }, (_, index) => new BN(index === 0 ? 50_000_000 : 0));
+const ninetyPercentShare = Array.from({ length: 25 }, (_, index) => new BN(index === 0 ? 450_000_000 : 0));
+const tenPercentShare = Array.from({ length: 25 }, (_, index) => new BN(index === 0 ? 50_000_000 : 0));
 const receiptFor = (authority, nonce) => PublicKey.findProgramAddressSync([
   Buffer.from('bet'),
   u64Buffer(roundId),
   authority.toBuffer(),
   u64Buffer(nonce),
 ], PROGRAM_ID)[0];
-for (const nonce of [new BN(10), new BN(11)]) {
-  await program.methods
-    .deploy(roundId, nonce, amounts)
-    .accounts({ config, miner, round, receipt: receiptFor(payer.publicKey, nonce), authority: payer.publicKey, systemProgram: SystemProgram.programId })
-    .rpc();
-}
+await program.methods
+  .deploy(roundId, new BN(10), ninetyPercentShare)
+  .accounts({ config, miner, round, receipt: receiptFor(payer.publicKey, new BN(10)), authority: payer.publicKey, systemProgram: SystemProgram.programId })
+  .rpc();
+await program.methods
+  .deploy(roundId, new BN(11), tenPercentShare)
+  .accounts({ config, miner, round, receipt: receiptFor(payer.publicKey, new BN(11)), authority: payer.publicKey, systemProgram: SystemProgram.programId })
+  .rpc();
 const rogueAmounts = Array.from({ length: 25 }, (_, index) => new BN(index === 0 ? 50_000_000 : 0));
 await program.methods
   .deploy(roundId, new BN(20), rogueAmounts)
   .accounts({ config, miner: rogueMiner, round, receipt: receiptFor(rogue.publicKey, new BN(20)), authority: rogue.publicKey, systemProgram: SystemProgram.programId })
   .signers([rogue])
+  .rpc();
+const losingAmounts = Array.from({ length: 25 }, (_, index) => new BN(index === 1 ? 50_000_000 : 0));
+await program.methods
+  .deploy(roundId, new BN(30), losingAmounts)
+  .accounts({
+    config, miner: loserMiner, round, receipt: receiptFor(loser.publicKey, new BN(30)),
+    authority: loser.publicKey, systemProgram: SystemProgram.programId,
+  })
+  .signers([loser])
   .rpc();
 
 const [autoPlan] = PublicKey.findProgramAddressSync(
@@ -318,7 +350,7 @@ const [autoPlan] = PublicKey.findProgramAddressSync(
   PROGRAM_ID,
 );
 await program.methods
-  .createAutoPlan(amounts, new BN('100000000'))
+  .createAutoPlan(amounts, new BN('100000000'), 1)
   .accounts({ config, autoPlan, authority: payer.publicKey, systemProgram: SystemProgram.programId })
   .rpc();
 await program.methods
@@ -334,8 +366,8 @@ await assert.rejects(
 );
 
 let roundState = await program.account.round.fetch(round);
-assert.equal(roundState.grossDeployedLamports.toString(), '200000000');
-assert.equal(roundState.tileLamports[0].toString(), '200000000');
+assert.equal(roundState.grossDeployedLamports.toString(), '650000000');
+assert.equal(roundState.tileLamports[0].toString(), '600000000');
 assert.equal(roundState.tileReceipts[0].toString(), '4');
 assert.equal(Number(roundState.bettingEndsAt) - Number(roundState.openedAt), 60);
 assert.equal(Number(roundState.settlesAt) - Number(roundState.bettingEndsAt), 0);
@@ -362,12 +394,20 @@ await program.methods
   .settleRound(randomness)
   .accounts({ config, stakePool, round, liquidityGate, liquidityPool: localPool, randomnessAuthority: payer.publicKey, buybackWallet: payer.publicKey })
   .rpc();
-for (const nonce of [new BN(10), new BN(11), new BN(0)]) {
+for (const nonce of [new BN(10), new BN(11)]) {
   await program.methods
     .claimReceipt()
     .accounts({ config, miningPool, stakePool, miner, stakePosition, round, receipt: receiptFor(payer.publicKey, nonce), authority: payer.publicKey })
     .rpc();
 }
+await program.methods
+  .claimAutoBurnReceipt()
+  .accounts({
+    config, miningPool, stakePool, miner, stakePosition, round,
+    receipt: receiptFor(payer.publicKey, new BN(0)), beneficiary: payer.publicKey,
+    executor: payer.publicKey,
+  })
+  .rpc();
 await program.methods
   .claimReceipt()
   .accounts({
@@ -376,15 +416,34 @@ await program.methods
   })
   .signers([rogue])
   .rpc();
+await program.methods
+  .claimReceipt()
+  .accounts({
+    config, miningPool, stakePool, miner: loserMiner, stakePosition: loserStakePosition, round,
+    receipt: receiptFor(loser.publicKey, new BN(30)), authority: loser.publicKey,
+  })
+  .signers([loser])
+  .rpc();
 roundState = await program.account.round.fetch(round);
 assert.equal(roundState.settled, true);
 assert.equal(roundState.winningTile, 0);
 assert.equal(roundState.soloMode, false);
 assert.equal(roundState.motherlodePayoutLamports.toString(), '0');
-assert.equal(roundState.claimedLamports.toString(), '176000000');
+assert.equal(roundState.claimedLamports.toString(), '572000000');
 const settledConfig = await program.account.protocolConfig.fetch(config);
-assert.equal(settledConfig.motherlodeLamports.toString(), '4000000');
+assert.equal(settledConfig.motherlodeLamports.toString(), '13000000');
+const autoBurnPosition = await program.account.stakePosition.fetch(stakePosition);
+assert.equal(autoBurnPosition.burnPrincipal.toString(), '83333334');
+assert.equal(autoBurnPosition.rewardWeight.toString(), '10416666670');
+const autoReceipt = await program.account.betReceipt.fetch(receiptFor(payer.publicKey, new BN(0)));
+assert.equal(autoReceipt.rewardMode, 1);
+assert.equal(autoReceipt.claimed, true);
 let minerState = await program.account.miner.fetch(miner);
+const rogueRewardState = await program.account.miner.fetch(rogueMiner);
+const loserRewardState = await program.account.miner.fetch(loserMiner);
+assert.equal(minerState.lifetimeSolClaimed.toString(), '524333333');
+assert.equal(rogueRewardState.lifetimeSolClaimed.toString(), '47666667');
+assert.equal(loserRewardState.lifetimeSolClaimed.toString(), '0');
 const referrerStateBefore = await program.account.miner.fetch(referrerMiner);
 const payerGross = BigInt(minerState.unclaimedMyne.toString());
 const payerReferral = (payerGross * 1_000n) / 10_000n - (payerGross * 900n) / 10_000n;
@@ -444,8 +503,8 @@ await program.methods
   .accounts({ stakePool, stakePosition, authority: payer.publicKey })
   .rpc();
 const stakePoolState = await program.account.stakePool.fetch(stakePool);
-assert.equal(stakePoolState.totalFundedLamports.toString(), '116000000');
-assert.equal(stakePoolState.totalClaimedLamports.toString(), '116000000');
+assert.equal(stakePoolState.totalFundedLamports.toString(), '152000000');
+assert.equal(stakePoolState.totalClaimedLamports.toString(), '152000000');
 
 await program.methods
   .proposeAdmin(rogue.publicKey)

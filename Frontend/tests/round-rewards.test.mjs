@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { displayedMotherlodeSol, settledSolReward, sharedRoundReward } from '../src/chain/round-rewards.js';
+import { displayedMotherlodeSol, intervalReward, settledSolReward, sharedRoundReward } from '../src/chain/round-rewards.js';
 
 test('winning miners share the settled 88% SOL prize pool by winning-tile stake', () => {
   const grossRound = 1_000_000_000n;
@@ -38,10 +38,20 @@ test('five-miner round pays only the two winning miners pro rata', () => {
   assert.equal(rewards.reduce((sum, value) => sum + value, 0n), prize);
 });
 
-test('Motherlode displays exactly 1% of total deployed mining while a round is open', () => {
-  assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_000n, false), 14_400_000n);
-  assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_099n, false), 14_400_000n);
-  assert.equal(displayedMotherlodeSol(14_400_000n, 440_000_000n, true), 14_400_000n);
+test('cumulative intervals assign every integer unit without reward dust', () => {
+  const shares = [
+    intervalReward(11n, 0n, 1n, 3n),
+    intervalReward(11n, 1n, 1n, 3n),
+    intervalReward(11n, 2n, 1n, 3n),
+  ];
+  assert.deepEqual(shares, [3n, 4n, 4n]);
+  assert.equal(shares.reduce((sum, value) => sum + value, 0n), 11n);
+});
+
+test('Motherlode displays exactly 2% of total deployed mining while a round is open', () => {
+  assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_000n, false), 18_800_000n);
+  assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_099n, false), 18_800_001n);
+  assert.equal(displayedMotherlodeSol(18_800_000n, 440_000_000n, true), 18_800_000n);
 });
 
 test('Motherlode payout is shared by total round deployment, not the winning tile', () => {

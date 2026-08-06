@@ -91,6 +91,9 @@ pub struct BetReceipt {
     pub amounts: [u64; TILE_COUNT],
     pub cumulative_starts: [u64; TILE_COUNT],
     pub total_lamports: u64,
+    /// 0 = accumulate MYNE for a later user-signed claim; 1 = permissionless
+    /// auto-burn into the user's 5x virtual staking position.
+    pub reward_mode: u8,
     pub claimed: bool,
     pub refunded: bool,
 }
@@ -101,6 +104,7 @@ pub struct AutoPlan {
     pub bump: u8,
     pub authority: Pubkey,
     pub active: bool,
+    pub reward_mode: u8,
     pub amounts: [u64; TILE_COUNT],
     pub balance_lamports: u64,
     pub next_nonce: u64,

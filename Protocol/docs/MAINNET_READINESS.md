@@ -1,95 +1,77 @@
 # MYNE mainnet readiness review
 
 **Review date:** 2026-08-06  
-**Outcome:** Not approved for mainnet deployment
+**Outcome:** Code-complete deployment candidate; launch approval remains gated by external rehearsal and independent review
 
-The local implementation builds and the protocol unit suite passes, but the current system is a
-paused/devnet milestone. The following gates must be closed before any mainnet transaction or
-liquidity funding. A multisig is not required for this project; the authority section records the
-single-developer operating model and its key-management requirements.
+The program, clients and keepers build and pass the local suites. No Mainnet transaction was
+authorized or submitted by this review. The remaining gates depend on live Switchboard/Meteora
+accounts, production infrastructure, legal review and an independent security reviewer; they
+cannot be honestly replaced by more local code.
 
 ## Implemented and locally verified
 
-- Anchor program with mining receipts, settlement, claims, referrals, staking, auto-round plans,
-  liquidity pause gate, hard-cap checks and no freeze authority.
-- 12% mining allocation: 8% staking, 2% buyback/burn, 2% Motherlode.
-- 10% MYNE claim fee: 9% unclaimed balances and 1% referrer, with the configured fallback wallet
-  for wallets without a referrer.
-- Buyback keeper in dry-run by default, with registered-pool/direct-route checks, spend caps,
-  reserve protection, swap simulation, burn simulation, per-round accounting and durable retry
-  state.
-- Local Rust checks: `cargo fmt`, `cargo check`, `cargo clippy`, `cargo test`, and `anchor build`.
-- Local Rust unit tests: 6 passed. Frontend tests: 18 passed. Buyback policy tests: 2 passed.
+- Anchor mining receipts, round settlement, claims, referrals, staking, auto-round/auto-burn,
+  immutable fee constants, a hard issuance ceiling, pause control and no freeze authority.
+- 12% mining allocation: 8% staking, 2% buyback/burn and 2% Motherlode.
+- 10% liquid-MYNE claim fee: 9% to remaining unclaimed balances and 1% to the permanent referrer,
+  with the configured fallback wallet used when no referrer exists.
+- Exact cumulative-interval reward allocation. Every integer SOL/MYNE unit is assigned without
+  operator dust; frontend miner calculations use the same rule.
+- Switchboard pre-bid account commitment/binding, exact seed-slot binding, same-transaction
+  reveal/settlement, exact owner/authority validation and a one-way Mainnet provider lock.
+- Mainnet activation and every settlement revalidate the canonical Meteora DLMM pool reserve PDAs,
+  MYNE/WSOL mints and minimum reserves.
+- Buyback keeper is dry-run by default and enforces the registered direct Meteora route, spend and
+  slippage caps, reserve protection, swap/burn simulation, signed-transaction crash recovery,
+  sequential round accounting and a durable journal in live mode.
+- Local demo keeper is single-instance, preventing the multi-keeper races that previously caused
+  the round header, history and miners list to diverge.
+- Rust: formatting, Clippy with warnings denied, 11 unit tests, successful SBF deployment and full
+  local integration. Frontend: 22 tests and production build. Keeper policy/dependency tests: 4.
+  Current npm production audit: no known vulnerabilities.
 
-## Critical blockers
+## External launch gates
 
-### 1. Randomness provider integration is implemented but not yet production-tested
+### 1. Live Switchboard rehearsal
 
-The production path now binds a Switchboard On-Demand randomness account before deployments,
-parses the pinned account discriminator/owner, requires a committed seed, and consumes the value
-only in its reveal slot. `settle_round` remains available only when the configured provider is the
-default key, which is an explicit local/devnet legacy mode. The keeper still needs to create and
-commit a fresh Switchboard account, submit the reveal and call `settle_round_verified` in the same
-slot. `scripts/switchboard-round-keeper.mjs` now rehearses account creation, commit, round opening
-and binding, then waits for the settlement window and submits reveal plus
-`settle_round_verified` atomically. Auto-round execution now has the same randomness-binding
-requirement, and binding is restricted to `config.randomness_authority`. Devnet tests must cover
-stale reveals, wrong account binding, wrong owner, replay and missed-reveal recovery before this
-gate can be closed.
+Run the exact production request/commit/open/bind/reveal/settle sequence on a live cluster. Exercise
+wrong owner, wrong binding, stale reveal, replay, duplicate settlement and missed-reveal/refund
+recovery. The on-chain checks and one-shot keeper exist; this gate proves the external service and
+operator setup.
 
-### 2. Mainnet liquidity gate now verifies the configured Meteora DLMM and live vault reserves
+### 2. Final Meteora pool does not exist yet
 
-Mainnet registration requires the canonical Meteora DLMM program, MYNE and wrapped SOL vault
-accounts, matching mints, and minimum live vault balances. Mainnet unpause and verified settlement
-re-check those same vaults, so withdrawing liquidity pauses the production path. Devnet's
-Switchboard provider mode intentionally bypasses this gate; its buyback keeper records the 2%
-allocation but skips swaps until a pool is registered. The pool-to-vault association still depends
-on the designated admin supplying the pool's official vault accounts and remains a mainnet launch
-check.
+The program accepts only the canonical Meteora DLMM program and reserve PDAs and rechecks reserves
+at activation and settlement. After the official MYNE/WSOL pool is created, independently verify
+the pool, both vaults, mint order and thresholds before the single unpause activation.
 
-### 3. Buyback/burn remains an operational keeper
+### 3. Keeper hosting and keys
 
-The program transfers 2% SOL to `buyback_wallet`; the swap and burn happen later in a Node keeper
-through Jupiter. The keeper now calculates each settled round's exact 2% allocation, persists
-partial progress, retries safely after restart, and simulates both swap and burn before signing.
-Mainnet still needs monitored hosting, secret-manager or hardware signing, balance alerts, API
-outage behavior, slippage circuit breakers, and an incident response plan.
+Run the Switchboard and buyback keepers under a supervisor with durable storage, restricted online
+keys, alerts, RPC/Jupiter outage handling and an incident pause procedure. The single-developer
+upgrade authority should be offline/hardware-backed and separate from the admin and keeper keys.
 
-### 4. The round/randomness keeper flow is implemented but needs an operational deployment
+### 4. Independent security and legal review
 
-`local-keeper.mjs` remains deliberately locked to localnet/devnet. The Switchboard keeper now
-opens, commits, binds, waits, reveals and settles one round atomically. Mainnet still needs a
-supervised service that runs this flow continuously, executes funded auto-plans, and monitors
-missed or failed transactions. It must be idempotent, observable and safe to restart.
+This is a financial protocol with paid chance-based settlement and token issuance. Commission an
+independent Solana/Anchor audit, adversarial testing and jurisdiction-specific legal review before
+accepting public funds.
 
-### 5. Production authority model needs explicit sign-off
+RustSec found no vulnerable Rust crate; it reported the upstream maintenance-status warning for
+Solana's `bincode 1.x`. GitHub's unpatched native `bigint-buffer` advisory was removed from the
+keeper graph with a local, bounds-safe, pure-JavaScript compatibility shim, after which npm reported
+no known production vulnerabilities.
 
-You have confirmed that MYNE will be operated by a single developer rather than a multisig. That is
-an acceptable product decision, but the upgrade authority, protocol admin, randomness signer and fee
-wallets must still be separate, documented, hardware-backed or otherwise protected production keys.
-The current scripts and local fixtures use single file-backed wallets and must not be reused for
-mainnet.
+## Required launch sequence
 
-### 6. External audit and fuzzing are outstanding
+1. Complete the live Switchboard failure rehearsal and keeper monitoring drill.
+2. Deploy the exact recorded SBF artifact and verify program ID, ProgramData and upgrade authority.
+3. Create the 9-decimal mint: exactly 100 MYNE, no freeze authority, config PDA mint authority.
+4. Initialize paused with the Mainnet Switchboard program and reviewed destinations.
+5. Create and independently verify the official Meteora MYNE/WSOL pool and register its gate.
+6. Run dry-run buyback quotes, then a tiny controlled swap/burn canary.
+7. Snapshot every address and state account, unpause once, and verify a full round before publicity.
+8. Publish program ID, mint, IDL/binary hashes, authority disclosure and incident procedure.
 
-This is a financial protocol with chance-based settlement and token issuance. A professional audit
-and adversarial/fuzz testing are required before launch. `cargo audit` could not refresh its advisory
-database in this environment because the Cargo advisory path is read-only, so dependency status is
-not independently verified here.
-
-## Required next sequence
-
-1. Write and rehearse the production round/randomness keeper, then choose and integrate the
-   randomness provider; add adversarial tests for bias, replay,
-   stale fulfilment and duplicate settlement.
-2. Implement and test real Meteora pool verification, including MYNE/SOL mint ordering and reserve
-   thresholds. Keep the protocol paused until the verifier passes.
-3. Deploy a disposable devnet pool and run multi-round tests covering mining, claims, referrals,
-   staking, Motherlode, keeper buyback/burn and failure/retry paths.
-4. Move upgrade/admin/keeper/treasury authority to the approved governance setup and rehearse key
-   rotation and pause recovery.
-5. Produce a verifiable build, publish the IDL/hash, complete an independent audit, and only then
-   authorize a separately confirmed mainnet deployment.
-
-No mainnet deployment or mainnet funds should be attempted until every critical blocker above is
-closed and explicitly signed off.
+Follow `docs/MAINNET_LAUNCH_RUNBOOK.md`. “Deployment candidate” does not mean independently audited
+or guaranteed safe; Mainnet funds should not be accepted until every external gate is signed off.

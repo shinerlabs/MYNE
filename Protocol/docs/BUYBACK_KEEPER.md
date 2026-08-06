@@ -47,6 +47,7 @@ MIN_BUYBACK_SOL=0.01
 BUYBACK_SLIPPAGE_BPS=100
 MAX_PRIORITY_LAMPORTS=500000
 BUYBACK_INTERVAL_MS=60000
+BUYBACK_START_ROUND=0
 BUYBACK_STATE_PATH=/secure/keeper-data/myne-buyback-state.json
 ```
 
@@ -54,6 +55,10 @@ The buyback signer must be the wallet configured as `buyback_wallet`; do not use
 authority or personal wallet. Keep its keypair outside the repository, preferably in a secret
 manager or hardware-backed signer. Start with `--once` and `DRY_RUN=1`, inspect the quoted pool,
 price impact, and amount, then enable live mode only after a devnet smoke test.
+
+`BUYBACK_START_ROUND` is used only when creating a new journal. Set it to the first production
+round (normally `0`). Thereafter the durable journal advances sequentially, including across
+outages, so earlier allocations cannot be skipped merely because the keeper restarted later.
 
 ## Review status
 

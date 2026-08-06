@@ -164,6 +164,68 @@ body[data-route="about"] .about-nav button[data-about-section].active::before {
 
 body[data-route="about"] .about-nav-toggle { display: none !important; }
 
+body[data-route="about"] .address-status {
+  width: fit-content;
+  margin: 0 0 18px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.045);
+  color: #919399;
+  font: 650 9px/1 var(--font-mono);
+  letter-spacing: .035em;
+}
+body[data-route="about"] .address-status.verified { color: #dcf9ed; background: rgba(72,210,160,.09); }
+body[data-route="about"] .address-status.verified::before { content: "●"; margin-right: 7px; color: #55d7a6; }
+body[data-route="about"] .address-ledger { display: grid; margin: 0 0 18px; }
+body[data-route="about"] .address-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(155px,.72fr) minmax(260px,1.45fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 70px;
+  padding: 12px 2px;
+  border-top: 1px solid rgba(255,255,255,.075);
+}
+body[data-route="about"] .address-row[data-address-group] { margin-top: 20px; }
+body[data-route="about"] .address-row[data-address-group]::before {
+  content: attr(data-address-group);
+  position: absolute;
+  left: 2px;
+  top: -16px;
+  color: #686a70;
+  font: 750 7px/1 var(--font-sans);
+  letter-spacing: .16em;
+}
+body[data-route="about"] .address-row > div:first-child { display: grid; gap: 5px; min-width: 0; }
+body[data-route="about"] .address-row > div:first-child span { color: #ededee; font: 650 11px/1.2 var(--font-sans); }
+body[data-route="about"] .address-row > div:first-child small { color: #85878c; font: 500 9px/1.4 var(--font-sans); }
+body[data-route="about"] .address-row code {
+  min-width: 0;
+  color: #c9cbd0;
+  font: 550 10px/1.45 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+body[data-route="about"] .address-row code.pending { color: #6f7176; font-style: italic; }
+body[data-route="about"] .address-actions { display: flex; align-items: center; gap: 6px; }
+body[data-route="about"] .address-actions button,
+body[data-route="about"] .address-actions a {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255,255,255,.055);
+  color: #a9abb0;
+  font: 650 8px/1 var(--font-sans);
+  text-decoration: none;
+}
+body[data-route="about"] .address-actions button:hover,
+body[data-route="about"] .address-actions a:hover { background: rgba(255,255,255,.1); color: #f4f4f5; }
+body[data-route="about"] .address-disclosure { margin-top: 22px; }
+
 @media (max-width: 860px) {
   body[data-route="about"] .about-shell.page-view.active { width: min(100% - 24px, 760px); padding-top: 18px; }
   body[data-route="about"] .about-shell > .feature-hero { min-height: 80px; }
@@ -179,4 +241,7 @@ body[data-route="about"] .about-nav-toggle { display: none !important; }
   body[data-route="about"] .about-section .about-lead { font-size: 13px; }
   body[data-route="about"] .about-staking-history { height: 154px; padding: 12px 12px 8px; }
   body[data-route="about"] .about-staking-history .staking-history-plot { height: 101px; }
+  body[data-route="about"] .address-row { grid-template-columns: 1fr; gap: 8px; padding: 15px 2px; }
+  body[data-route="about"] .address-actions { justify-content: flex-start; }
+  body[data-route="about"] .address-row code { font-size: 9px; }
 }

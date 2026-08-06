@@ -25,7 +25,7 @@ export let genesisTime = BigInt(ENV.VITE_GENESIS_TIME || Math.floor(Date.now() /
 export const setGenesisTime = (value) => { genesisTime = BigInt(value); };
 export const economics = Object.freeze({
   protocolFeeBps: 1200, stakingBps: 800, buybackBps: 200, motherlodeBps: 200,
-  administrationBps: 0, liquidityPoolTaxBps: 400,
+  administrationBps: 0, liquidityPoolTaxBps: 0,
   minimumRoundLamports: '50000000', stakingRewardAsset: 'SOL',
 });
 export const MIN_ROUND_DEPLOYMENT = BigInt(economics.minimumRoundLamports);

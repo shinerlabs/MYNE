@@ -1,9 +1,10 @@
 import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
+import bs58 from 'bs58';
 
 import { connection, getAccount } from './client.js';
 import { GRID, MIN_ROUND_DEPLOYMENT, setGenesisTime } from './config.js';
 import { parseEther } from './units.js';
-import { settledSolReward, sharedRoundReward } from './round-rewards.js';
+import { intervalReward } from './round-rewards.js';
 import { roundIdsForRange } from './round-range.js';
 import {
   asBn, decodeProtocolAccount, derivePda, fetchProtocolAccount, getProtocolConfig, getWritableProgram,
@@ -42,16 +43,22 @@ const receiptPda = (roundId, authority, nonce) => derivePda(
 
 // getProgramAccounts needs the program ID, not a config PDA. Keep the scan local and decode-only;
 // production history moves to the configured indexer, while balances remain account-verifiable.
-let receiptScan = null;
-let receiptScanAt = 0;
-let receiptScanRequest = null;
+const receiptScans = new Map();
 const RECEIPT_CACHE_MS = 5_000;
-async function decodedReceipts() {
-  if (receiptScan && Date.now() - receiptScanAt < RECEIPT_CACHE_MS) return receiptScan;
-  if (receiptScanRequest) return receiptScanRequest;
+// 8-byte discriminator + BetReceipt::INIT_SPACE. Keep this asserted in the
+// protocol capability tests whenever the receipt schema changes.
+const BET_RECEIPT_ACCOUNT_SIZE = 468;
+async function decodedReceipts({ roundId = null, authority = null } = {}) {
   if (!protocolProgramId) return [];
-  receiptScanRequest = (async () => {
-    const accounts = await connection.getProgramAccounts(protocolProgramId, { commitment: 'confirmed' });
+  const cacheKey = `${roundId ?? '*'}:${authority ?? '*'}`;
+  const cached = receiptScans.get(cacheKey);
+  if (cached?.data && Date.now() - cached.at < RECEIPT_CACHE_MS) return cached.data;
+  if (cached?.request) return cached.request;
+  const request = (async () => {
+    const filters = [{ dataSize: BET_RECEIPT_ACCOUNT_SIZE }];
+    if (roundId !== null) filters.push({ memcmp: { offset: 9, bytes: bs58.encode(u64Seed(roundId)) } });
+    if (authority) filters.push({ memcmp: { offset: 17, bytes: new PublicKey(authority).toBase58() } });
+    const accounts = await connection.getProgramAccounts(protocolProgramId, { commitment: 'confirmed', filters });
     const decoded = [];
     for (const entry of accounts) {
       try {
@@ -61,18 +68,19 @@ async function decodedReceipts() {
     }
     return decoded;
   })();
+  receiptScans.set(cacheKey, { request, at: 0, data: null });
   try {
-    receiptScan = await receiptScanRequest;
-    receiptScanAt = Date.now();
-    return receiptScan;
+    const data = await request;
+    receiptScans.set(cacheKey, { request: null, at: Date.now(), data });
+    return data;
   } finally {
-    receiptScanRequest = null;
+    const current = receiptScans.get(cacheKey);
+    if (current?.request === request) receiptScans.set(cacheKey, { ...current, request: null });
   }
 }
 
 export const invalidateReceiptCache = () => {
-  receiptScan = null;
-  receiptScanAt = 0;
+  receiptScans.clear();
 };
 
 const roundFromAccount = (roundId, account) => {
@@ -154,7 +162,7 @@ export function netClaimable({ grossMined, refinedAccrued = 0n }) { return gross
 
 export async function readMyBets(roundId, address) {
   const totals = Array(GRID).fill(0n);
-  for (const { account } of await decodedReceipts()) {
+  for (const { account } of await decodedReceipts({ roundId, authority: address })) {
     if (toBig(account.roundId) !== BigInt(roundId) || !account.authority.equals(new PublicKey(address))) continue;
     account.amounts.forEach((amount, index) => { totals[index] += toBig(amount); });
   }
@@ -206,7 +214,7 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
 
 async function claimableReceipts(roundIds, authority) {
   const wanted = new Set(roundIds.map((id) => BigInt(id).toString()));
-  return (await decodedReceipts()).filter(({ account }) => wanted.has(toBig(account.roundId).toString())
+  return (await decodedReceipts({ authority })).filter(({ account }) => wanted.has(toBig(account.roundId).toString())
     && account.authority.equals(new PublicKey(authority)) && !account.claimed && !account.refunded);
 }
 
@@ -252,7 +260,7 @@ export async function withdrawUnrefined() {
 
 export async function readRoundWinners(roundId) {
   const round = await readRound(roundId);
-  const receiptRows = (await decodedReceipts()).filter(({ account }) => toBig(account.roundId) === BigInt(roundId));
+  const receiptRows = await decodedReceipts({ roundId });
   const miners = aggregateMiners(receiptRows);
   if (!round.resolved || round.winningSquare >= GRID) {
     return { winningSquare: round.winningSquare, winnerTotal: round.winnerTotal, solo: false, winners: [], miners };
@@ -270,16 +278,37 @@ export async function readRoundWinners(roundId) {
     soloWinner = receipt?.account.authority.toBase58() ?? null;
   }
   const enriched = miners.map((miner) => {
+    const minerReceipts = receiptRows.filter(({ account }) => account.authority.toBase58() === miner.address);
     const winningStake = miner.tileBets[winningSquare] ?? 0n;
     const onWinningTile = winningStake > 0n && round.winnerTotal > 0n;
     const isSoloWinner = round.singleMinerRound && soloWinner === miner.address;
-    const solReward = settledSolReward(round.potForWinners, winningStake, round.winnerTotal);
-    const motherlodeSolReward = sharedRoundReward(round.motherlodePayoutLamports, miner.deployed, round.totalWager);
+    const solReward = minerReceipts.reduce((sum, { account }) => sum + intervalReward(
+      round.potForWinners,
+      account.cumulativeStarts[winningSquare],
+      account.amounts[winningSquare],
+      round.winnerTotal,
+    ), 0n);
+    const motherlodeSolReward = minerReceipts.reduce((sum, { account }) => sum + intervalReward(
+      round.motherlodePayoutLamports,
+      account.cumulativeStarts.reduce((total, value) => total + toBig(value), 0n),
+      account.totalLamports,
+      round.totalWager,
+    ), 0n);
     const baseBullionReward = !onWinningTile ? 0n
       : round.singleMinerRound ? (isSoloWinner ? round.bullionForWinners : 0n)
-        : (round.bullionForWinners * winningStake) / round.winnerTotal;
+        : minerReceipts.reduce((sum, { account }) => sum + intervalReward(
+          round.bullionForWinners,
+          account.cumulativeStarts[winningSquare],
+          account.amounts[winningSquare],
+          round.winnerTotal,
+        ), 0n);
     const motherlodeBullionReward = round.jackpotHit && round.totalWager > 0n
-      ? sharedRoundReward(round.motherlodeEmission, miner.deployed, round.totalWager)
+      ? minerReceipts.reduce((sum, { account }) => sum + intervalReward(
+        round.motherlodeEmission,
+        account.cumulativeStarts.reduce((total, value) => total + toBig(value), 0n),
+        account.totalLamports,
+        round.totalWager,
+      ), 0n)
       : 0n;
     const bullionReward = baseBullionReward + motherlodeBullionReward;
     return {
@@ -344,7 +373,7 @@ function aggregateMiners(receiptRows) {
 }
 
 export async function readRoundMiners(roundId) {
-  const rows = (await decodedReceipts()).filter(({ account }) => toBig(account.roundId) === BigInt(roundId));
+  const rows = await decodedReceipts({ roundId });
   return aggregateMiners(rows);
 }
 export async function readRecentRounds(latestRoundId, lookback = 80) { return readRoundsRange(BigInt(latestRoundId) - BigInt(lookback), latestRoundId); }
@@ -366,7 +395,7 @@ export async function readRoundsRange(fromId, toId, maxScan = 2000) {
   return { rounds, truncated };
 }
 export async function readExpectedRewards(rounds, address) {
-  const receipts = await decodedReceipts();
+  const receipts = address ? await decodedReceipts({ authority: address }) : [];
   const authority = address ? new PublicKey(address) : null;
   const expected = new Map();
   for (const round of rounds) {
@@ -378,11 +407,14 @@ export async function readExpectedRewards(rounds, address) {
     }
     const roundReceipts = receipts.filter(({ account }) => toBig(account.roundId) === BigInt(round.roundId) && !account.refunded);
     const mine = roundReceipts.filter(({ account }) => account.authority.equals(authority));
-    const mineTotal = mine.reduce((sum, { account }) => sum + toBig(account.totalLamports), 0n);
     let reward = 0n;
     if (winningSquare >= 0 && winningSquare < GRID && round.winnerTotal > 0n) {
-      const winningStake = mine.reduce((sum, { account }) => sum + toBig(account.amounts[winningSquare]), 0n);
-      if (!round.singleMinerRound) reward = (round.bullionForWinners * winningStake) / round.winnerTotal;
+      if (!round.singleMinerRound) reward = mine.reduce((sum, { account }) => sum + intervalReward(
+        round.bullionForWinners,
+        account.cumulativeStarts[winningSquare],
+        account.amounts[winningSquare],
+        round.winnerTotal,
+      ), 0n);
       else if (round.singleMinerWinner) reward = round.singleMinerWinner === authority.toBase58() ? round.bullionForWinners : 0n;
       else {
         const soloSample = round.soloSample === undefined || round.soloSample === null ? null : toBig(round.soloSample);
@@ -394,7 +426,12 @@ export async function readExpectedRewards(rounds, address) {
         reward = soloReceipt?.account.authority.equals(authority) ? round.bullionForWinners : 0n;
       }
     }
-    if (round.jackpotHit) reward += sharedRoundReward(round.motherlodeEmission, mineTotal, round.totalWager);
+    if (round.jackpotHit) reward += mine.reduce((sum, { account }) => sum + intervalReward(
+      round.motherlodeEmission,
+      account.cumulativeStarts.reduce((total, value) => total + toBig(value), 0n),
+      account.totalLamports,
+      round.totalWager,
+    ), 0n);
     expected.set(key, reward);
   }
   return expected;
@@ -404,9 +441,9 @@ export async function readRoundIndexAtResolve(rounds) {
 }
 export async function readSettlementTx() { return null; }
 export async function readWinnerCounts(rounds) {
-  const receipts = await decodedReceipts();
   const counts = new Map();
   for (const round of rounds) {
+    const receipts = await decodedReceipts({ roundId: round.roundId });
     const winners = new Set();
     const square = Number(round.winningSquare);
     let soloWinner = null;
@@ -448,7 +485,7 @@ export async function readMyClaimStatus(rounds, address) {
     rounds.forEach((round) => statuses.set(String(round.roundId), { myBet: 0n, claimed: false }));
     return statuses;
   }
-  const receipts = await decodedReceipts();
+  const receipts = await decodedReceipts({ authority: address });
   const authority = new PublicKey(address);
   for (const round of rounds) {
     const square = Number(round.winningSquare);

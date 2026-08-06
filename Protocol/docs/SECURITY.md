@@ -26,7 +26,9 @@ No MYNE program should reach mainnet until every gate below is satisfied.
 
 ## Operational gates
 
-- Use a hardware-backed multisig for upgrade and treasury authority.
+- Use an offline/hardware-backed key for the single-developer upgrade authority, and separate it
+  from the online admin, Switchboard keeper and buyback keeper keys. A multisig is not part of the
+  chosen operating model; that makes backups, access logging and tested key rotation mandatory.
 - Keep deployment keys out of the repository and frontend environment files.
 - Fund and rehearse devnet deployment from a dedicated deployer.
 - Publish program ID, mint, IDL hash, build provenance and authority addresses.

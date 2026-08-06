@@ -58,10 +58,11 @@ selected tile, allowing a Solo winner to prove its random ticket without iterati
 Local/devnet decisions:
 
 1. A wallet may submit any number of separate receipt deployments in a round.
-2. Integer division dust stays in the round account pending a permissionless dust-sweep milestone.
-3. Local/devnet settlement uses the configured trusted randomness signer. Devnet's Switchboard
-   provider mode does not require a Meteora pool; Mainnet remains pool-gated and uses the verified
-   Switchboard settlement path.
+2. Integer rewards use cumulative interval allocation. Adjacent receipt intervals telescope, so
+   the final receipt receives the rounding remainder and the entire SOL/MYNE pool is accounted for.
+3. Local settlement alone may use the configured trusted signer. Devnet and Mainnet use a bound
+   Switchboard commit/reveal account and verified settlement. Devnet does not require a Meteora
+   pool; Mainnet remains pool-gated.
 4. Unsettled receipts become fully refundable ten minutes after the normal settlement time.
 5. The 0.2 MYNE staking bonus is virtual until a Motherlode hit. It is never a liquid or claimable
    token balance: when claimed alongside the SOL payment, it is permanently burned and becomes
@@ -144,8 +145,9 @@ the MYNE program in this milestone. The current on-chain fee schedule is limited
 ## Randomness and settlement
 
 Recent blockhashes, timestamps and validator-controlled values are not acceptable randomness.
-Mining should use a provider-neutral request record, but production deployment must pin one audited
-oracle integration and verify callbacks against its program ID and request account.
+Production pins Switchboard On-Demand. A randomness account must be committed to a future seed
+slot and bound before bids are accepted; reveal and settlement occur atomically, and settlement
+checks the exact owner, authority, account, seed slot, reveal slot and value.
 
 Every request stores the round/roll identity before randomness exists. Fulfilment is one-shot.
 Settlement derives domain-separated values for tile, Split/Solo mode, Solo ticket and Motherlode
@@ -153,15 +155,14 @@ hit so one draw is not reused ambiguously.
 
 ## Indexing
 
-Solana programs do not offer EVM-style historical log scans through the frontend adapters. Emit
-structured Anchor events for deployments, resolution, claims, referrals and staking. A
-read-only indexer supplies history, leaderboards and charts; all balances and claim eligibility
-remain verifiable against program accounts.
+The frontend performs scoped PDA/account reads for authoritative recent rounds, receipts, balances
+and claim eligibility. Structured Anchor events permit a read-only indexer to accelerate long-term
+history and charts without becoming a source of truth.
 
-## Upgrade and operations policy — required before devnet
+## Upgrade and operations policy — required before Mainnet
 
 - Upgrade authority owner and custody method.
-- Admin multisig addresses and signer threshold.
+- Single-developer admin address, offline backup and rotation procedure.
 - Pause scope; pause must not block user withdrawals/claims unless strictly necessary.
 - Oracle authority and recovery procedure.
 - Treasury destinations and whether they are program vaults or multisigs.

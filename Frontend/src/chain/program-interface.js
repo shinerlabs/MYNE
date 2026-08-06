@@ -46,6 +46,7 @@ export const MYNE_INSTRUCTIONS = Object.freeze({
   fundAutoPlan: 'fund_auto_plan',
   cancelAutoPlan: 'cancel_auto_plan',
   executeAutoPlan: 'execute_auto_plan',
+  claimAutoBurnReceipt: 'claim_auto_burn_receipt',
 });
 
 const parsePublicKey = (value, label) => {

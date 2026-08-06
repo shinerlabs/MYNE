@@ -55,8 +55,11 @@ Run `./scripts/check-devnet-readiness.sh` before a deployment. The detailed sequ
 conditions are in [`docs/DEVNET_TESTING.md`](docs/DEVNET_TESTING.md), and the current security scope
 is recorded in [`docs/REVIEW_2026-08-05.md`](docs/REVIEW_2026-08-05.md).
 
-## Safety boundary
+## Mainnet-candidate boundary
 
-Do not deploy this milestone to mainnet. Devnet still uses a trusted randomness signer, the
-Meteora pool is an external deployment step, and professional audit/fuzzing plus production key
-management remain required.
+The checked-in code is a deployment candidate, not an authorization to launch. Production uses
+the verified Switchboard commit/reveal path and a canonical Meteora DLMM reserve gate; the legacy
+caller-supplied randomness instruction is limited to configs whose randomness program is the
+default key. Before funding Mainnet, complete the external Switchboard/Meteora rehearsal,
+independent security review, legal review, and production-key/keeper setup in
+[`docs/MAINNET_LAUNCH_RUNBOOK.md`](docs/MAINNET_LAUNCH_RUNBOOK.md).

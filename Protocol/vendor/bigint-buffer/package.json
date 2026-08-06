@@ -1,0 +1,8 @@
+{
+  "name": "bigint-buffer",
+  "version": "1.1.6-myne.1",
+  "description": "Pure-JavaScript, bounds-safe bigint/buffer conversion shim for MYNE keepers",
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "license": "MIT"
+}

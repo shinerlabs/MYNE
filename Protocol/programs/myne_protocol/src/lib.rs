@@ -20,7 +20,7 @@ pub const MINER_SEED: &[u8] = b"miner";
 pub const STAKE_POSITION_SEED: &[u8] = b"stake_position";
 pub const ROUND_SEED: &[u8] = b"round";
 pub const BET_SEED: &[u8] = b"bet";
-pub const CURRENT_VERSION: u8 = 3;
+pub const CURRENT_VERSION: u8 = 4;
 pub const MYNE_DECIMALS: u8 = 9;
 pub const GENESIS_TOKENS: u64 = 100;
 pub const MAX_TOKENS: u64 = 2_000_000;
@@ -36,6 +36,8 @@ pub const GENESIS_BASE_UNITS: u64 = GENESIS_TOKENS * 1_000_000_000;
 pub const BASE_ROUND_EMISSION: u64 = 1_000_000_000;
 pub const MOTHERLODE_ROUND_EMISSION: u64 = 200_000_000;
 pub const BURN_WEIGHT_MULTIPLIER: u64 = 5;
+pub const AUTO_REWARD_ACCUMULATE: u8 = 0;
+pub const AUTO_REWARD_BURN: u8 = 1;
 
 // Switchboard On-Demand randomness account identifiers. The account layout is
 // intentionally parsed locally so the protocol does not depend on an Anchor
@@ -51,8 +53,12 @@ pub const SWITCHBOARD_MAINNET_PROGRAM: Pubkey =
 /// satisfy the liquidity gate.
 pub const METEORA_DLMM_PROGRAM: Pubkey = pubkey!("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo");
 pub const WRAPPED_SOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+pub const ASSOCIATED_TOKEN_PROGRAM: Pubkey =
+    pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 const SWITCHBOARD_RANDOMNESS_DISCRIMINATOR: [u8; 8] = [10, 66, 229, 135, 220, 239, 217, 114];
-const SWITCHBOARD_RANDOMNESS_ACCOUNT_SIZE: usize = 408;
+// Smallest stable prefix used below: discriminator through the 32-byte value.
+// Switchboard may append reserved fields without invalidating this parser.
+const SWITCHBOARD_RANDOMNESS_ACCOUNT_PREFIX_SIZE: usize = 184;
 
 #[program]
 pub mod myne_protocol {
@@ -118,6 +124,9 @@ pub mod myne_protocol {
         config.randomness_authority = args.randomness_authority;
         config.randomness_program = args.randomness_program;
         config.buyback_wallet = args.buyback_wallet;
+        // Reserved configuration field retained for versioned account-layout
+        // compatibility. Motherlode SOL remains in the config PDA and is paid
+        // directly to eligible receipt owners; no fee is transferred here.
         config.motherlode_wallet = args.motherlode_wallet;
         config.admin_fee_wallet = args.admin_fee_wallet;
         config.initialized_at = Clock::get()?.unix_timestamp;
@@ -130,6 +139,7 @@ pub mod myne_protocol {
         config.motherlode_base_units = 0;
         config.motherlode_lamports = 0;
         config.virtual_burn_base_units = 0;
+        config.total_emitted_base_units = GENESIS_BASE_UNITS;
 
         let mining_pool = &mut ctx.accounts.mining_pool;
         mining_pool.bump = ctx.bumps.mining_pool;
@@ -208,6 +218,8 @@ pub mod myne_protocol {
                 myne_vault.amount >= min_myne_base_units && sol_vault.amount >= min_sol_lamports,
                 MyneError::InvalidLiquidityPool
             );
+            assert_meteora_reserve(pool, myne_vault.key(), myne_vault.mint)?;
+            assert_meteora_reserve(pool, sol_vault.key(), sol_vault.mint)?;
         }
         require!(
             ctx.accounts.pool.key() == pool,
@@ -338,6 +350,16 @@ pub mod myne_protocol {
                 || randomness_program == SWITCHBOARD_MAINNET_PROGRAM,
             MyneError::InvalidRandomnessAccount
         );
+        // Production is a one-way transition. Once mainnet Switchboard is
+        // selected, an administrator cannot downgrade to caller-supplied or
+        // devnet randomness and thereby bypass the mainnet liquidity gate.
+        if ctx.accounts.config.randomness_program == SWITCHBOARD_MAINNET_PROGRAM {
+            require_keys_eq!(
+                randomness_program,
+                SWITCHBOARD_MAINNET_PROGRAM,
+                MyneError::ProductionModeLocked
+            );
+        }
         ctx.accounts.config.randomness_program = randomness_program;
         emit!(RandomnessProgramChanged { randomness_program });
         Ok(())
@@ -393,6 +415,10 @@ pub mod myne_protocol {
 
     pub fn open_round(ctx: Context<OpenRound>, round_id: u64) -> Result<()> {
         require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        require!(
+            ctx.accounts.config.total_emitted_base_units < max_supply_base_units()?,
+            MyneError::EmissionComplete
+        );
         let now = Clock::get()?.unix_timestamp;
         let round_offset_seconds = round_id
             .checked_mul(ctx.accounts.config.round_duration_seconds)
@@ -477,16 +503,28 @@ pub mod myne_protocol {
             ctx.accounts.config.randomness_authority,
             MyneError::InvalidRandomnessAuthority
         );
+        require_keys_eq!(
+            parsed.authority,
+            ctx.accounts.config.randomness_authority,
+            MyneError::InvalidRandomnessAuthority
+        );
         require!(
             parsed.reveal_slot == 0 || parsed.reveal_slot > clock.slot,
             MyneError::RandomnessNotResolved
+        );
+        // A randomness account must already be committed to a future slot
+        // before it can be bound. Accepting an uncommitted account here would
+        // let its authority choose when to commit after seeing the bids.
+        require!(
+            parsed.seed_slot > clock.slot,
+            MyneError::RandomnessNotCommitted
         );
         require!(
             ctx.accounts.round.randomness_account == Pubkey::default(),
             MyneError::RandomnessNotBound
         );
         ctx.accounts.round.randomness_account = ctx.accounts.randomness_account.key();
-        ctx.accounts.round.randomness_commit_slot = clock.slot;
+        ctx.accounts.round.randomness_commit_slot = parsed.seed_slot;
         Ok(())
     }
 
@@ -525,6 +563,7 @@ pub mod myne_protocol {
         receipt.amounts = amounts;
         receipt.cumulative_starts = round.tile_lamports;
         receipt.total_lamports = total;
+        receipt.reward_mode = AUTO_REWARD_ACCUMULATE;
         receipt.claimed = false;
         receipt.refunded = false;
         for (index, amount) in amounts.iter().enumerate() {
@@ -558,6 +597,7 @@ pub mod myne_protocol {
         ctx: Context<CreateAutoPlan>,
         amounts: [u64; TILE_COUNT],
         deposit_lamports: u64,
+        reward_mode: u8,
     ) -> Result<()> {
         require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         let per_round = checked_sum(&amounts)?;
@@ -566,9 +606,14 @@ pub mod myne_protocol {
             MyneError::DeploymentTooSmall
         );
         let plan = &mut ctx.accounts.auto_plan;
+        require!(
+            reward_mode <= AUTO_REWARD_BURN,
+            MyneError::InvalidRewardMode
+        );
         plan.bump = ctx.bumps.auto_plan;
         plan.authority = ctx.accounts.authority.key();
         plan.active = true;
+        plan.reward_mode = reward_mode;
         plan.amounts = amounts;
         plan.balance_lamports = deposit_lamports;
         plan.next_nonce = 0;
@@ -600,14 +645,20 @@ pub mod myne_protocol {
         ctx: Context<ManageAutoPlan>,
         amounts: [u64; TILE_COUNT],
         active: bool,
+        reward_mode: u8,
     ) -> Result<()> {
         let per_round = checked_sum(&amounts)?;
         require!(
             per_round >= ctx.accounts.config.minimum_round_lamports,
             MyneError::DeploymentTooSmall
         );
+        require!(
+            reward_mode <= AUTO_REWARD_BURN,
+            MyneError::InvalidRewardMode
+        );
         ctx.accounts.auto_plan.amounts = amounts;
         ctx.accounts.auto_plan.active = active;
+        ctx.accounts.auto_plan.reward_mode = reward_mode;
         emit!(AutoPlanConfigured {
             authority: ctx.accounts.authority.key(),
             per_round_lamports: per_round,
@@ -687,8 +738,10 @@ pub mod myne_protocol {
         );
         let amounts = ctx.accounts.auto_plan.amounts;
         let total = checked_sum(&amounts)?;
+        let receipt_rent = Rent::get()?.minimum_balance(8 + BetReceipt::INIT_SPACE);
+        let required_balance = checked_add(total, receipt_rent)?;
         require!(
-            ctx.accounts.auto_plan.balance_lamports >= total,
+            ctx.accounts.auto_plan.balance_lamports >= required_balance,
             MyneError::InsufficientBalance
         );
 
@@ -700,6 +753,7 @@ pub mod myne_protocol {
         receipt.amounts = amounts;
         receipt.cumulative_starts = ctx.accounts.round.tile_lamports;
         receipt.total_lamports = total;
+        receipt.reward_mode = ctx.accounts.auto_plan.reward_mode;
         receipt.claimed = false;
         receipt.refunded = false;
         for (index, amount) in amounts.iter().enumerate() {
@@ -720,11 +774,19 @@ pub mod myne_protocol {
             &ctx.accounts.round.to_account_info(),
             total,
         )?;
+        // Anchor's `init` charges the permissionless executor for the receipt.
+        // Reimburse only the protocol-determined rent from the user's funded
+        // plan so long-running automation does not drain the keeper wallet.
+        move_lamports(
+            &ctx.accounts.auto_plan.to_account_info(),
+            &ctx.accounts.executor.to_account_info(),
+            receipt_rent,
+        )?;
         ctx.accounts.auto_plan.balance_lamports = ctx
             .accounts
             .auto_plan
             .balance_lamports
-            .checked_sub(total)
+            .checked_sub(required_balance)
             .ok_or(MyneError::ArithmeticOverflow)?;
         ctx.accounts.auto_plan.next_nonce = checked_add(ctx.accounts.auto_plan.next_nonce, 1)?;
         ctx.accounts.auto_plan.last_round = round_id;
@@ -748,6 +810,17 @@ pub mod myne_protocol {
             Pubkey::default(),
             MyneError::RandomnessProviderRequired
         );
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        require_keys_eq!(
+            ctx.accounts.randomness_authority.key(),
+            ctx.accounts.config.randomness_authority,
+            MyneError::InvalidRandomnessAuthority
+        );
+        require_keys_eq!(
+            ctx.accounts.buyback_wallet.key(),
+            ctx.accounts.config.buyback_wallet,
+            MyneError::InvalidFeeDestination
+        );
         let liquidity_pool = ctx
             .accounts
             .liquidity_pool
@@ -767,6 +840,7 @@ pub mod myne_protocol {
     }
 
     pub fn settle_round_verified(ctx: Context<SettleRoundVerified>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         require!(!ctx.accounts.round.settled, MyneError::RoundAlreadySettled);
         let now = Clock::get()?.unix_timestamp;
         require!(
@@ -788,8 +862,13 @@ pub mod myne_protocol {
             &ctx.accounts.randomness_account.to_account_info(),
             &ctx.accounts.config.randomness_program,
         )?;
+        require_keys_eq!(
+            randomness.authority,
+            ctx.accounts.config.randomness_authority,
+            MyneError::InvalidRandomnessAuthority
+        );
         require!(
-            randomness.seed_slot >= ctx.accounts.round.randomness_commit_slot,
+            randomness.seed_slot == ctx.accounts.round.randomness_commit_slot,
             MyneError::RandomnessCommittedTooLate
         );
         require!(
@@ -974,44 +1053,10 @@ pub mod myne_protocol {
         checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
 
-        let tile = ctx.accounts.round.winning_tile as usize;
-        let amount = ctx.accounts.receipt.amounts[tile];
-        let winning_total = ctx.accounts.round.tile_lamports[tile];
-        let mut sol_reward = 0;
-        let mut myne_reward = 0;
-        let mut motherlode_reward = 0;
-        let mut motherlode_sol_reward = 0;
-        if amount > 0 && winning_total > 0 {
-            sol_reward = mul_div(ctx.accounts.round.prize_lamports, amount, winning_total)?;
-            if ctx.accounts.round.solo_mode {
-                let start = ctx.accounts.receipt.cumulative_starts[tile];
-                let end = checked_add(start, amount)?;
-                if ctx.accounts.round.solo_sample >= start && ctx.accounts.round.solo_sample < end {
-                    myne_reward = ctx.accounts.round.base_emission;
-                    motherlode_reward = ctx.accounts.round.motherlode_emission;
-                }
-            } else {
-                myne_reward = mul_div(ctx.accounts.round.base_emission, amount, winning_total)?;
-                motherlode_reward = mul_div(
-                    ctx.accounts.round.motherlode_emission,
-                    amount,
-                    winning_total,
-                )?;
-            }
-        }
-        // A Motherlode hit is a round-wide shared payout. It is independent of the winning tile
-        // and the normal solo/split mode: every miner receives their share of total round SOL.
-        let (shared_sol_reward, shared_motherlode_reward) = motherlode_share(
-            ctx.accounts.round.motherlode_payout_lamports,
-            ctx.accounts.round.motherlode_emission,
-            ctx.accounts.receipt.total_lamports,
-            ctx.accounts.round.gross_deployed_lamports,
-        )?;
-        if shared_sol_reward > 0 || shared_motherlode_reward > 0 {
-            motherlode_sol_reward = shared_sol_reward;
-            motherlode_reward = shared_motherlode_reward;
-        }
-        sol_reward = checked_add(sol_reward, motherlode_sol_reward)?;
+        let rewards = receipt_rewards(&ctx.accounts.round, &ctx.accounts.receipt)?;
+        let sol_reward = rewards.sol_lamports;
+        let myne_reward = rewards.myne_base_units;
+        let motherlode_reward = rewards.motherlode_base_units;
         if sol_reward > 0 {
             move_lamports(
                 &ctx.accounts.round.to_account_info(),
@@ -1023,32 +1068,27 @@ pub mod myne_protocol {
             ctx.accounts.miner.lifetime_sol_claimed =
                 checked_add(ctx.accounts.miner.lifetime_sol_claimed, sol_reward)?;
         }
-        if myne_reward > 0 {
+        if myne_reward > 0 && ctx.accounts.receipt.reward_mode == AUTO_REWARD_ACCUMULATE {
             ctx.accounts.miner.unclaimed_myne =
                 checked_add(ctx.accounts.miner.unclaimed_myne, myne_reward)?;
             ctx.accounts.mining_pool.total_unclaimed =
                 checked_add(ctx.accounts.mining_pool.total_unclaimed, myne_reward)?;
             distribute_mining_rewards(&mut ctx.accounts.mining_pool, 0)?;
         }
-        if motherlode_reward > 0 {
-            let weight = motherlode_reward
-                .checked_mul(BURN_WEIGHT_MULTIPLIER)
-                .ok_or(MyneError::ArithmeticOverflow)?;
-            ctx.accounts.stake_position.burn_principal = checked_add(
-                ctx.accounts.stake_position.burn_principal,
-                motherlode_reward,
-            )?;
-            ctx.accounts.stake_position.reward_weight =
-                checked_add(ctx.accounts.stake_position.reward_weight, weight)?;
-            ctx.accounts.stake_pool.total_burn =
-                checked_add(ctx.accounts.stake_pool.total_burn, motherlode_reward)?;
-            ctx.accounts.stake_pool.total_weight =
-                checked_add(ctx.accounts.stake_pool.total_weight, weight)?;
-            ctx.accounts.config.virtual_burn_base_units = checked_add(
-                ctx.accounts.config.virtual_burn_base_units,
-                motherlode_reward,
-            )?;
-            fund_stake_rewards(&mut ctx.accounts.stake_pool, 0)?;
+        let burn_reward = if ctx.accounts.receipt.reward_mode == AUTO_REWARD_BURN {
+            checked_add(myne_reward, motherlode_reward)?
+        } else {
+            motherlode_reward
+        };
+        add_virtual_burn(
+            &mut ctx.accounts.config,
+            &mut ctx.accounts.stake_pool,
+            &mut ctx.accounts.stake_position,
+            burn_reward,
+        )?;
+        if ctx.accounts.receipt.reward_mode == AUTO_REWARD_BURN {
+            ctx.accounts.miner.lifetime_myne_claimed =
+                checked_add(ctx.accounts.miner.lifetime_myne_claimed, myne_reward)?;
         }
         ctx.accounts.receipt.claimed = true;
         emit!(ReceiptClaimed {
@@ -1058,6 +1098,68 @@ pub mod myne_protocol {
             sol_lamports: sol_reward,
             myne_base_units: myne_reward,
             motherlode_base_units: motherlode_reward
+        });
+        Ok(())
+    }
+
+    /// Permissionless completion for receipts created by an Auto-burn plan.
+    /// The reward mode is committed into the receipt before the outcome is
+    /// known. Any keeper may execute this instruction, but SOL can only go to
+    /// the receipt owner and MYNE can only become that owner's non-withdrawable
+    /// 5x virtual burn stake.
+    pub fn claim_auto_burn_receipt(ctx: Context<ClaimAutoBurnReceipt>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        require!(ctx.accounts.round.settled, MyneError::RoundNotReady);
+        require!(
+            !ctx.accounts.receipt.claimed && !ctx.accounts.receipt.refunded,
+            MyneError::ReceiptAlreadyProcessed
+        );
+        require!(
+            ctx.accounts.receipt.reward_mode == AUTO_REWARD_BURN,
+            MyneError::InvalidRewardMode
+        );
+        require_keys_eq!(
+            ctx.accounts.receipt.authority,
+            ctx.accounts.beneficiary.key(),
+            MyneError::InvalidReceiptAuthority
+        );
+        require!(
+            ctx.accounts.receipt.round_id == ctx.accounts.round.id,
+            MyneError::InvalidRound
+        );
+        checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
+        checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
+        let rewards = receipt_rewards(&ctx.accounts.round, &ctx.accounts.receipt)?;
+        if rewards.sol_lamports > 0 {
+            move_lamports(
+                &ctx.accounts.round.to_account_info(),
+                &ctx.accounts.beneficiary.to_account_info(),
+                rewards.sol_lamports,
+            )?;
+            ctx.accounts.round.claimed_lamports =
+                checked_add(ctx.accounts.round.claimed_lamports, rewards.sol_lamports)?;
+            ctx.accounts.miner.lifetime_sol_claimed = checked_add(
+                ctx.accounts.miner.lifetime_sol_claimed,
+                rewards.sol_lamports,
+            )?;
+        }
+        let burned = checked_add(rewards.myne_base_units, rewards.motherlode_base_units)?;
+        add_virtual_burn(
+            &mut ctx.accounts.config,
+            &mut ctx.accounts.stake_pool,
+            &mut ctx.accounts.stake_position,
+            burned,
+        )?;
+        ctx.accounts.miner.lifetime_myne_claimed =
+            checked_add(ctx.accounts.miner.lifetime_myne_claimed, burned)?;
+        ctx.accounts.receipt.claimed = true;
+        emit!(ReceiptClaimed {
+            round_id: ctx.accounts.round.id,
+            authority: ctx.accounts.beneficiary.key(),
+            nonce: ctx.accounts.receipt.nonce,
+            sol_lamports: rewards.sol_lamports,
+            myne_base_units: rewards.myne_base_units,
+            motherlode_base_units: rewards.motherlode_base_units,
         });
         Ok(())
     }
@@ -1134,6 +1236,12 @@ pub mod myne_protocol {
     pub fn stake_standard(ctx: Context<StakeTokens>, amount: u64) -> Result<()> {
         require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         require!(amount > 0, MyneError::InsufficientBalance);
+        assert_canonical_stake_vault(
+            ctx.accounts.vault_tokens.key(),
+            ctx.accounts.stake_pool.key(),
+            ctx.accounts.mint.key(),
+            ctx.accounts.token_program.key(),
+        )?;
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
         token_interface::transfer_checked(
             CpiContext::new(
@@ -1256,6 +1364,12 @@ pub mod myne_protocol {
             Clock::get()?.unix_timestamp >= ctx.accounts.stake_position.cooldown_unlock_at,
             MyneError::CooldownActive
         );
+        assert_canonical_stake_vault(
+            ctx.accounts.vault_tokens.key(),
+            ctx.accounts.stake_pool.key(),
+            ctx.accounts.mint.key(),
+            ctx.accounts.token_program.key(),
+        )?;
         let amount = ctx.accounts.stake_position.cooldown_amount;
         let signer: &[&[&[u8]]] = &[&[STAKE_POOL_SEED, &[ctx.accounts.stake_pool.bump]]];
         token_interface::transfer_checked(
@@ -1345,9 +1459,7 @@ pub mod myne_protocol {
         // The fallback path mints the 1% admin allocation separately when no
         // referrer exists, so both mint legs must fit under the hard cap.
         let total_mint = checked_add(net, admin_fee)?;
-        let max_supply = GENESIS_BASE_UNITS
-            .checked_mul(MAX_TOKENS / GENESIS_TOKENS)
-            .ok_or(MyneError::ArithmeticOverflow)?;
+        let max_supply = max_supply_base_units()?;
         require!(
             ctx.accounts
                 .mint
@@ -1408,6 +1520,11 @@ fn checked_sum(values: &[u64; TILE_COUNT]) -> Result<u64> {
         .iter()
         .try_fold(0u64, |sum, value| checked_add(sum, *value))
 }
+fn max_supply_base_units() -> Result<u64> {
+    GENESIS_BASE_UNITS
+        .checked_mul(MAX_TOKENS / GENESIS_TOKENS)
+        .ok_or_else(|| error!(MyneError::ArithmeticOverflow))
+}
 fn mul_div(value: u64, numerator: u64, denominator: u64) -> Result<u64> {
     require!(denominator > 0, MyneError::ArithmeticOverflow);
     let result = (value as u128)
@@ -1418,30 +1535,112 @@ fn mul_div(value: u64, numerator: u64, denominator: u64) -> Result<u64> {
     u64::try_from(result).map_err(|_| error!(MyneError::ArithmeticOverflow))
 }
 
+/// Allocate a receipt's exact slice of an integer pool using cumulative
+/// boundaries. Adjacent receipts telescope, so the final receipt receives any
+/// rounding remainder and the whole pool is accounted for.
+fn proportional_interval_share(
+    pool: u64,
+    cumulative_start: u64,
+    amount: u64,
+    denominator: u64,
+) -> Result<u64> {
+    require!(denominator > 0, MyneError::ArithmeticOverflow);
+    let cumulative_end = checked_add(cumulative_start, amount)?;
+    require!(cumulative_end <= denominator, MyneError::ArithmeticOverflow);
+    mul_div(pool, cumulative_end, denominator)?
+        .checked_sub(mul_div(pool, cumulative_start, denominator)?)
+        .ok_or_else(|| error!(MyneError::ArithmeticOverflow))
+}
+
 /// Shares a Motherlode hit across every receipt in proportion to that receipt's
 /// total round deployment. The SOL and MYNE legs use the same denominator, so
 /// each claimant receives both awards atomically during `claim_receipt`.
-fn motherlode_share(
-    payout_lamports: u64,
-    emission_base_units: u64,
-    receipt_total_lamports: u64,
-    round_total_lamports: u64,
-) -> Result<(u64, u64)> {
-    if payout_lamports == 0 || round_total_lamports == 0 || receipt_total_lamports == 0 {
-        return Ok((0, 0));
+struct ReceiptRewards {
+    sol_lamports: u64,
+    myne_base_units: u64,
+    motherlode_base_units: u64,
+}
+
+fn receipt_rewards(round: &Round, receipt: &BetReceipt) -> Result<ReceiptRewards> {
+    let tile = round.winning_tile as usize;
+    require!(tile < TILE_COUNT, MyneError::InvalidRound);
+    let amount = receipt.amounts[tile];
+    let winning_total = round.tile_lamports[tile];
+    let mut sol_lamports = 0;
+    let mut myne_base_units = 0;
+    let mut motherlode_base_units = 0;
+    if amount > 0 && winning_total > 0 {
+        let tile_start = receipt.cumulative_starts[tile];
+        sol_lamports =
+            proportional_interval_share(round.prize_lamports, tile_start, amount, winning_total)?;
+        if round.solo_mode {
+            let start = tile_start;
+            let end = checked_add(start, amount)?;
+            if round.solo_sample >= start && round.solo_sample < end {
+                myne_base_units = round.base_emission;
+            }
+        } else {
+            myne_base_units = proportional_interval_share(
+                round.base_emission,
+                tile_start,
+                amount,
+                winning_total,
+            )?;
+        }
     }
-    Ok((
-        mul_div(
-            payout_lamports,
-            receipt_total_lamports,
-            round_total_lamports,
-        )?,
-        mul_div(
-            emission_base_units,
-            receipt_total_lamports,
-            round_total_lamports,
-        )?,
-    ))
+    // Motherlode SOL and staking-bonus MYNE are round-wide and always shared
+    // by total deployment, independent of the normal winning tile.
+    let round_start = receipt
+        .cumulative_starts
+        .iter()
+        .try_fold(0u64, |sum, value| checked_add(sum, *value))?;
+    let shared_sol = if round.gross_deployed_lamports > 0 {
+        proportional_interval_share(
+            round.motherlode_payout_lamports,
+            round_start,
+            receipt.total_lamports,
+            round.gross_deployed_lamports,
+        )?
+    } else {
+        0
+    };
+    let shared_myne = if round.gross_deployed_lamports > 0 {
+        proportional_interval_share(
+            round.motherlode_emission,
+            round_start,
+            receipt.total_lamports,
+            round.gross_deployed_lamports,
+        )?
+    } else {
+        0
+    };
+    sol_lamports = checked_add(sol_lamports, shared_sol)?;
+    motherlode_base_units = checked_add(motherlode_base_units, shared_myne)?;
+    Ok(ReceiptRewards {
+        sol_lamports,
+        myne_base_units,
+        motherlode_base_units,
+    })
+}
+
+fn add_virtual_burn(
+    config: &mut Account<ProtocolConfig>,
+    stake_pool: &mut Account<StakePool>,
+    stake_position: &mut Account<StakePosition>,
+    amount: u64,
+) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+    let weight = amount
+        .checked_mul(BURN_WEIGHT_MULTIPLIER)
+        .ok_or(MyneError::ArithmeticOverflow)?;
+    stake_position.burn_principal = checked_add(stake_position.burn_principal, amount)?;
+    stake_position.reward_weight = checked_add(stake_position.reward_weight, weight)?;
+    stake_pool.total_burn = checked_add(stake_pool.total_burn, amount)?;
+    stake_pool.total_weight = checked_add(stake_pool.total_weight, weight)?;
+    config.virtual_burn_base_units = checked_add(config.virtual_burn_base_units, amount)?;
+    fund_stake_rewards(stake_pool, 0)
 }
 
 fn motherlode_hit(sample: u64) -> bool {
@@ -1491,6 +1690,8 @@ fn assert_liquidity_pool(
             WRAPPED_SOL_MINT,
             MyneError::InvalidLiquidityPool
         );
+        assert_meteora_reserve(gate.pool, base_vault.key(), base_vault.mint)?;
+        assert_meteora_reserve(gate.pool, quote_vault.key(), quote_vault.mint)?;
         require!(
             base_vault.amount >= gate.min_myne_base_units
                 && quote_vault.amount >= gate.min_sol_lamports,
@@ -1500,10 +1701,34 @@ fn assert_liquidity_pool(
     Ok(())
 }
 
+/// Meteora DLMM reserve accounts are PDAs with seeds `[lb_pair, token_mint]`.
+/// Binding both reserve addresses prevents an unrelated funded token account
+/// from being paired with a genuine Meteora-owned pool account.
+fn assert_meteora_reserve(pool: Pubkey, reserve: Pubkey, mint: Pubkey) -> Result<()> {
+    let (expected, _) =
+        Pubkey::find_program_address(&[pool.as_ref(), mint.as_ref()], &METEORA_DLMM_PROGRAM);
+    require_keys_eq!(reserve, expected, MyneError::InvalidLiquidityPool);
+    Ok(())
+}
+
+fn assert_canonical_stake_vault(
+    vault: Pubkey,
+    stake_pool: Pubkey,
+    mint: Pubkey,
+    token_program: Pubkey,
+) -> Result<()> {
+    let (expected, _) = Pubkey::find_program_address(
+        &[stake_pool.as_ref(), token_program.as_ref(), mint.as_ref()],
+        &ASSOCIATED_TOKEN_PROGRAM,
+    );
+    require_keys_eq!(vault, expected, MyneError::InvalidStakeVault);
+    Ok(())
+}
+
 #[cfg(test)]
 mod motherlode_tests {
     use super::{
-        checked_bps, liquidity_gate_required, motherlode_hit, motherlode_share, mul_div,
+        checked_bps, liquidity_gate_required, motherlode_hit, mul_div, proportional_interval_share,
         BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER, MINING_PROTOCOL_FEE_BPS, MOTHERLODE_ODDS,
         SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
     };
@@ -1528,7 +1753,8 @@ mod motherlode_tests {
 
     #[test]
     fn motherlode_shares_sol_and_myne_by_total_deployment() {
-        let (sol, myne) = motherlode_share(13_000, 200, 25, 100).unwrap();
+        let sol = proportional_interval_share(13_000, 0, 25, 100).unwrap();
+        let myne = proportional_interval_share(200, 0, 25, 100).unwrap();
         assert_eq!(sol, 3_250);
         assert_eq!(myne, 50);
     }
@@ -1575,8 +1801,17 @@ mod motherlode_tests {
     }
 
     #[test]
+    fn cumulative_allocation_distributes_every_integer_unit() {
+        let first = proportional_interval_share(11, 0, 1, 3).unwrap();
+        let second = proportional_interval_share(11, 1, 1, 3).unwrap();
+        let third = proportional_interval_share(11, 2, 1, 3).unwrap();
+        assert_eq!((first, second, third), (3, 4, 4));
+        assert_eq!(first + second + third, 11);
+    }
+
+    #[test]
     fn empty_motherlode_share_is_zero_and_burn_weight_is_five_x() {
-        assert_eq!(motherlode_share(13_000, 200, 0, 100).unwrap(), (0, 0));
+        assert_eq!(proportional_interval_share(13_000, 0, 0, 100).unwrap(), 0);
         assert_eq!(
             200_000_000u64.checked_mul(BURN_WEIGHT_MULTIPLIER).unwrap(),
             1_000_000_000
@@ -1667,13 +1902,23 @@ fn settle_round_core(
         motherlode_fee,
     )?;
     config.motherlode_lamports = checked_add(config.motherlode_lamports, motherlode_fee)?;
-    config.motherlode_base_units =
-        checked_add(config.motherlode_base_units, MOTHERLODE_ROUND_EMISSION)?;
+    let remaining_emission = max_supply_base_units()?
+        .checked_sub(config.total_emitted_base_units)
+        .ok_or(MyneError::ArithmeticOverflow)?;
+    let motherlode_emission = remaining_emission.min(MOTHERLODE_ROUND_EMISSION);
+    let remaining_after_motherlode = remaining_emission
+        .checked_sub(motherlode_emission)
+        .ok_or(MyneError::ArithmeticOverflow)?;
     round.base_emission = if winning_total > 0 {
-        BASE_ROUND_EMISSION
+        remaining_after_motherlode.min(BASE_ROUND_EMISSION)
     } else {
         0
     };
+    config.motherlode_base_units = checked_add(config.motherlode_base_units, motherlode_emission)?;
+    config.total_emitted_base_units = checked_add(
+        config.total_emitted_base_units,
+        checked_add(motherlode_emission, round.base_emission)?,
+    )?;
     if winning_total == 0 {
         let rollover = round.prize_lamports;
         move_lamports(
@@ -1716,6 +1961,7 @@ fn liquidity_gate_required(randomness_program: Pubkey) -> bool {
 }
 
 struct SwitchboardRandomness {
+    authority: Pubkey,
     seed_slot: u64,
     reveal_slot: u64,
     value: [u8; 32],
@@ -1738,13 +1984,15 @@ fn parse_switchboard_randomness(
         .try_borrow_data()
         .map_err(|_| error!(MyneError::InvalidRandomnessAccount))?;
     require!(
-        data.len() >= SWITCHBOARD_RANDOMNESS_ACCOUNT_SIZE,
+        data.len() >= SWITCHBOARD_RANDOMNESS_ACCOUNT_PREFIX_SIZE,
         MyneError::InvalidRandomnessAccount
     );
     require!(
         data[..8] == SWITCHBOARD_RANDOMNESS_DISCRIMINATOR,
         MyneError::InvalidRandomnessAccount
     );
+    let authority =
+        Pubkey::try_from(&data[8..40]).map_err(|_| error!(MyneError::InvalidRandomnessAccount))?;
     let seed_slot = u64::from_le_bytes(
         data[104..112]
             .try_into()
@@ -1758,6 +2006,7 @@ fn parse_switchboard_randomness(
     let mut value = [0u8; 32];
     value.copy_from_slice(&data[152..184]);
     Ok(SwitchboardRandomness {
+        authority,
         seed_slot,
         reveal_slot,
         value,
@@ -1862,6 +2111,8 @@ pub struct InitializeArgs {
     /// settlement by the verified instruction.
     pub randomness_program: Pubkey,
     pub buyback_wallet: Pubkey,
+    /// Reserved for account-layout compatibility. Protocol funds are never
+    /// transferred to this address.
     pub motherlode_wallet: Pubkey,
     pub admin_fee_wallet: Pubkey,
 }
@@ -1890,6 +2141,9 @@ pub struct ProtocolConfig {
     pub motherlode_base_units: u64,
     pub motherlode_lamports: u64,
     pub virtual_burn_base_units: u64,
+    /// Genesis plus every mining emission ever created, including virtual
+    /// burn rewards. Burns never reopen the hard issuance ceiling.
+    pub total_emitted_base_units: u64,
 }
 
 #[account]
@@ -2123,6 +2377,27 @@ pub struct ClaimReceipt<'info> {
     pub receipt: Box<Account<'info, BetReceipt>>,
     #[account(mut)]
     pub authority: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct ClaimAutoBurnReceipt<'info> {
+    #[account(mut, seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[MINING_POOL_SEED], bump=mining_pool.bump)]
+    pub mining_pool: Box<Account<'info, MiningPool>>,
+    #[account(mut, seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
+    pub stake_pool: Box<Account<'info, StakePool>>,
+    #[account(mut, seeds=[MINER_SEED, receipt.authority.as_ref()], bump=miner.bump, constraint=miner.authority == receipt.authority @ MyneError::InvalidReceiptAuthority)]
+    pub miner: Account<'info, Miner>,
+    #[account(mut, seeds=[STAKE_POSITION_SEED, receipt.authority.as_ref()], bump=stake_position.bump, constraint=stake_position.authority == receipt.authority @ MyneError::InvalidReceiptAuthority)]
+    pub stake_position: Account<'info, StakePosition>,
+    #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(mut, seeds=[BET_SEED, &round.id.to_le_bytes(), receipt.authority.as_ref(), &receipt.nonce.to_le_bytes()], bump=receipt.bump)]
+    pub receipt: Box<Account<'info, BetReceipt>>,
+    /// CHECK: Must be the immutable receipt owner; receives SOL only.
+    #[account(mut, constraint=beneficiary.key() == receipt.authority @ MyneError::InvalidReceiptAuthority)]
+    pub beneficiary: UncheckedAccount<'info>,
+    pub executor: Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct RefundReceipt<'info> {

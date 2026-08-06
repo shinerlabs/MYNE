@@ -152,7 +152,7 @@ async function ensureMyneAta(mint) {
   return ata;
 }
 
-async function burnDelta(mint, ata, beforeBaseUnits) {
+async function buildBurnTransaction(mint, ata, beforeBaseUnits) {
   const account = await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID);
   const delta = account.amount - beforeBaseUnits;
   assert.ok(delta > 0n, 'Swap produced no positive MYNE balance delta');
@@ -161,9 +161,101 @@ async function burnDelta(mint, ata, beforeBaseUnits) {
     ata, mint, payer.publicKey, delta, mintInfo.decimals, [], TOKEN_PROGRAM_ID,
   );
   const transaction = new Transaction().add(instruction);
+  const { blockhash } = await provider.connection.getLatestBlockhash('confirmed');
+  transaction.recentBlockhash = blockhash;
+  transaction.feePayer = payer.publicKey;
   const simulation = await provider.connection.simulateTransaction(transaction, [payer]);
   assert.equal(simulation.value.err, null, `MYNE burn simulation failed: ${JSON.stringify(simulation.value.err)}`);
-  return sendAndConfirmTransaction(provider.connection, transaction, [payer], { commitment: 'confirmed' });
+  transaction.sign(payer);
+  return { delta, raw: Buffer.from(transaction.serialize()).toString('base64') };
+}
+
+async function sendSavedTransaction(rawBase64) {
+  const signature = await provider.connection.sendRawTransaction(Buffer.from(rawBase64, 'base64'), {
+    maxRetries: 3,
+    skipPreflight: false,
+  });
+  await provider.connection.confirmTransaction(signature, 'confirmed');
+  return signature;
+}
+
+function roundJournal(state, roundId) {
+  const raw = state.rounds[roundId];
+  if (typeof raw === 'string' || typeof raw === 'number') {
+    return { processedLamports: String(raw), pending: null };
+  }
+  return raw && typeof raw === 'object'
+    ? { processedLamports: String(raw.processedLamports || '0'), pending: raw.pending || null }
+    : { processedLamports: '0', pending: null };
+}
+
+async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
+  const pending = journal.pending;
+  if (!pending) return null;
+  const before = BigInt(pending.beforeBaseUnits);
+  let current = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
+
+  if (pending.phase === 'swap-ready') {
+    if (current <= before) {
+      try {
+        pending.swapSignature = await sendSavedTransaction(pending.swapRaw);
+      } catch (error) {
+        current = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
+        if (current <= before) {
+          // The exact signed transaction is now unusable (normally an expired
+          // blockhash) and did not produce tokens. It is safe to clear and
+          // quote again on the next tick.
+          journal.pending = null;
+          state.rounds[roundKey] = journal;
+          await saveState(state);
+          return { skipped: true, reason: 'pending-swap-expired-retry-next-tick', detail: String(error) };
+        }
+      }
+    }
+    pending.phase = 'swapped';
+    state.rounds[roundKey] = journal;
+    await saveState(state);
+  }
+
+  current = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
+  if (current > before && !pending.burnRaw) {
+    const burn = await buildBurnTransaction(mint, ata, before);
+    pending.burnBaseUnits = burn.delta.toString();
+    pending.burnRaw = burn.raw;
+    pending.phase = 'burn-ready';
+    state.rounds[roundKey] = journal;
+    await saveState(state);
+  }
+  if (current > before) {
+    try {
+      pending.burnSignature = await sendSavedTransaction(pending.burnRaw);
+    } catch (error) {
+      // A crash can occur after the exact burn landed but before the journal
+      // was updated. Treat the saved transaction as complete only when the
+      // token balance proves the purchased delta is already gone.
+      const recoveredBalance = (await getAccount(
+        provider.connection,
+        ata,
+        'confirmed',
+        TOKEN_PROGRAM_ID,
+      )).amount;
+      if (recoveredBalance > before) throw error;
+    }
+  }
+  const after = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
+  assert.ok(after <= before, 'Burn transaction did not remove the purchased MYNE');
+  journal.processedLamports = (BigInt(journal.processedLamports) + BigInt(pending.spendLamports)).toString();
+  const completed = { ...pending };
+  journal.pending = null;
+  state.rounds[roundKey] = journal;
+  await saveState(state);
+  return {
+    skipped: false,
+    recovered: true,
+    swapSignature: completed.swapSignature,
+    burnSignature: completed.burnSignature,
+    burnedBaseUnits: completed.burnBaseUnits,
+  };
 }
 
 export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
@@ -187,7 +279,13 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const currentRound = Math.floor((nowSeconds - initializedAt) / roundDuration) - 1;
   if (currentRound < 0) return { skipped: true, reason: 'no-settled-round-yet' };
   const state = await loadState();
-  const initialRound = state.nextRound == null ? currentRound : Number(state.nextRound);
+  // A new production journal must begin at the configured launch round so a
+  // keeper outage cannot silently strand earlier 2% allocations. Dry-run can
+  // inspect the latest round without creating operational state.
+  const initialRound = state.nextRound == null
+    ? Number(process.env.BUYBACK_START_ROUND ?? (dryRun ? currentRound : 0))
+    : Number(state.nextRound);
+  assert.ok(Number.isSafeInteger(initialRound) && initialRound >= 0, 'BUYBACK_START_ROUND must be a non-negative integer');
   const roundId = BigInt(process.env.MYNE_ROUND_ID || Math.min(initialRound, currentRound));
   const roundSeed = Buffer.alloc(8);
   roundSeed.writeBigUInt64LE(roundId);
@@ -198,7 +296,17 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const roundState = await program.account.round.fetch(roundAddress);
   if (!roundState.settled) return { skipped: true, reason: 'round-not-settled', round: roundId.toString() };
   const allocation = (BigInt(roundState.grossDeployedLamports.toString()) * 200n) / 10_000n;
-  const previous = BigInt(state.rounds[roundId.toString()] || '0');
+  const roundKey = roundId.toString();
+  const journal = roundJournal(state, roundKey);
+  state.rounds[roundKey] = journal;
+  const mint = configState.mint;
+  const ata = getAssociatedTokenAddressSync(mint, payer.publicKey, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  if (journal.pending) {
+    assert.ok(!dryRun, 'A live pending buyback cannot be recovered in dry-run mode');
+    assert.ok(await provider.connection.getAccountInfo(ata, 'confirmed'), 'Pending buyback MYNE account is missing');
+    return recoverPendingBuyback({ state, roundKey, journal, mint, ata });
+  }
+  const previous = BigInt(journal.processedLamports);
   const remainingAllocation = allocation > previous ? allocation - previous : 0n;
   if (remainingAllocation === 0n) {
     if (!dryRun && process.env.MYNE_ROUND_ID == null) {
@@ -226,22 +334,30 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const { raw: quote, checked } = await fetchQuote(spend, configState.mint, poolAddress, slippageBps);
   const result = { skipped: false, dryRun, round: roundId.toString(), allocationLamports: allocation.toString(), pool: poolAddress.toBase58(), spendLamports: spend, ...checked };
   if (dryRun) return result;
-  const ata = await ensureMyneAta(configState.mint);
-  const before = (await getAccount(provider.connection, ata, 'confirmed')).amount;
+  const ensuredAta = await ensureMyneAta(configState.mint);
+  const before = (await getAccount(provider.connection, ensuredAta, 'confirmed')).amount;
   const swap = await buildSwapTransaction(quote);
   const swapSimulation = await provider.connection.simulateTransaction(swap);
   assert.equal(swapSimulation.value.err, null, `Meteora swap simulation failed: ${JSON.stringify(swapSimulation.value.err)}`);
   swap.sign([payer]);
-  result.swapSignature = await provider.connection.sendRawTransaction(swap.serialize(), { maxRetries: 3 });
-  await provider.connection.confirmTransaction(result.swapSignature, 'confirmed');
-  result.burnSignature = await burnDelta(configState.mint, ata, before);
-  assert.ok(result.burnSignature, 'Swap produced no MYNE to burn');
-  result.burnedBaseUnits = checked.outputBaseUnits;
-  state.rounds[roundId.toString()] = (previous + BigInt(spend)).toString();
-  if (BigInt(state.rounds[roundId.toString()]) >= allocation && process.env.MYNE_ROUND_ID == null) {
-    state.nextRound = Number(roundId + 1n);
-  }
+  journal.pending = {
+    phase: 'swap-ready',
+    spendLamports: String(spend),
+    beforeBaseUnits: before.toString(),
+    expectedOutputBaseUnits: checked.outputBaseUnits,
+    swapRaw: Buffer.from(swap.serialize()).toString('base64'),
+    swapSignature: null,
+    burnRaw: null,
+    burnSignature: null,
+  };
+  state.rounds[roundKey] = journal;
   await saveState(state);
+  const recovered = await recoverPendingBuyback({ state, roundKey, journal, mint: configState.mint, ata: ensuredAta });
+  Object.assign(result, recovered);
+  if (BigInt(journal.processedLamports) >= allocation && process.env.MYNE_ROUND_ID == null) {
+    state.nextRound = Number(roundId + 1n);
+    await saveState(state);
+  }
   return result;
 }
 

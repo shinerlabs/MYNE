@@ -1,6 +1,6 @@
 import { PublicKey, SystemProgram } from '@solana/web3.js';
 
-import { getAccount } from './client.js';
+import { connection, getAccount } from './client.js';
 import { GRID } from './config.js';
 import { parseEther } from './units.js';
 import { asBn, derivePda, fetchProtocolAccount, getWritableProgram, protocolPdas, sendInstructions } from './anchor-client.js';
@@ -34,15 +34,23 @@ export async function readPlan(account = getAccount()) {
     amountPerPlay: amounts.reduce((sum, amount) => sum + amount, 0n),
     balance: toBig(plan.balanceLamports),
     autoClaim: false,
+    rewardMode: Number(plan.rewardMode ?? 0) === 1 ? 'burn' : 'accumulate',
     tiles: amounts.flatMap((amount, index) => amount > 0n ? [index + 1] : []),
     amounts,
   };
 }
 
-export async function readFeeParams() { return { accountDeposit: 0n, maxFee: 0n }; }
-export function requiredDeposit({ amountPerPlay, fundRounds }) { return amountPerPlay * BigInt(fundRounds); }
+const BET_RECEIPT_ACCOUNT_BYTES = 468;
 
-export async function configurePlan({ tiles, ethPerTile, deposit }) {
+export async function readFeeParams() {
+  const receiptRent = await connection.getMinimumBalanceForRentExemption(BET_RECEIPT_ACCOUNT_BYTES);
+  return { accountDeposit: 0n, maxFee: BigInt(receiptRent) };
+}
+export function requiredDeposit({ amountPerPlay, fundRounds, maxFee = 0n }) {
+  return (amountPerPlay + maxFee) * BigInt(fundRounds);
+}
+
+export async function configurePlan({ tiles, ethPerTile, deposit, rewardMode = 'accumulate' }) {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
   const authority = new PublicKey(account);
@@ -53,12 +61,13 @@ export async function configurePlan({ tiles, ethPerTile, deposit }) {
   const { program } = await getWritableProgram();
   const exists = await fetchProtocolAccount('AutoPlan', autoPlan);
   const instructions = [];
+  const rewardModeCode = rewardMode === 'burn' ? 1 : 0;
   if (!exists) {
-    instructions.push(await program.methods.createAutoPlan(amounts.map(asBn), asBn(deposit)).accounts({
+    instructions.push(await program.methods.createAutoPlan(amounts.map(asBn), asBn(deposit), rewardModeCode).accounts({
       config: protocolPdas.config, autoPlan, authority, systemProgram: SystemProgram.programId,
     }).instruction());
   } else {
-    instructions.push(await program.methods.configureAutoPlan(amounts.map(asBn), true).accounts({
+    instructions.push(await program.methods.configureAutoPlan(amounts.map(asBn), true, rewardModeCode).accounts({
       config: protocolPdas.config, autoPlan, authority,
     }).instruction());
     if (deposit > 0n) instructions.push(await program.methods.fundAutoPlan(asBn(deposit)).accounts({

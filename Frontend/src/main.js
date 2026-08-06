@@ -3,7 +3,10 @@ import './chat-social.css';
 import './stake-compact.css';
 import './about-compact.css';
 import './brand-uniform.css';
-import { LINKS, PRODUCT } from './app-config.js';
+import { LINKS, NETWORK, PRODUCT, PROGRAMS } from './app-config.js';
+import {
+  fetchProtocolAccount, getProtocolConfig, protocolPdas, protocolProgramId,
+} from './chain/anchor-client.js';
 import * as chain from './chain/mine-page.js';
 import { WALLET_LOGOS } from './wallet-logos.js';
 import { loadRoundBets, loadDrandLink, countMyBetRounds } from './chain/rounds-index.js';
@@ -367,7 +370,7 @@ document.querySelector('#app').innerHTML = `
     </details>
   </main>
 
-  <main class="feature-shell about-shell page-view" data-page="about"><header class="feature-hero route-header"><div><span class="eyebrow">PROTOCOL</span><h1>About MYNE.</h1></div></header><div class="about-layout"><aside class="about-nav panel"><span>CONTENTS</span><button class="active" data-about-section="intro">Protocol</button><button data-about-section="mining">Mine</button><button data-about-section="token-flow">Supply</button><button data-about-section="fees">Fees</button><button data-about-section="motherlode">Motherlode</button><button data-about-section="referral-model">Referrals</button><button data-about-section="staking-model">Staking</button></aside><section class="about-content panel">
+  <main class="feature-shell about-shell page-view" data-page="about"><header class="feature-hero route-header"><div><span class="eyebrow">PROTOCOL</span><h1>About MYNE.</h1></div></header><div class="about-layout"><aside class="about-nav panel"><span>CONTENTS</span><button class="active" data-about-section="intro">Protocol</button><button data-about-section="mining">Mine</button><button data-about-section="token-flow">Supply</button><button data-about-section="fees">Fees</button><button data-about-section="motherlode">Motherlode</button><button data-about-section="referral-model">Referrals</button><button data-about-section="staking-model">Staking</button><button data-about-section="addresses">Addresses</button></aside><section class="about-content panel">
     <article class="about-section active" data-about-panel="intro"><span class="eyebrow">01 · INTRODUCTION</span><h2>Store of value.</h2><p class="about-lead">MYNE v2 begins with a ${LAUNCH_GENESIS_MYNE} MYNE genesis mint. ${LAUNCH_BURN_STAKED_MYNE} MYNE is permanently burned and staked; only ${LAUNCH_MARKET_MYNE} MYNE enters the market through the initial liquidity pool.</p><div class="about-statline"><span><small>GENESIS MINT</small><strong>${LAUNCH_GENESIS_MYNE}</strong></span><span><small>BURN-STAKED</small><strong>${LAUNCH_BURN_STAKED_MYNE}</strong></span><span><small>MARKET SUPPLY</small><strong>${LAUNCH_MARKET_MYNE}</strong></span><span><small>HARD CAP</small><strong>2,000,000</strong></span></div><div class="principle-grid"><div><b>Public liquidity</b><p>The initial ${LAUNCH_LIQUIDITY_MYNE} MYNE is paired with SOL and forms the entire launch market supply.</p></div><div><b>Genesis burn stake</b><p>${LAUNCH_BURN_STAKED_MYNE} MYNE is permanently removed from liquid supply while retaining protocol staking weight.</p></div><div><b>Mining-only emissions</b><p>After genesis, new MYNE enters supply through competitive mining rounds.</p></div><div><b>Staker yield</b><p>Staked MYNE earns SOL directly from the 8% mining allocation.</p></div></div><div class="protocol-callout"><b>Only ${LAUNCH_MARKET_MYNE} MYNE begins liquid</b><p>The genesis burn stake cannot be sold or withdrawn. At launch, every market-available MYNE originates from the ${LAUNCH_LIQUIDITY_MYNE} MYNE liquidity allocation.</p></div></article>
     <article class="about-section" data-about-panel="mining"><span class="eyebrow">02 · MINING ROUNDS</span><h2>+${isPremine ? '0.3' : '1'} / minute.</h2><p class="about-lead">Miners deploy SOL across a 5×5 grid. Each 60-second round selects one winning tile, followed immediately by a 5-second result window.</p><div class="about-statline"><span><small>TILES</small><strong>25</strong></span><span><small>MINING</small><strong>60 SEC</strong></span><span><small>RESULT</small><strong>5 SEC</strong></span><span><small>REWARD</small><strong>+${isPremine ? '0.3' : '1'}</strong></span></div><div class="steps-list compact-steps"><div><i>1</i><span><b>Select</b><p>Choose tiles manually or set a random tile count.</p></span></div><div><i>2</i><span><b>Deploy</b><p>One SOL amount is applied to every selected tile.</p></span></div><div><i>3</i><span><b>Reveal</b><p>One of the 25 tiles wins at round close.</p></span></div><div><i>4</i><span><b>Settle</b><p>The +${isPremine ? '0.3' : '1'} MYNE reward resolves as Split or Solo.</p></span></div></div><div class="about-split"><div><span>SPLIT · 50%</span><strong>Every miner on the tile</strong><p>The reward is shared in proportion to each miner’s SOL on the winning tile.</p></div><div><span>SOLO · 50%</span><strong>One weighted winner</strong><p>Each miner’s chance equals their share of SOL on the winning tile.</p></div></div><div class="worked-example"><span>EXAMPLE</span><p>A miner supplied <b>0.60 SOL</b> of the tile’s <b>1.00 SOL</b>. They receive 60% in Split mode or have a 60% chance in Solo mode.</p></div><details class="about-disclosure"><summary>Automation rules <i>+</i></summary><p>Auto-round repeats manually selected tiles every round. When Random is active, the chosen number of tiles is randomly reassigned at the start of each automated round.</p></details></article>
     
@@ -377,6 +380,7 @@ document.querySelector('#app').innerHTML = `
     <article class="about-section" data-about-panel="motherlode"><span class="eyebrow">06 · MOTHERLODE</span><h2>Two assets. Two destinations.</h2><p class="about-lead">The Motherlode grows in SOL from mining deployments, while MYNE accrues every round. On a hit, both assets are shared by every miner in that round in proportion to total deployment.</p><div class="motherlode-grid"><div><strong>+0.2</strong><span>MYNE / round · burn stake</span></div><div><strong>2%</strong><span>Mining SOL</span></div><div><strong>1 / 650</strong><span>Round odds</span></div></div><div class="motherlode-formula"><div><span>BURNT-STAKED MYNE</span><strong>0.2 × rounds since last hit</strong></div><i>+</i><div><span>CLAIMABLE SOL</span><strong>2% deployed SOL</strong></div></div><div class="worked-example"><span>100 ROUNDS WITHOUT A HIT</span><p>Every miner shares the accumulated Motherlode in proportion to total round deployment, including miners who were not on the winning tile.</p></div><div class="protocol-callout"><b>When it hits</b><p>The MYNE is placed directly into each miner’s permanent 5× burn-stake share. The SOL share remains claimable by each miner.</p></div></article>
     <article class="about-section" data-about-panel="referral-model"><span class="eyebrow">07 · REFERRALS</span><h2>Invite. Earn MYNE.</h2><p class="about-lead">A permanent referrer receives 1% whenever a referred miner claims MYNE. It comes from the existing 10% claim fee.</p><div class="about-statline"><span><small>REFERRER</small><strong>1%</strong></span><span><small>UNCLAIMED POOL</small><strong>9%</strong></span><span><small>EXTRA FEE</small><strong>0%</strong></span><span><small>ATTRIBUTION</small><strong>FIRST</strong></span></div><div class="principle-grid"><div><b>Permanent attribution</b><p>The first valid referral attached to a wallet cannot be replaced.</p></div><div><b>Paid at claim</b><p>The referral reward settles only when the referred miner claims MYNE.</p></div><div><b>No additional charge</b><p>The 1% referral payment is carved from the standard 10% claim fee.</p></div><div><b>Public performance</b><p>The leaderboard tracks referrals, active miners and MYNE earned.</p></div></div><div class="worked-example"><span>100 MYNE CLAIMED</span><p>The miner receives <b>90 MYNE</b>, unclaimed miners share <b>9 MYNE</b>, and the permanent referrer receives <b>1 MYNE</b>.</p></div><button class="primary-feature-action" data-route="referrals">Open referral dashboard</button></article>
     <article class="about-section" data-about-panel="staking-model"><span class="eyebrow">08 · STAKING</span><h2>Stake. Earn SOL.</h2><p class="about-lead">Choose standard staking at 1× weight or permanently burn the principal for 5× weight. Motherlode MYNE is awarded directly into the same permanent burn-stake tier.</p><div class="about-statline"><span><small>UNSTAKE QUEUE</small><strong>30 DAYS</strong></span><span><small>MINING SHARE</small><strong>8% SOL</strong></span><span><small>TRADE SOURCE</small><strong>DEFERRED</strong></span><span><small>WEIGHTS</small><strong>1× / 5×</strong></span></div><section class="staking-history about-staking-history" data-staking-chart aria-label="Total MYNE staked over the past 30 days"><header><div><span>STAKED MYNE · 30 DAYS</span><strong data-staking-chart-total>—</strong></div><small>PAST 30 DAYS · ON-CHAIN</small></header><div class="staking-history-plot" data-staking-chart-plot><span>Loading staking history…</span></div><footer><span data-staking-chart-start>—</span><span>NOW</span></footer></section><div class="about-rule-table"><div><span>Standard stake</span><strong>1× pool weight</strong><p>Unstake at any time. The withdrawal request starts a 30-day queue before principal can be claimed.</p></div><div><span>Stake + burn</span><strong>5× pool weight</strong><p>The deposited MYNE is permanently burned and cannot be withdrawn.</p></div><div><span>Motherlode position</span><strong>Automatic 5× burn stake</strong><p>Motherlode MYNE is never liquid: it enters every miner’s permanent burn-staked position automatically when the Motherlode is hit.</p></div><div><span>SOL rewards</span><strong>8% mining allocation</strong><p>Staker SOL rewards accrue by weight and remain claimable.</p></div></div><div class="protocol-callout"><b>SOL stays liquid</b><p>Burn-staked MYNE provides permanent reward weight. SOL earned through staking or a Motherlode remains claimable.</p></div><button class="primary-feature-action" data-route="stake">Open staking</button></article>
+    <article class="about-section" data-about-panel="addresses"><span class="eyebrow">09 · ADDRESSES</span><h2>Addresses</h2><p class="about-lead">Public protocol accounts and fee destinations for the active Solana deployment. Values are read from the configured program and its on-chain state.</p><div class="address-status" data-address-status>Loading deployment addresses…</div><div class="address-ledger" data-address-ledger aria-live="polite"></div><div class="protocol-callout address-disclosure"><b>Verify before interacting</b><p>Always compare the mint and program addresses shown here with Solana Explorer. Mainnet addresses will remain marked as pending until the production deployment is configured and verifiable on-chain.</p></div></article>
   </section></div></main>
   <footer class="network-footer">
     <a href="https://solana.com" target="_blank" rel="noopener noreferrer" aria-label="Powered by Solana">
@@ -1077,6 +1081,93 @@ referralFlexDialog?.remove();
 const aboutContent = document.querySelector('.about-content');
 const aboutNav = document.querySelector('.about-nav');
 
+const publicKeyText = (value) => {
+  if (!value) return '';
+  if (typeof value.toBase58 === 'function') return value.toBase58();
+  return String(value);
+};
+
+const appendAddressRow = (ledger, { label, address, note, group }) => {
+  const row = document.createElement('article');
+  row.className = 'address-row';
+  if (group) row.dataset.addressGroup = group;
+  const summary = document.createElement('div');
+  const title = document.createElement('span');
+  title.textContent = label;
+  const description = document.createElement('small');
+  description.textContent = note;
+  summary.append(title, description);
+  const code = document.createElement('code');
+  const resolvedAddress = publicKeyText(address);
+  code.textContent = resolvedAddress || 'Pending Mainnet deployment';
+  code.classList.toggle('pending', !resolvedAddress);
+  const actions = document.createElement('div');
+  actions.className = 'address-actions';
+  if (resolvedAddress) {
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.dataset.copyAddress = resolvedAddress;
+    copy.textContent = 'Copy';
+    const explorer = document.createElement('a');
+    explorer.href = explorerAddress(resolvedAddress);
+    explorer.target = '_blank';
+    explorer.rel = 'noopener noreferrer';
+    explorer.textContent = 'Explorer ↗';
+    actions.append(copy, explorer);
+  }
+  row.append(summary, code, actions);
+  ledger.append(row);
+};
+
+const renderTransparencyAddresses = async () => {
+  const ledger = document.querySelector('[data-address-ledger]');
+  const status = document.querySelector('[data-address-status]');
+  if (!ledger || !status) return;
+  let config = null;
+  let gate = null;
+  let configError = null;
+  if (protocolPdas.config) {
+    try {
+      config = await getProtocolConfig();
+      if (protocolPdas.liquidityGate) {
+        gate = await fetchProtocolAccount('LiquidityGate', protocolPdas.liquidityGate).catch(() => null);
+      }
+    } catch (error) {
+      configError = error;
+    }
+  }
+  ledger.replaceChildren();
+  const entries = [
+    { group: 'CORE', label: 'MYNE mint', address: config?.mint || PROGRAMS.tokenMint, note: 'Canonical SPL token mint · no freeze authority at launch' },
+    { group: 'CORE', label: 'Protocol program', address: protocolProgramId || PROGRAMS.protocol, note: 'Executable MYNE Anchor program' },
+    { group: 'CORE', label: 'Protocol config', address: protocolPdas.config, note: 'Mint authority and custody account for the 2% Motherlode allocation' },
+    { group: 'FEE CUSTODY', label: 'Staking rewards vault', address: protocolPdas.stakePool, note: 'Receives the 8% staking allocation in SOL' },
+    { group: 'FEE CUSTODY', label: 'Buyback wallet', address: config?.buybackWallet, note: 'Receives the 2% SOL allocation for automated MYNE buyback and burn' },
+    { group: 'FEE CUSTODY', label: 'Referral fallback wallet', address: config?.adminFeeWallet, note: 'Receives the 1% claim-fee share only when no referrer is recorded' },
+    { group: 'ACCOUNTING', label: 'Mining rewards ledger', address: protocolPdas.miningPool, note: 'Tracks unclaimed MYNE and the 9% passive claim-fee distribution' },
+    { group: 'LIQUIDITY', label: 'Liquidity gate', address: protocolPdas.liquidityGate, note: 'Locks Mainnet activation to the verified Meteora MYNE/SOL pool' },
+    { group: 'LIQUIDITY', label: 'Meteora pool', address: gate?.pool, note: 'Official MYNE/WSOL DLMM pool registered on-chain' },
+    { group: 'AUTHORITIES', label: 'Protocol administrator', address: config?.admin, note: 'Can pause the protocol and perform the documented two-step admin transfer' },
+    { group: 'AUTHORITIES', label: 'Upgrade authority', address: PROGRAMS.upgradeAuthority, note: 'Published production program upgrade authority' },
+    { group: 'RANDOMNESS', label: 'Randomness authority', address: config?.randomnessAuthority, note: 'Keeper authorized to bind committed Switchboard randomness accounts' },
+    { group: 'RANDOMNESS', label: 'Switchboard program', address: config?.randomnessProgram || PROGRAMS.randomness, note: 'Pinned randomness provider program for this deployment' },
+  ];
+  let previousGroup = '';
+  entries.forEach((entry) => {
+    appendAddressRow(ledger, { ...entry, group: entry.group === previousGroup ? '' : entry.group });
+    previousGroup = entry.group;
+  });
+  if (config) {
+    status.textContent = `Verified from protocol state · ${solanaNetwork.name} · config v${Number(config.version)}`;
+    status.classList.add('verified');
+  } else {
+    status.textContent = configError
+      ? `Configured addresses shown · on-chain state unavailable on ${solanaNetwork.name}`
+      : `Awaiting deployment configuration · ${solanaNetwork.name}`;
+    status.classList.remove('verified');
+  }
+};
+
 /* About is protocol documentation, not a landing page. Keep each chapter to named parameters,
    mechanics and constraints; promotional headings, scenarios and calls to action belong elsewhere. */
 if (aboutContent && aboutNav) {
@@ -1127,10 +1218,21 @@ if (aboutContent && aboutNav) {
   // contents list has one clear destination for all staking information.
   aboutContent.querySelector('[data-about-panel="gold-payouts"]')?.remove();
 
+  const addressLedger = aboutContent.querySelector('[data-address-ledger]');
+  addressLedger?.addEventListener('click', async (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest('[data-copy-address]')
+      : null;
+    if (!button) return;
+    const copied = await copyText(button.dataset.copyAddress);
+    notify(copied ? 'Address copied' : 'Could not copy address');
+  });
+  void renderTransparencyAddresses();
+
   const navLabels = {
     intro: 'Protocol', mining: 'Mine',
     'token-flow': 'Supply', fees: 'Fees',
-    motherlode: 'Motherlode', 'referral-model': 'Referrals', 'staking-model': 'Staking',
+    motherlode: 'Motherlode', 'referral-model': 'Referrals', 'staking-model': 'Staking', addresses: 'Addresses',
   };
   Object.entries(navLabels).forEach(([name, label]) => {
     const button = aboutNav.querySelector(`[data-about-section="${name}"]`);
@@ -2145,7 +2247,7 @@ const setAboutSection = (name) => {
   const sectionTitles = {
     intro: 'Protocol', mining: 'Mine', 'token-flow': 'Supply', fees: 'Fees',
     motherlode: 'Motherlode', 'referral-model': 'Referrals',
-    'staking-model': 'Staking',
+    'staking-model': 'Staking', addresses: 'Addresses',
   };
   const title = sectionTitles[target];
   const panel = document.querySelector(`[data-about-panel="${target}"]`);
@@ -2155,6 +2257,7 @@ const setAboutSection = (name) => {
   const label = aboutNavToggle.querySelector('b');
   const active = document.querySelector(`[data-about-section="${target}"]`);
   if (label && active) label.textContent = active.textContent;
+  if (target === 'addresses') void renderTransparencyAddresses();
 };
 
 const syncNavIndicator = () => window.requestAnimationFrame(() => {
@@ -3972,6 +4075,7 @@ document.querySelector('#deploy').addEventListener('click', () => chain.mine({
   plays: chain.UNLIMITED_PLAYS,
   fundRounds: repeatRounds,
   autoClaim: autoRound && autoClaimEnabled,
+  rewardMode: autoRound ? autoRewardMode : 'accumulate',
 }));
 // Delegated: the plan panel is re-rendered on every state change.
 document.querySelector('#auto-plan').addEventListener('click', (event) => {

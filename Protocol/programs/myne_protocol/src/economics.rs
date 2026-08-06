@@ -97,6 +97,8 @@ pub enum MyneError {
     InvalidRandomnessAccount,
     #[msg("The randomness account has not been revealed in the current slot")]
     RandomnessNotResolved,
+    #[msg("The randomness account was not committed to a future slot before betting")]
+    RandomnessNotCommitted,
     #[msg("The randomness commitment was created too late")]
     RandomnessCommittedTooLate,
     #[msg("The receipt has already been processed")]
@@ -125,6 +127,14 @@ pub enum MyneError {
     AutoPlanAlreadyExecuted,
     #[msg("This automation plan is inactive")]
     AutoPlanInactive,
+    #[msg("Production mode cannot be downgraded after mainnet randomness is selected")]
+    ProductionModeLocked,
+    #[msg("The staking token account is not the canonical stake-pool vault")]
+    InvalidStakeVault,
+    #[msg("The automation reward mode is invalid")]
+    InvalidRewardMode,
+    #[msg("The fixed MYNE emission schedule has completed")]
+    EmissionComplete,
 }
 
 #[cfg(test)]
