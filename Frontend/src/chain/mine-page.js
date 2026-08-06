@@ -14,7 +14,7 @@ import {
 } from './client.js';
 import {
   claimRound, claimManyRounds, placeBet, readJackpot, readMiner, readMyBets, readRound, netClaimable, passiveOnRounds,
-  readSquareMiners, readSquareTotals, verifyFeeEconomics, verifyPremine, verifyRoundTiming, waitForTx, withdrawUnrefined,
+  verifyFeeEconomics, verifyPremine, verifyRoundTiming, waitForTx, withdrawUnrefined,
   claimManyEthOnly, syncRoundGenesis,
 } from './lottery.js';
 import { ROUND_DURATION, BETTING_DURATION, isPremine } from './config.js';
@@ -92,14 +92,17 @@ export const setLive = (next) => {
  * Tile totals only change when someone bets, so a 5s poll is plenty. The countdown is
  * arithmetic (see round.js) and ticks locally every second without any RPC traffic.
  */
+let roundRefreshRequest = null;
 async function refreshRound() {
+  if (roundRefreshRequest) return roundRefreshRequest;
+  roundRefreshRequest = (async () => {
   try {
     const { roundId } = state;
-    const [totals, miners, round] = await Promise.all([
-      readSquareTotals(roundId), readSquareMiners(roundId), readRound(roundId),
-    ]);
-    state.squareTotals = totals;
-    state.squareMiners = miners;
+    // One Round PDA contains both tile totals and tile participant counts. Reading it once avoids
+    // two duplicate getAccountInfo calls on every five-second refresh (and during the result poll).
+    const round = await readRound(roundId);
+    state.squareTotals = round.tileLamports ?? Array(25).fill(0n);
+    state.squareMiners = round.tileReceipts ?? Array(25).fill(0n);
     state.totalWager = round.totalWager;
     state.currentRound = round;
     // A current-round settlement drives the final five-second winner reveal through
@@ -110,6 +113,8 @@ async function refreshRound() {
   } catch (error) {
     console.warn('round refresh failed', error);
   }
+  })().finally(() => { roundRefreshRequest = null; });
+  return roundRefreshRequest;
 }
 
 async function refreshJackpot() {

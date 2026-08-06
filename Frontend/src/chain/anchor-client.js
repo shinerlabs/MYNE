@@ -42,6 +42,14 @@ export const protocolPdas = Object.freeze({
   stakePool: PROGRAM_ID ? derivePda('stake_pool') : null,
 });
 
+// Protocol configuration changes only through an admin transaction, so avoid fetching the same
+// PDA for every page refresh. A short TTL keeps normal admin updates visible without adding a
+// subscription requirement to the read-only client.
+const CONFIG_CACHE_MS = 15_000;
+let configCache = null;
+let configCacheAt = 0;
+let configRequest = null;
+
 export async function fetchProtocolAccount(name, address) {
   const info = await connection.getAccountInfo(address, 'confirmed');
   if (!info) return null;
@@ -50,12 +58,26 @@ export async function fetchProtocolAccount(name, address) {
 
 export const decodeProtocolAccount = (name, data) => camelize(coder.decode(name, data));
 
-export async function getProtocolConfig() {
+export async function getProtocolConfig({ force = false } = {}) {
   if (!protocolPdas.config) throw new Error('MYNE program ID is not configured');
-  const config = await fetchProtocolAccount('ProtocolConfig', protocolPdas.config);
-  if (!config) throw new Error('Protocol config is not initialized');
-  return config;
+  if (!force && configCache && Date.now() - configCacheAt < CONFIG_CACHE_MS) return configCache;
+  if (!configRequest) {
+    configRequest = fetchProtocolAccount('ProtocolConfig', protocolPdas.config)
+      .then((config) => {
+        if (!config) throw new Error('Protocol config is not initialized');
+        configCache = config;
+        configCacheAt = Date.now();
+        return config;
+      })
+      .finally(() => { configRequest = null; });
+  }
+  return configRequest;
 }
+
+export const invalidateProtocolConfig = () => {
+  configCache = null;
+  configCacheAt = 0;
+};
 
 async function walletAdapter() {
   const { getAccount, getProvider } = await import('./client.js');

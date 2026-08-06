@@ -43,10 +43,14 @@ const receiptPda = (roundId, authority, nonce) => derivePda(
 // getProgramAccounts needs the program ID, not a config PDA. Keep the scan local and decode-only;
 // production history moves to the configured indexer, while balances remain account-verifiable.
 let receiptScan = null;
+let receiptScanAt = 0;
+let receiptScanRequest = null;
+const RECEIPT_CACHE_MS = 5_000;
 async function decodedReceipts() {
-  if (receiptScan) return receiptScan;
+  if (receiptScan && Date.now() - receiptScanAt < RECEIPT_CACHE_MS) return receiptScan;
+  if (receiptScanRequest) return receiptScanRequest;
   if (!protocolProgramId) return [];
-  receiptScan = (async () => {
+  receiptScanRequest = (async () => {
     const accounts = await connection.getProgramAccounts(protocolProgramId, { commitment: 'confirmed' });
     const decoded = [];
     for (const entry of accounts) {
@@ -58,11 +62,18 @@ async function decodedReceipts() {
     return decoded;
   })();
   try {
-    return await receiptScan;
+    receiptScan = await receiptScanRequest;
+    receiptScanAt = Date.now();
+    return receiptScan;
   } finally {
-    receiptScan = null;
+    receiptScanRequest = null;
   }
 }
+
+export const invalidateReceiptCache = () => {
+  receiptScan = null;
+  receiptScanAt = 0;
+};
 
 const roundFromAccount = (roundId, account) => {
   if (!account) return emptyRound(roundId);
@@ -188,7 +199,9 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
   instructions.push(await program.methods.deploy(asBn(roundId), asBn(nonce), amounts.map(asBn)).accounts({
     config: protocolPdas.config, miner, round, receipt, authority, systemProgram: SystemProgram.programId,
   }).instruction());
-  return sendInstructions(instructions);
+  const signature = await sendInstructions(instructions);
+  invalidateReceiptCache();
+  return signature;
 }
 
 async function claimableReceipts(roundIds, authority) {
@@ -208,7 +221,9 @@ export async function claimRound(roundId) {
     miner: minerPda(account), stakePosition: stakePositionPda(account), round: roundPda(receipt.roundId),
     receipt: publicKey, authority,
   }).instruction()));
-  return sendInstructions(ixs);
+  const signature = await sendInstructions(ixs);
+  invalidateReceiptCache();
+  return signature;
 }
 export async function claimManyRounds(roundIds) { let signature; for (const id of roundIds) signature = await claimRound(id); return signature; }
 export const claimManyEthOnly = claimManyRounds;
