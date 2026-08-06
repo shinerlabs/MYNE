@@ -18,7 +18,9 @@ const {
 
 const PROGRAM_ID_TEXT = 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e';
 const PROGRAM_ID = new PublicKey(PROGRAM_ID_TEXT);
-const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
+// Solana's current devnet genesis hash. Keep this exact value so the
+// initialization guard cannot accidentally target mainnet or another cluster.
+const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   'BPFLoaderUpgradeab1e11111111111111111111111',
 );
