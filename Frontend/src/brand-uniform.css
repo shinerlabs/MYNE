@@ -7382,6 +7382,11 @@ html #app > .topbar .main-nav {
   background-color: transparent !important;
 }
 
+/* The sole wallet entry point in the menu should read as a clear primary action. */
+html #app > .topbar .connect-header {
+  font-weight: 800 !important;
+}
+
 /* The switch communicates Auto-round state through its track and thumb; the extra word adds
    noise to the compact control. Keep the label available to assistive technology. */
 body[data-route="mine"] .configuration .auto-row #auto-round > b {
