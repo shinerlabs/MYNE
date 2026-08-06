@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 
 import anchor from '@anchor-lang/core';
 import web3 from '@solana/web3.js';
 import * as splToken from '@solana/spl-token';
 
 const { AnchorProvider, BN, Program, setProvider } = anchor;
-const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = web3;
+const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } = web3;
 const { TOKEN_PROGRAM_ID, getOrCreateAssociatedTokenAccount, transfer } = splToken;
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const DEVNET_KEEPER_CONFIRMATION = PROGRAM_ID.toBase58();
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const provider = AnchorProvider.env();
 setProvider(provider);
-const isDevnet = /^https:\/\/api\.devnet\.solana\.com\/?$/i.test(provider.connection.rpcEndpoint);
+const isDevnet = /^https:\/\/(?:api\.devnet\.solana\.com|devnet\.rpcpool\.com)\/?$/i.test(provider.connection.rpcEndpoint);
 if (isDevnet) {
   assert.equal(
     process.env.ALLOW_DEVNET_KEEPER,
@@ -59,21 +59,45 @@ const receiptPda = (roundId, authority, nonce) => PublicKey.findProgramAddressSy
   u64Buffer(nonce),
 ], PROGRAM_ID)[0];
 
+const demoWalletPath = '.localnet/devnet-demo-wallets.json';
+let savedDemoWallets = null;
+if (isDevnet) {
+  try {
+    savedDemoWallets = JSON.parse(await readFile(demoWalletPath, 'utf8'));
+  } catch { /* first run creates a fresh controlled set */ }
+}
+const savedMinerKeys = Array.isArray(savedDemoWallets?.miners) ? savedDemoWallets.miners : [];
+const savedStakerKeys = Array.isArray(savedDemoWallets?.stakers) ? savedDemoWallets.stakers : [];
 const demoMiners = Array.from({ length: 10 }, (_, index) => {
+  const keypair = savedMinerKeys[index]
+    ? Keypair.fromSecretKey(Uint8Array.from(savedMinerKeys[index]))
+    : Keypair.generate();
   if (index < 5) {
-    // Five persistent local miners cover every tile. Their per-tile amount is randomized between
-    // 10x and 20x the 0.001 SOL demo base on each round, keeping every tile active and ensuring
-    // the local viewer always has a populated previous-round roster.
-    return { keypair: Keypair.generate(), coverAll: true, bids: {} };
+    // Five persistent demo miners cover every tile together. Each covers five tiles with a
+    // randomized 10x–20x amount over the 0.001 SOL minimum, keeping every round winnable while
+    // fitting inside a small Devnet test-wallet balance.
+    return { keypair, coverAll: true, bids: {} };
   }
   const firstTile = (index * 2) % 25;
   const secondTile = (index * 5 + 6) % 25;
   return {
-    keypair: Keypair.generate(),
+    keypair,
     bids: { [firstTile]: 30_000_000, [secondTile]: 20_000_000 },
   };
 });
-const demoStakers = Array.from({ length: 3 }, () => ({ keypair: Keypair.generate(), amount: 5_000_000_000n }));
+const demoStakers = Array.from({ length: 3 }, (_, index) => ({
+  keypair: savedStakerKeys[index]
+    ? Keypair.fromSecretKey(Uint8Array.from(savedStakerKeys[index]))
+    : Keypair.generate(),
+  amount: 5_000_000_000n,
+}));
+const submittedReceipts = new Set();
+if (isDevnet && !savedDemoWallets) {
+  await writeFile(demoWalletPath, JSON.stringify({
+    miners: demoMiners.map(({ keypair }) => [...keypair.secretKey]),
+    stakers: demoStakers.map(({ keypair }) => [...keypair.secretKey]),
+  }), { mode: 0o600 });
+}
 
 const log = (event, values = {}) => console.log(JSON.stringify({
   at: new Date().toISOString(),
@@ -86,11 +110,42 @@ async function chainTime() {
   return await provider.connection.getBlockTime(slot) ?? Math.floor(Date.now() / 1000);
 }
 
+async function fundDemoWallet(authority, amountSol) {
+  if (isDevnet) {
+    const requiredLamports = Math.round(amountSol * LAMPORTS_PER_SOL);
+    const existingLamports = await provider.connection.getBalance(authority, 'confirmed');
+    if (existingLamports >= requiredLamports) return 'existing';
+    // Skip the rate-limited public faucet on Devnet and use the authorized demo payer directly.
+    const transaction = new Transaction().add(SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: authority,
+      lamports: requiredLamports - existingLamports,
+    }));
+    await sendAndConfirmTransaction(provider.connection, transaction, [payer], { commitment: 'confirmed' });
+    return 'payer';
+  }
+  try {
+    const signature = await provider.connection.requestAirdrop(authority, amountSol * LAMPORTS_PER_SOL);
+    await provider.connection.confirmTransaction(signature, 'confirmed');
+    return 'faucet';
+  } catch (error) {
+    if (!isDevnet) throw error;
+    // Devnet's public faucet is commonly rate-limited. The authorized demo payer is the
+    // controlled fallback; amounts are deliberately small and this path is Devnet-only.
+    const transaction = new Transaction().add(SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: authority,
+      lamports: Math.round(amountSol * LAMPORTS_PER_SOL),
+    }));
+    await sendAndConfirmTransaction(provider.connection, transaction, [payer], { commitment: 'confirmed' });
+    return 'payer';
+  }
+}
+
 async function prepareDemoMiners() {
   for (const [index, demo] of demoMiners.entries()) {
     const authority = demo.keypair.publicKey;
-    const signature = await provider.connection.requestAirdrop(authority, (isDevnet ? 2 : 10) * LAMPORTS_PER_SOL);
-    await provider.connection.confirmTransaction(signature, 'confirmed');
+    const funding = await fundDemoWallet(authority, isDevnet ? 0.1 : 10);
     const miner = minerPda(authority);
     if (!(await provider.connection.getAccountInfo(miner, 'confirmed'))) {
       await program.methods.registerMiner(PublicKey.default).accounts({
@@ -104,7 +159,8 @@ async function prepareDemoMiners() {
         systemProgram: SystemProgram.programId,
       }).signers([demo.keypair]).rpc();
     }
-    log('demo-miner-ready', { index: index + 1, authority: authority.toBase58() });
+    log('demo-miner-ready', { index: index + 1, authority: authority.toBase58(), funding });
+    await new Promise((resolve) => setTimeout(resolve, isDevnet ? 350 : 0));
   }
 }
 
@@ -115,8 +171,7 @@ async function prepareDemoStakers() {
   const vaultTokens = await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, stakePool, true);
   for (const [index, demo] of demoStakers.entries()) {
     const authority = demo.keypair.publicKey;
-    const signature = await provider.connection.requestAirdrop(authority, (isDevnet ? 2 : 5) * LAMPORTS_PER_SOL);
-    await provider.connection.confirmTransaction(signature, 'confirmed');
+    const funding = await fundDemoWallet(authority, isDevnet ? 0.05 : 5);
     const miner = minerPda(authority);
     const stakePosition = stakePositionPda(authority);
     if (!(await provider.connection.getAccountInfo(miner, 'confirmed'))) {
@@ -136,7 +191,8 @@ async function prepareDemoStakers() {
         mint, authority, tokenProgram: TOKEN_PROGRAM_ID,
       }).signers([demo.keypair]).rpc();
     }
-    log('demo-staker-ready', { index: index + 1, authority: authority.toBase58(), myne: demo.amount.toString() });
+    log('demo-staker-ready', { index: index + 1, authority: authority.toBase58(), myne: demo.amount.toString(), funding });
+    await new Promise((resolve) => setTimeout(resolve, isDevnet ? 350 : 0));
   }
 }
 
@@ -164,28 +220,33 @@ async function deployDemoMiners(roundId) {
     const authority = demo.keypair.publicKey;
     const nonce = roundId;
     const receipt = receiptPda(roundId, authority, nonce);
-    if (await provider.connection.getAccountInfo(receipt, 'confirmed')) continue;
+    if (submittedReceipts.has(receipt.toBase58())) continue;
     const bids = demo.coverAll
-      ? Object.fromEntries(Array.from({ length: 25 }, (_, tile) => [
-        tile,
-        (10 + (randomBytes(1)[0] % 11)) * 1_000_000,
+      ? Object.fromEntries(Array.from({ length: isDevnet ? 5 : 25 }, (_, offset) => [
+        (isDevnet ? index * 5 + offset : offset) % 25,
+        (10 + (randomBytes(1)[0] % (isDevnet ? 6 : 11))) * 1_000_000,
       ]))
       : demo.bids;
     const amounts = Array.from({ length: 25 }, (_, tile) => new BN(String(bids[tile] ?? 0)));
-    await program.methods.deploy(new BN(roundId.toString()), new BN(nonce.toString()), amounts).accounts({
-      config,
-      miner: minerPda(authority),
-      round,
-      receipt,
-      authority,
-      systemProgram: SystemProgram.programId,
-    }).signers([demo.keypair]).rpc();
-    log('demo-miner-deployed', {
-      roundId: roundId.toString(),
-      miner: index + 1,
-      authority: authority.toBase58(),
-      lamports: Object.values(bids).reduce((sum, amount) => sum + amount, 0),
-    });
+    try {
+      await program.methods.deploy(new BN(roundId.toString()), new BN(nonce.toString()), amounts).accounts({
+        config,
+        miner: minerPda(authority),
+        round,
+        receipt,
+        authority,
+        systemProgram: SystemProgram.programId,
+      }).signers([demo.keypair]).rpc();
+      submittedReceipts.add(receipt.toBase58());
+      log('demo-miner-deployed', {
+        roundId: roundId.toString(),
+        miner: index + 1,
+        authority: authority.toBase58(),
+        lamports: Object.values(bids).reduce((sum, amount) => sum + amount, 0),
+      });
+    } catch (error) {
+      log('demo-miner-deploy-error', { roundId: roundId.toString(), miner: index + 1, message: error instanceof Error ? error.message.split('\\n')[0] : String(error) });
+    }
   }
 }
 
@@ -270,8 +331,8 @@ if (isDevnet) {
   }
 }
 
-await prepareDemoMiners();
-await prepareDemoStakers();
+if (process.env.SKIP_DEMO_MINERS !== '1') await prepareDemoMiners();
+if (process.env.SKIP_DEMO_STAKERS !== '1') await prepareDemoStakers();
 log('keeper-started', { rpc: provider.connection.rpcEndpoint, programId: PROGRAM_ID.toBase58() });
 await tick();
 // Check the boundary twice per second: the result window is intentionally only five seconds, so a
