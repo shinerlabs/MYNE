@@ -42,6 +42,7 @@ const {
 const PROGRAM_ID_TEXT = process.env.MYNE_PROGRAM_ID
   || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e';
 const PROGRAM_ID = new PublicKey(PROGRAM_ID_TEXT);
+const SWITCHBOARD_DEVNET_PROGRAM = 'Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2';
 const JUPITER_QUOTE_URL = process.env.JUPITER_QUOTE_URL || 'https://lite-api.jup.ag/swap/v1/quote';
 const JUPITER_SWAP_URL = process.env.JUPITER_SWAP_URL || 'https://lite-api.jup.ag/swap/v1/swap';
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
@@ -169,6 +170,13 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   if (!dryRun) assertLiveAuthorization();
   if (!dryRun) assert.ok(statePath, 'Set BUYBACK_STATE_PATH to a durable keeper state file before live mode');
   const configState = await program.account.protocolConfig.fetch(config);
+  // Devnet intentionally runs without Meteora liquidity. The protocol still
+  // accounts for the 2% allocation on-chain, but there is no swap to execute
+  // until a real pool is registered; leave the allocation untouched for a
+  // later pool-backed rehearsal.
+  if (configState.randomnessProgram.toBase58() === SWITCHBOARD_DEVNET_PROGRAM) {
+    return { skipped: true, reason: 'devnet-liquidity-pool-not-required' };
+  }
   const gateState = await program.account.liquidityGate.fetch(liquidityGate);
   assert.ok(gateState.verified, 'Liquidity gate is not verified');
   assert.equal(configState.mint.toBase58(), process.env.MYNE_MINT_ADDRESS || configState.mint.toBase58(), 'MYNE mint mismatch');

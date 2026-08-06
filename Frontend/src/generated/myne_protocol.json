@@ -2092,6 +2092,90 @@
       ]
     },
     {
+      "name": "set_randomness_program",
+      "docs": [
+        "Selects the randomness deployment mode while the protocol is paused.",
+        "Devnet and the local harness intentionally do not require a Meteora",
+        "pool; mainnet remains pool-gated. This is also the safe migration path",
+        "for an already-initialized Devnet config."
+      ],
+      "discriminator": [
+        64,
+        21,
+        0,
+        142,
+        206,
+        90,
+        142,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_gate",
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_pool",
+          "optional": true
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "randomness_program",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
       "name": "settle_round",
       "discriminator": [
         40,
@@ -2171,6 +2255,7 @@
         },
         {
           "name": "liquidity_gate",
+          "optional": true,
           "pda": {
             "seeds": [
               {
@@ -2196,7 +2281,8 @@
           }
         },
         {
-          "name": "liquidity_pool"
+          "name": "liquidity_pool",
+          "optional": true
         },
         {
           "name": "randomness_authority",
@@ -2299,6 +2385,7 @@
         },
         {
           "name": "liquidity_gate",
+          "optional": true,
           "pda": {
             "seeds": [
               {
@@ -2324,13 +2411,16 @@
           }
         },
         {
-          "name": "liquidity_pool"
+          "name": "liquidity_pool",
+          "optional": true
         },
         {
-          "name": "myne_vault"
+          "name": "myne_vault",
+          "optional": true
         },
         {
-          "name": "sol_vault"
+          "name": "sol_vault",
+          "optional": true
         },
         {
           "name": "randomness_account",
@@ -2861,6 +2951,19 @@
         93,
         152,
         47
+      ]
+    },
+    {
+      "name": "RandomnessProgramChanged",
+      "discriminator": [
+        128,
+        64,
+        125,
+        39,
+        92,
+        194,
+        191,
+        86
       ]
     },
     {
@@ -3744,6 +3847,18 @@
         "fields": [
           {
             "name": "randomness_authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RandomnessProgramChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "randomness_program",
             "type": "pubkey"
           }
         ]

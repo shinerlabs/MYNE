@@ -17,7 +17,6 @@ const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID || 'D6kkupmJWw9bpDZ
 const ROUND_ID = BigInt(process.env.MYNE_ROUND_ID || '1');
 const CONFIRM = process.env.CONFIRM_SWITCHBOARD_KEEPER;
 assert.equal(CONFIRM, ROUND_ID.toString(), `Set CONFIRM_SWITCHBOARD_KEEPER=${ROUND_ID} to authorize this keeper`);
-assert.ok(process.env.MYNE_LIQUIDITY_POOL, 'Set MYNE_LIQUIDITY_POOL to the registered Meteora pool');
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 
 const { keypair, connection, program: switchboardProgram } = await sb.AnchorUtils.loadEnv();
@@ -98,19 +97,22 @@ if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
 
 const randomnessClient = new sb.Randomness(switchboardProgram, randomness.pubkey);
 const revealIx = await randomnessClient.revealIx(keypair.publicKey);
-const gateState = await myne.account.liquidityGate.fetch(liquidityGate);
-assert.ok(gateState.verified, 'Liquidity gate is not verified');
-assert.ok(gateState.myneVault && gateState.solVault, 'Liquidity gate has no verified token vaults');
+const devnetNoPool = configState.randomnessProgram.toBase58() === 'Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2';
+const gateState = devnetNoPool ? null : await myne.account.liquidityGate.fetch(liquidityGate);
+if (!devnetNoPool) {
+  assert.ok(gateState.verified, 'Liquidity gate is not verified');
+  assert.ok(gateState.myneVault && gateState.solVault, 'Liquidity gate has no verified token vaults');
+}
 const settleIx = await myne.methods
   .settleRoundVerified()
   .accounts({
     config,
     stakePool,
     round,
-    liquidityGate,
-    liquidityPool: gateState.pool,
-    myneVault: gateState.myneVault,
-    solVault: gateState.solVault,
+    liquidityGate: devnetNoPool ? null : liquidityGate,
+    liquidityPool: devnetNoPool ? null : gateState.pool,
+    myneVault: devnetNoPool ? null : gateState.myneVault,
+    solVault: devnetNoPool ? null : gateState.solVault,
     randomnessAccount: randomness.pubkey,
     buybackWallet: configState.buybackWallet,
   })

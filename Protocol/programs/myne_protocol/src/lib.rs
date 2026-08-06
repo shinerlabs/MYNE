@@ -252,7 +252,7 @@ pub mod myne_protocol {
     }
 
     pub fn set_paused(ctx: Context<SetPaused>, paused: bool) -> Result<()> {
-        if !paused {
+        if !paused && liquidity_gate_required(ctx.accounts.config.randomness_program) {
             let gate = ctx
                 .accounts
                 .liquidity_gate
@@ -317,6 +317,29 @@ pub mod myne_protocol {
         emit!(RandomnessAuthorityChanged {
             randomness_authority
         });
+        Ok(())
+    }
+
+    /// Selects the randomness deployment mode while the protocol is paused.
+    /// Devnet and the local harness intentionally do not require a Meteora
+    /// pool; mainnet remains pool-gated. This is also the safe migration path
+    /// for an already-initialized Devnet config.
+    pub fn set_randomness_program(
+        ctx: Context<AdminConfig>,
+        randomness_program: Pubkey,
+    ) -> Result<()> {
+        require!(
+            ctx.accounts.config.paused,
+            MyneError::RandomnessAuthorityLocked
+        );
+        require!(
+            randomness_program == Pubkey::default()
+                || randomness_program == SWITCHBOARD_DEVNET_PROGRAM
+                || randomness_program == SWITCHBOARD_MAINNET_PROGRAM,
+            MyneError::InvalidRandomnessAccount
+        );
+        ctx.accounts.config.randomness_program = randomness_program;
+        emit!(RandomnessProgramChanged { randomness_program });
         Ok(())
     }
 
@@ -725,12 +748,17 @@ pub mod myne_protocol {
             Pubkey::default(),
             MyneError::RandomnessProviderRequired
         );
+        let liquidity_pool = ctx
+            .accounts
+            .liquidity_pool
+            .as_ref()
+            .map(|pool| pool.to_account_info());
         settle_round_core(
             &mut ctx.accounts.round,
             &mut ctx.accounts.config,
             &mut ctx.accounts.stake_pool,
-            &ctx.accounts.liquidity_gate,
-            &ctx.accounts.liquidity_pool.to_account_info(),
+            ctx.accounts.liquidity_gate.as_ref(),
+            liquidity_pool.as_ref(),
             &ctx.accounts.buyback_wallet.to_account_info(),
             None,
             None,
@@ -775,15 +803,20 @@ pub mod myne_protocol {
             randomness.reveal_slot == clock.slot,
             MyneError::RandomnessNotResolved
         );
+        let liquidity_pool = ctx
+            .accounts
+            .liquidity_pool
+            .as_ref()
+            .map(|pool| pool.to_account_info());
         settle_round_core(
             &mut ctx.accounts.round,
             &mut ctx.accounts.config,
             &mut ctx.accounts.stake_pool,
-            &ctx.accounts.liquidity_gate,
-            &ctx.accounts.liquidity_pool.to_account_info(),
+            ctx.accounts.liquidity_gate.as_ref(),
+            liquidity_pool.as_ref(),
             &ctx.accounts.buyback_wallet.to_account_info(),
-            Some(&ctx.accounts.myne_vault),
-            Some(&ctx.accounts.sol_vault),
+            ctx.accounts.myne_vault.as_ref(),
+            ctx.accounts.sol_vault.as_ref(),
             randomness.value,
         )
     }
@@ -1470,9 +1503,20 @@ fn assert_liquidity_pool(
 #[cfg(test)]
 mod motherlode_tests {
     use super::{
-        checked_bps, motherlode_hit, motherlode_share, mul_div, BASE_ROUND_EMISSION,
-        BURN_WEIGHT_MULTIPLIER, MINING_PROTOCOL_FEE_BPS, MOTHERLODE_ODDS,
+        checked_bps, liquidity_gate_required, motherlode_hit, motherlode_share, mul_div,
+        BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER, MINING_PROTOCOL_FEE_BPS, MOTHERLODE_ODDS,
+        SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
     };
+
+    #[test]
+    fn devnet_provider_does_not_require_a_pool() {
+        assert!(!liquidity_gate_required(SWITCHBOARD_DEVNET_PROGRAM));
+    }
+
+    #[test]
+    fn mainnet_provider_remains_pool_gated() {
+        assert!(liquidity_gate_required(SWITCHBOARD_MAINNET_PROGRAM));
+    }
 
     #[test]
     fn motherlode_is_one_in_650_per_round() {
@@ -1524,7 +1568,10 @@ mod motherlode_tests {
         let prize = gross.checked_sub(fee).unwrap();
         assert_eq!(fee, 240_000_000);
         assert_eq!(prize, 1_760_000_000);
-        assert_eq!(mul_div(prize, 20_000_000, 100_000_000).unwrap(), 352_000_000);
+        assert_eq!(
+            mul_div(prize, 20_000_000, 100_000_000).unwrap(),
+            352_000_000
+        );
     }
 
     #[test]
@@ -1545,20 +1592,18 @@ fn settle_round_core(
     round: &mut Account<Round>,
     config: &mut Account<ProtocolConfig>,
     stake_pool: &mut Account<StakePool>,
-    liquidity_gate: &Account<LiquidityGate>,
-    liquidity_pool: &AccountInfo<'_>,
+    liquidity_gate: Option<&Account<LiquidityGate>>,
+    liquidity_pool: Option<&AccountInfo<'_>>,
     buyback_wallet: &AccountInfo<'_>,
     myne_vault: Option<&InterfaceAccount<'_, TokenAccount>>,
     sol_vault: Option<&InterfaceAccount<'_, TokenAccount>>,
     randomness: [u8; 32],
 ) -> Result<()> {
-    assert_liquidity_pool(
-        liquidity_gate,
-        liquidity_pool,
-        config,
-        myne_vault,
-        sol_vault,
-    )?;
+    if liquidity_gate_required(config.randomness_program) {
+        let gate = liquidity_gate.ok_or(MyneError::LiquidityPoolNotVerified)?;
+        let pool = liquidity_pool.ok_or(MyneError::LiquidityPoolNotVerified)?;
+        assert_liquidity_pool(gate, pool, config, myne_vault, sol_vault)?;
+    }
     require!(!round.settled, MyneError::RoundAlreadySettled);
     let tile_hash = domain_hash(b"tile", round.id, &randomness);
     let mode_hash = domain_hash(b"mode", round.id, &randomness);
@@ -1660,6 +1705,14 @@ fn settle_round_core(
         motherlode_payout_lamports: round.motherlode_payout_lamports,
     });
     Ok(())
+}
+
+/// Mainnet settlement is pool-gated. Devnet deliberately runs without a
+/// Meteora dependency so the full mining/staking flow can be exercised before
+/// production liquidity exists. Unknown providers fail closed and remain
+/// pool-gated.
+fn liquidity_gate_required(randomness_program: Pubkey) -> bool {
+    randomness_program != SWITCHBOARD_DEVNET_PROGRAM && randomness_program != Pubkey::default()
 }
 
 struct SwitchboardRandomness {
@@ -2023,9 +2076,9 @@ pub struct SettleRound<'info> {
     #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
     pub round: Box<Account<'info, Round>>,
     #[account(seeds=[LIQUIDITY_GATE_SEED], bump=liquidity_gate.bump)]
-    pub liquidity_gate: Account<'info, LiquidityGate>,
+    pub liquidity_gate: Option<Account<'info, LiquidityGate>>,
     /// CHECK: The pool address and owner are checked against LiquidityGate before settlement.
-    pub liquidity_pool: UncheckedAccount<'info>,
+    pub liquidity_pool: Option<UncheckedAccount<'info>>,
     pub randomness_authority: Signer<'info>,
     /// CHECK: Address constrained to immutable configuration.
     #[account(mut)]
@@ -2040,11 +2093,11 @@ pub struct SettleRoundVerified<'info> {
     #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
     pub round: Box<Account<'info, Round>>,
     #[account(seeds=[LIQUIDITY_GATE_SEED], bump=liquidity_gate.bump)]
-    pub liquidity_gate: Account<'info, LiquidityGate>,
+    pub liquidity_gate: Option<Account<'info, LiquidityGate>>,
     /// CHECK: pool key and owner are checked against LiquidityGate.
-    pub liquidity_pool: UncheckedAccount<'info>,
-    pub myne_vault: InterfaceAccount<'info, TokenAccount>,
-    pub sol_vault: InterfaceAccount<'info, TokenAccount>,
+    pub liquidity_pool: Option<UncheckedAccount<'info>>,
+    pub myne_vault: Option<InterfaceAccount<'info, TokenAccount>>,
+    pub sol_vault: Option<InterfaceAccount<'info, TokenAccount>>,
     /// CHECK: owner, discriminator, account binding and freshness are checked
     /// by parse_switchboard_randomness and the settlement handler.
     pub randomness_account: UncheckedAccount<'info>,
@@ -2186,6 +2239,10 @@ pub struct AdminAccepted {
 #[event]
 pub struct RandomnessAuthorityChanged {
     pub randomness_authority: Pubkey,
+}
+#[event]
+pub struct RandomnessProgramChanged {
+    pub randomness_program: Pubkey,
 }
 #[event]
 pub struct MinerRegistered {

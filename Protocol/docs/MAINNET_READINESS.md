@@ -37,14 +37,15 @@ requirement, and binding is restricted to `config.randomness_authority`. Devnet 
 stale reveals, wrong account binding, wrong owner, replay and missed-reveal recovery before this
 gate can be closed.
 
-### 2. The liquidity gate now verifies the configured Meteora DLMM and live vault reserves
+### 2. Mainnet liquidity gate now verifies the configured Meteora DLMM and live vault reserves
 
-Production/devnet registration now requires the canonical Meteora DLMM program, MYNE and wrapped
-SOL vault accounts, matching mints, and minimum live vault balances. Unpause and verified
-settlement re-check those same vaults, so withdrawing liquidity pauses the protocol path. The
-pool-to-vault association still depends on the designated admin supplying the pool's official
-vault accounts; this must be verified against Meteora's published account layout during devnet
-testing and external audit.
+Mainnet registration requires the canonical Meteora DLMM program, MYNE and wrapped SOL vault
+accounts, matching mints, and minimum live vault balances. Mainnet unpause and verified settlement
+re-check those same vaults, so withdrawing liquidity pauses the production path. Devnet's
+Switchboard provider mode intentionally bypasses this gate; its buyback keeper records the 2%
+allocation but skips swaps until a pool is registered. The pool-to-vault association still depends
+on the designated admin supplying the pool's official vault accounts and remains a mainnet launch
+check.
 
 ### 3. Buyback/burn remains an operational keeper
 

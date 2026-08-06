@@ -1,14 +1,15 @@
 # Devnet testing runbook
 
-The mining, staking, referral, claim, and auto-round bundles are implemented for local testing.
-The program may be deployed while paused, but it must not be unpaused until the official Meteora
-pool has been created and registered. The on-chain liquidity gate stores the exact pool address,
-program owner, and MYNE/WSOL vault balances; miners cannot register a competing pool. Do not
-enable value-bearing operations
-until the full local suite passes and the devnet-only trusted randomness keeper, operational fee
-wallets, and Meteora devnet pool are explicitly confirmed.
+The mining, staking, referral, claim, and auto-round bundles are implemented for local and Devnet
+testing. Devnet uses the Switchboard Devnet provider mode and intentionally does not require a
+Meteora pool, so the full mining/staking flow can be exercised without liquidity. The program
+still starts paused and must be explicitly unpaused by the admin. The 2% buyback allocation is
+accounted for on-chain, but the buyback keeper skips swaps until a pool is registered.
 
-After the pool exists, register it with the admin wallet only after independently checking its
+Mainnet remains pool-gated: the official Meteora pool must be created and registered before
+activation or settlement.
+
+For a Devnet pool-backed buyback rehearsal, register it with the admin wallet only after independently checking its
 MYNE/SOL vault mints and reserves:
 
 ```bash

@@ -12,6 +12,7 @@ const { TOKEN_PROGRAM_ID, getOrCreateAssociatedTokenAccount, transfer } = splTok
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const DEVNET_KEEPER_CONFIRMATION = PROGRAM_ID.toBase58();
 const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
+const SWITCHBOARD_DEVNET_PROGRAM = 'Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2';
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const provider = AnchorProvider.env();
 setProvider(provider);
@@ -279,12 +280,14 @@ async function settleReadyRound(roundId, now, configState) {
   if (!state || state.settled) return;
   if (now < Number(state.settlesAt) || now >= Number(state.refundAt)) return;
   const randomness = [...randomBytes(32)];
+  const poolGated = configState.randomnessProgram.toBase58() !== SWITCHBOARD_DEVNET_PROGRAM
+    && !configState.randomnessProgram.equals(PublicKey.default);
   await program.methods.settleRound(randomness).accounts({
     config,
     stakePool,
     round,
-    liquidityGate,
-    liquidityPool: (await program.account.liquidityGate.fetch(liquidityGate)).pool,
+    liquidityGate: poolGated ? liquidityGate : null,
+    liquidityPool: poolGated ? (await program.account.liquidityGate.fetch(liquidityGate)).pool : null,
     randomnessAuthority: payer.publicKey,
     buybackWallet: configState.buybackWallet,
   }).rpc();
@@ -328,8 +331,15 @@ async function tick() {
 if (isDevnet) {
   const configState = await program.account.protocolConfig.fetch(config);
   if (configState.paused) {
-    const gateState = await program.account.liquidityGate.fetch(liquidityGate);
-    await program.methods.setPaused(false).accounts({ config, liquidityGate, liquidityPool: gateState.pool, admin: payer.publicKey }).rpc();
+    const poolGated = configState.randomnessProgram.toBase58() !== SWITCHBOARD_DEVNET_PROGRAM
+      && !configState.randomnessProgram.equals(PublicKey.default);
+    const gateState = poolGated ? await program.account.liquidityGate.fetch(liquidityGate) : null;
+    await program.methods.setPaused(false).accounts({
+      config,
+      liquidityGate: poolGated ? liquidityGate : null,
+      liquidityPool: poolGated ? gateState.pool : null,
+      admin: payer.publicKey,
+    }).rpc();
     log('devnet-unpaused', { admin: payer.publicKey.toBase58() });
   }
 }

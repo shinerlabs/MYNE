@@ -59,8 +59,9 @@ Local/devnet decisions:
 
 1. A wallet may submit any number of separate receipt deployments in a round.
 2. Integer division dust stays in the round account pending a permissionless dust-sweep milestone.
-3. Local/devnet settlement uses the configured trusted randomness signer. Mainnet remains blocked
-   until this is replaced by a verified oracle callback.
+3. Local/devnet settlement uses the configured trusted randomness signer. Devnet's Switchboard
+   provider mode does not require a Meteora pool; Mainnet remains pool-gated and uses the verified
+   Switchboard settlement path.
 4. Unsettled receipts become fully refundable ten minutes after the normal settlement time.
 5. The 0.2 MYNE staking bonus is virtual until a Motherlode hit. It is never a liquid or claimable
    token balance: when claimed alongside the SOL payment, it is permanently burned and becomes
@@ -89,15 +90,15 @@ the same tracked balance instead of becoming operator revenue.
 
 ## Launch liquidity gate
 
-Initialization always leaves the protocol paused. Before the admin can unpause it, a separate
-`LiquidityGate` PDA must be initialized with the exact official Meteora pool address and its owner
-program. The gate records the declared minimum SOL and MYNE thresholds for the pool-registration
-runbook and prevents miners or other users from substituting a competing pool before emissions
-begin. The `config.paused` flag is the single protocol activation latch: one successful unpause
-starts rounds, mining, staking, referrals, emissions, and buyback accounting together. Unpausing
-checks that the exact registered account still exists and is owned by the registered Meteora
-program; settlement repeats this check before moving the first round's 2% buyback/burn allocation.
-Pool-specific reserve decoding remains a required deployment check.
+Initialization always leaves the protocol paused. On Mainnet, before the admin can unpause it, a
+separate `LiquidityGate` PDA must be initialized with the exact official Meteora pool address and
+its owner program. The gate records the declared minimum SOL and MYNE thresholds and prevents
+miners or other users from substituting a competing pool before emissions begin. Devnet's
+Switchboard provider mode deliberately bypasses this gate so mining and staking can be tested
+without liquidity; the buyback keeper skips swaps until a pool is registered. The `config.paused`
+flag remains the single activation latch: one successful unpause starts rounds, mining, staking,
+referrals, emissions, and buyback accounting together. Mainnet unpause and settlement re-check
+the exact registered pool and vault reserves.
 `claim_myne` also respects the pause flag, so an emergency pause cannot leave a token-minting
 escape hatch.
 

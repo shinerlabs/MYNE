@@ -29,6 +29,15 @@ test('losing-tile deployments remain in the prize pool', () => {
   assert.equal(settledSolReward(prize, 80_000_000n, winningTileTotal), 1_408_000_000n);
 });
 
+test('five-miner round pays only the two winning miners pro rata', () => {
+  const prize = 1_760_000_000n;
+  const winningTileTotal = 100_000_000n;
+  const miners = [0n, 0n, 0n, 30_000_000n, 70_000_000n];
+  const rewards = miners.map((stake) => settledSolReward(prize, stake, winningTileTotal));
+  assert.deepEqual(rewards, [0n, 0n, 0n, 528_000_000n, 1_232_000_000n]);
+  assert.equal(rewards.reduce((sum, value) => sum + value, 0n), prize);
+});
+
 test('Motherlode displays exactly 1% of total deployed mining while a round is open', () => {
   assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_000n, false), 14_400_000n);
   assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_099n, false), 14_400_000n);
