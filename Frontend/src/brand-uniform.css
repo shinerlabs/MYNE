@@ -7364,10 +7364,15 @@ body[data-route="mine"] .deploy-panel > .deploy.ready:hover {
   box-shadow: none !important;
 }
 
-/* Keep the menu bar as one quiet solid surface, without a gradient or glass treatment. */
-html #app > .topbar {
+/* Use one solid page canvas across every route. The menu remains transparent over it. */
+html .brand-atmosphere {
   background: #090909 !important;
-  background-color: #090909 !important;
+  background-image: none !important;
+}
+
+html #app > .topbar {
+  background: transparent !important;
+  background-color: transparent !important;
   box-shadow: none !important;
   backdrop-filter: none !important;
 }
