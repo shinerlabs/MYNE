@@ -10,7 +10,7 @@ export const supabase = createClient(
 
 export const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-guest-id',
   'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
 };
 

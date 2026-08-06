@@ -2,6 +2,7 @@ import { getProvider } from '../chain/client.js';
 import { FUNCTIONS_URL, fetchJson } from './config.js';
 
 const CHAT_SESSION_KEY = 'gld-solana-chat-session';
+const CHAT_GUEST_KEY = 'gld-solana-chat-guest-id';
 let session = loadStoredSession();
 let getConnectedWallet = () => null;
 let notify = () => {};
@@ -17,6 +18,17 @@ function loadStoredSession() {
   } catch { return null; }
 }
 export const getSession = () => session;
+export const getGuestId = () => {
+  try {
+    const existing = localStorage.getItem(CHAT_GUEST_KEY);
+    if (existing) return existing;
+    const id = `guest_${crypto.randomUUID()}`;
+    localStorage.setItem(CHAT_GUEST_KEY, id);
+    return id;
+  } catch {
+    return `guest_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  }
+};
 const saveSession = (next) => {
   session = next;
   try { localStorage.setItem(CHAT_SESSION_KEY, JSON.stringify(next)); } catch { /* private mode */ }

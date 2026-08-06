@@ -2,7 +2,7 @@ import {
   supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, CHAT_TOPIC, HISTORY_LIMIT,
   REACTIONS, shortWallet, fetchJson,
 } from './config.js';
-import { getSession, ensureSession, authedFetchJson } from './session.js';
+import { getSession, getGuestId, ensureSession, authedFetchJson } from './session.js';
 import { encodeImageBody, decodeImageBody, mountStickerPicker } from './stickers.js';
 import { buildAvatar, bindProfileHover, getMyProfile, profileDisplayName } from './profile.js';
 
@@ -72,8 +72,8 @@ export const setChatComposeEnabled = (enabled, placeholder) => {
   chatSendButtonEl?.classList.toggle('chat-ready', enabled);
   if (chatHintEl) {
     chatHintEl.textContent = enabled
-      ? (getSession() ? 'Stickers · Enter send · Shift+Enter newline' : 'First send asks for a one-time signature')
-      : 'Sign-in unlocks send';
+      ? (getSession() ? 'Stickers · Enter send · Shift+Enter newline' : 'Guest chat · connect to unlock your profile')
+      : 'Chat unavailable';
   }
   document.querySelector('.chat-gate')?.remove();
 
@@ -81,12 +81,8 @@ export const setChatComposeEnabled = (enabled, placeholder) => {
     const gate = document.createElement('div');
     gate.className = 'chat-gate';
     const text = document.createElement('span');
-    text.textContent = 'Connect your wallet to send messages. You can read along without one.';
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = 'Connect wallet';
-    btn.addEventListener('click', () => host.connectWallet?.());
-    gate.append(text, btn);
+    text.textContent = 'Chat is temporarily unavailable.';
+    gate.append(text);
     chatComposeEl.parentElement.insertBefore(gate, chatComposeEl);
   }
 };
@@ -614,7 +610,6 @@ export async function loadChatHistory() {
 // ------------------------------------------------------------------ sending
 async function sendChatMessage() {
   if (!chatInputEl) return;
-  if (!host.requireWallet('Send a message')) return;
 
   const caption = chatInputEl.value.trim();
   const imagePath = stickers?.getPending() || null;
@@ -639,12 +634,14 @@ async function sendChatMessage() {
   if (chatSendButtonEl) chatSendButtonEl.disabled = true;
 
   try {
-    const session = await ensureSession();
+    const session = host.getAccount() ? await ensureSession() : null;
+    const headers = { 'Content-Type': 'application/json', 'X-Guest-Id': getGuestId() };
+    if (session?.token) headers.Authorization = `Bearer ${session.token}`;
     setChatComposeEnabled(true, 'Send a message…');
 
     const { res, data } = await fetchJson(`${FUNCTIONS_URL}/chat-send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
+      headers,
       body: JSON.stringify({ body: outboundBody }),
     });
     if (!res.ok) {
@@ -656,8 +653,8 @@ async function sendChatMessage() {
     // server's copy immediately so sending feels instant on a slow socket.
     appendChatMessage(data.message ?? {
       body: outboundBody,
-      walletAddress: session.walletAddress,
-      displayName: profileDisplayName(),
+      walletAddress: session?.walletAddress || null,
+      displayName: session ? profileDisplayName() : 'Guest',
       avatarUrl: getMyProfile()?.avatarUrl || null,
       createdAt: new Date().toISOString(),
     });
@@ -754,9 +751,7 @@ export function mountChat(hostAdapter, handlers = {}) {
       sendChatMessage();
     }
   });
-  chatInputEl?.addEventListener('focus', () => {
-    if (!host.getAccount()) host.requireWallet('Send a message');
-  });
+  chatInputEl?.addEventListener('focus', () => {});
 
   chatMessagesEl.addEventListener('scroll', () => {
     const atBottom = chatMessagesEl.scrollHeight - chatMessagesEl.scrollTop - chatMessagesEl.clientHeight < 60;

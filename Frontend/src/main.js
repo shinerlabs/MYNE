@@ -210,7 +210,7 @@ const socialPanel = `
           <button type="button" class="chat-media-btn" id="chat-sticker-btn" aria-label="Open stickers" title="Stickers">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.2 8.2a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Zm6.4 0a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4ZM12 17.2c-2.2 0-4-1.2-4.6-2.8h9.2c-.6 1.6-2.4 2.8-4.6 2.8Z"/></svg>
           </button>
-          <textarea rows="1" placeholder="Connect wallet to chat…" autocomplete="off" maxlength="300" aria-label="Chat message"></textarea>
+          <textarea rows="1" placeholder="Send a message…" autocomplete="off" maxlength="300" aria-label="Chat message"></textarea>
           <button type="button" aria-label="Send message" title="Send" class="chat-send-btn">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.4 20.6 21 12 3.4 3.4l-.1 6.8L14 12 3.3 13.8l.1 6.8Z"/></svg>
           </button>
@@ -232,7 +232,7 @@ const socialPanel = `
           <img alt="Selected sticker preview"/>
           <button type="button" id="chat-attach-clear" aria-label="Remove image">✕</button>
         </div>
-        <div class="chat-compose-meta"><small id="chat-hint">Sign-in unlocks send</small><span id="chat-char-count">0/300</span></div>
+        <div class="chat-compose-meta"><small id="chat-hint">Guest chat · connect to unlock your profile</small><span id="chat-char-count">0/300</span></div>
       </div>
     </section>
     <section class="social-content" data-social-panel="news" role="tabpanel">

@@ -87,7 +87,9 @@ export function mountSocial(host) {
     const previous = lastAccount;
     lastAccount = key;
 
-    setChatComposeEnabled(Boolean(account));
+    // Basic chat is available without wallet signing during launch. Connection still unlocks
+    // profiles, reactions, replies and authenticated moderation actions.
+    setChatComposeEnabled(true);
 
     if (!account) {
       // Only a REAL disconnect drops the session (previous held an address).
