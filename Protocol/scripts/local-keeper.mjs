@@ -10,15 +10,24 @@ const { AnchorProvider, BN, Program, setProvider } = anchor;
 const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = web3;
 const { TOKEN_PROGRAM_ID, getOrCreateAssociatedTokenAccount, transfer } = splToken;
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
+const DEVNET_KEEPER_CONFIRMATION = PROGRAM_ID.toBase58();
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const provider = AnchorProvider.env();
 setProvider(provider);
-
-assert.match(
-  provider.connection.rpcEndpoint,
-  /^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/,
-  'The demo keeper is local-only and refuses non-local RPC endpoints',
-);
+const isDevnet = /^https:\/\/api\.devnet\.solana\.com\/?$/i.test(provider.connection.rpcEndpoint);
+if (isDevnet) {
+  assert.equal(
+    process.env.ALLOW_DEVNET_KEEPER,
+    DEVNET_KEEPER_CONFIRMATION,
+    `Set ALLOW_DEVNET_KEEPER=${DEVNET_KEEPER_CONFIRMATION} to authorize Devnet demo transactions`,
+  );
+} else {
+  assert.match(
+    provider.connection.rpcEndpoint,
+    /^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/,
+    'The demo keeper only accepts localnet or explicitly authorized Devnet',
+  );
+}
 const payer = provider.wallet.payer;
 assert.ok(payer, 'A file-backed local wallet is required');
 
@@ -80,7 +89,7 @@ async function chainTime() {
 async function prepareDemoMiners() {
   for (const [index, demo] of demoMiners.entries()) {
     const authority = demo.keypair.publicKey;
-    const signature = await provider.connection.requestAirdrop(authority, 10 * LAMPORTS_PER_SOL);
+    const signature = await provider.connection.requestAirdrop(authority, (isDevnet ? 2 : 10) * LAMPORTS_PER_SOL);
     await provider.connection.confirmTransaction(signature, 'confirmed');
     const miner = minerPda(authority);
     if (!(await provider.connection.getAccountInfo(miner, 'confirmed'))) {
@@ -106,7 +115,7 @@ async function prepareDemoStakers() {
   const vaultTokens = await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, stakePool, true);
   for (const [index, demo] of demoStakers.entries()) {
     const authority = demo.keypair.publicKey;
-    const signature = await provider.connection.requestAirdrop(authority, 5 * LAMPORTS_PER_SOL);
+    const signature = await provider.connection.requestAirdrop(authority, (isDevnet ? 2 : 5) * LAMPORTS_PER_SOL);
     await provider.connection.confirmTransaction(signature, 'confirmed');
     const miner = minerPda(authority);
     const stakePosition = stakePositionPda(authority);
@@ -250,6 +259,14 @@ async function tick() {
     log('keeper-error', { message: error instanceof Error ? error.message.split('\n')[0] : String(error) });
   } finally {
     ticking = false;
+  }
+}
+
+if (isDevnet) {
+  const configState = await program.account.protocolConfig.fetch(config);
+  if (configState.paused) {
+    await program.methods.setPaused(false).accounts({ config, admin: payer.publicKey }).rpc();
+    log('devnet-unpaused', { admin: payer.publicKey.toBase58() });
   }
 }
 

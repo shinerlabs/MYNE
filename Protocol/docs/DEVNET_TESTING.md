@@ -86,6 +86,23 @@ pnpm run test:devnet:smoke
 For the viewer, set `VITE_SOLANA_RPC_URL=https://api.devnet.solana.com` in `Frontend/.env.local`,
 restart Vite, and open `/local.html`.
 
+## Controlled Devnet demo keeper
+
+After the admin wallet has been deliberately funded with Devnet SOL, the demo keeper can create
+ten ephemeral miners and three ephemeral stakers, deploy randomized demo amounts, and settle
+rounds. It is guarded against accidental use on any non-local/non-Devnet endpoint and requires an
+explicit program-id confirmation:
+
+```bash
+ALLOW_DEVNET_KEEPER=D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e \
+ANCHOR_PROVIDER_URL=https://api.devnet.solana.com \
+ANCHOR_WALLET=.localnet/test-wallet.json \
+pnpm run local:keeper
+```
+
+The public Devnet faucet can be rate-limited or empty. Do not substitute mainnet funds; use only
+ephemeral wallets and Devnet SOL for this demo.
+
 ## Stop conditions
 
 Do not continue if the program ID, upgrade authority, mint, config PDA, supply, decimals, or freeze
