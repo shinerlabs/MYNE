@@ -7363,3 +7363,12 @@ body[data-route="mine"] .deploy-panel > .deploy.ready:hover {
   background: #f1f1f1 !important;
   box-shadow: none !important;
 }
+
+/* The navigation sits directly on the page canvas; no separate menu-bar surface. */
+html #app > .topbar,
+html #app > .topbar .main-nav {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
