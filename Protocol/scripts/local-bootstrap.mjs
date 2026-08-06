@@ -6,7 +6,7 @@ import web3 from '@solana/web3.js';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const { PublicKey, SystemProgram } = web3;
-const { AuthorityType, TOKEN_PROGRAM_ID, createMint, getOrCreateAssociatedTokenAccount, mintTo, setAuthority } = splToken;
+const { AuthorityType, TOKEN_PROGRAM_ID, createMint, getMint, getOrCreateAssociatedTokenAccount, mintTo, setAuthority } = splToken;
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const LOADER = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111');
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
@@ -45,6 +45,9 @@ const mint = await createMint(provider.connection, payer, payer.publicKey, null,
 const launchAccount = await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, payer.publicKey);
 await mintTo(provider.connection, payer, mint, launchAccount.address, payer, 100_000_000_000n);
 await setAuthority(provider.connection, payer, mint, payer, AuthorityType.MintTokens, config);
+const launchMint = await getMint(provider.connection, mint, 'confirmed', TOKEN_PROGRAM_ID);
+assert.equal(launchMint.freezeAuthority, null, 'MYNE must launch without freeze authority');
+assert.ok(launchMint.mintAuthority?.equals(config), 'MYNE mint authority must be the config PDA');
 await program.methods.initializeProtocol({
   randomnessAuthority: payer.publicKey,
   buybackWallet: payer.publicKey,

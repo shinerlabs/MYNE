@@ -37,11 +37,6 @@ const LAUNCH_GENESIS_MYNE = launchAllocation.genesisMintMyne;
 const LAUNCH_BURN_STAKED_MYNE = launchAllocation.burnStakedMyne;
 const LAUNCH_LIQUIDITY_MYNE = launchAllocation.liquidityMyne;
 const LAUNCH_MARKET_MYNE = launchAllocation.initialMarketMyne;
-const communityLinks = [
-  LINKS.telegram && `<a class="header-social" href="${LINKS.telegram}" target="_blank" rel="noreferrer" aria-label="MYNE on Telegram" title="Telegram">${icon('telegram')}</a>`,
-  LINKS.x && `<a class="header-social" href="${LINKS.x}" target="_blank" rel="noreferrer" aria-label="MYNE on X" title="X">${icon('x')}</a>`,
-].filter(Boolean).join('');
-
 // Social is a secondary surface. Keep Supabase, chat, profiles and stickers out of the entry
 // chunk so the protocol UI can paint before that module is requested.
 let social = null;
@@ -177,6 +172,13 @@ const icon = (name) => ({
   info: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 10h2v8h-2v-8Zm0-4h2v2h-2V6Zm1-4a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm0 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z"/></svg>',
   trophy: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v2h4v4c0 3-2 5-5 5h-.35A6 6 0 0 1 13 16.65V19h4v2H7v-2h4v-2.35A6 6 0 0 1 8.35 14H8c-3 0-5-2-5-5V5h4V3Zm0 4H5v2c0 1.65 1 2.75 2.5 2.95A6 6 0 0 1 7 9.5V7Zm10 0v2.5a6 6 0 0 1-.5 2.45C18 11.75 19 10.65 19 9V7h-2Z"/></svg>',
 }[name] || '');
+
+const communityLinks = [
+  LINKS.telegram && `<a class="header-social" href="${LINKS.telegram}" target="_blank" rel="noreferrer" aria-label="MYNE on Telegram" title="Telegram">${icon('telegram')}</a>`,
+  // Keep the X touchpoint visible even before the project handle is configured;
+  // VITE_X_URL can replace the neutral landing link at deployment time.
+  `<a class="header-social header-social-x" href="${LINKS.x || 'https://x.com'}" target="_blank" rel="noreferrer" aria-label="MYNE on X">${icon('x')}</a>`,
+].filter(Boolean).join('');
 
 const claimPanel = `<section class="claim-panel panel rewards-panel collapsed" aria-label="Rewards">
   <div class="rewards-head"><span class="eyebrow">REWARDS</span><div class="rewards-unclaimed" aria-label="Claimable SOL and MYNE" aria-live="polite"><b><span>${solIcon('rw-eth-mark')} <em id="rw-eth">0.00</em></span><i class="rewards-sep">·</i><span><img src="/gld-icon-transparent.png" alt=""/> <em id="rw-unclaimed-gld">0.00</em></span></b></div><button class="rewards-toggle" id="rewards-toggle" type="button" aria-label="Expand rewards" aria-expanded="false" aria-controls="rewards-body">${icon('chevron')}</button></div>
@@ -365,7 +367,7 @@ document.querySelector('#app').innerHTML = `
     </details>
   </main>
 
-  <main class="feature-shell about-shell page-view" data-page="about"><header class="feature-hero route-header"><div><span class="eyebrow">PROTOCOL</span><h1>About MYNE.</h1></div></header><div class="about-layout"><aside class="about-nav panel"><span>CONTENTS</span><button class="active" data-about-section="intro">Protocol</button><button data-about-section="mining">Mine</button><button data-about-section="token-flow">Supply</button><button data-about-section="fees">Fees</button><button data-about-section="gold-payouts">Rewards</button><button data-about-section="motherlode">Motherlode</button><button data-about-section="referral-model">Referrals</button><button data-about-section="staking-model">Staking</button></aside><section class="about-content panel">
+  <main class="feature-shell about-shell page-view" data-page="about"><header class="feature-hero route-header"><div><span class="eyebrow">PROTOCOL</span><h1>About MYNE.</h1></div></header><div class="about-layout"><aside class="about-nav panel"><span>CONTENTS</span><button class="active" data-about-section="intro">Protocol</button><button data-about-section="mining">Mine</button><button data-about-section="token-flow">Supply</button><button data-about-section="fees">Fees</button><button data-about-section="motherlode">Motherlode</button><button data-about-section="referral-model">Referrals</button><button data-about-section="staking-model">Staking</button></aside><section class="about-content panel">
     <article class="about-section active" data-about-panel="intro"><span class="eyebrow">01 · INTRODUCTION</span><h2>Store of value.</h2><p class="about-lead">MYNE v2 begins with a ${LAUNCH_GENESIS_MYNE} MYNE genesis mint. ${LAUNCH_BURN_STAKED_MYNE} MYNE is permanently burned and staked; only ${LAUNCH_MARKET_MYNE} MYNE enters the market through the initial liquidity pool.</p><div class="about-statline"><span><small>GENESIS MINT</small><strong>${LAUNCH_GENESIS_MYNE}</strong></span><span><small>BURN-STAKED</small><strong>${LAUNCH_BURN_STAKED_MYNE}</strong></span><span><small>MARKET SUPPLY</small><strong>${LAUNCH_MARKET_MYNE}</strong></span><span><small>HARD CAP</small><strong>2,000,000</strong></span></div><div class="principle-grid"><div><b>Public liquidity</b><p>The initial ${LAUNCH_LIQUIDITY_MYNE} MYNE is paired with SOL and forms the entire launch market supply.</p></div><div><b>Genesis burn stake</b><p>${LAUNCH_BURN_STAKED_MYNE} MYNE is permanently removed from liquid supply while retaining protocol staking weight.</p></div><div><b>Mining-only emissions</b><p>After genesis, new MYNE enters supply through competitive mining rounds.</p></div><div><b>Staker yield</b><p>Staked MYNE earns SOL directly from the 8% mining allocation.</p></div></div><div class="protocol-callout"><b>Only ${LAUNCH_MARKET_MYNE} MYNE begins liquid</b><p>The genesis burn stake cannot be sold or withdrawn. At launch, every market-available MYNE originates from the ${LAUNCH_LIQUIDITY_MYNE} MYNE liquidity allocation.</p></div></article>
     <article class="about-section" data-about-panel="mining"><span class="eyebrow">02 · MINING ROUNDS</span><h2>+${isPremine ? '0.3' : '1'} / minute.</h2><p class="about-lead">Miners deploy SOL across a 5×5 grid. Each 60-second round selects one winning tile, followed immediately by a 5-second result window.</p><div class="about-statline"><span><small>TILES</small><strong>25</strong></span><span><small>MINING</small><strong>60 SEC</strong></span><span><small>RESULT</small><strong>5 SEC</strong></span><span><small>REWARD</small><strong>+${isPremine ? '0.3' : '1'}</strong></span></div><div class="steps-list compact-steps"><div><i>1</i><span><b>Select</b><p>Choose tiles manually or set a random tile count.</p></span></div><div><i>2</i><span><b>Deploy</b><p>One SOL amount is applied to every selected tile.</p></span></div><div><i>3</i><span><b>Reveal</b><p>One of the 25 tiles wins at round close.</p></span></div><div><i>4</i><span><b>Settle</b><p>The +${isPremine ? '0.3' : '1'} MYNE reward resolves as Split or Solo.</p></span></div></div><div class="about-split"><div><span>SPLIT · 50%</span><strong>Every miner on the tile</strong><p>The reward is shared in proportion to each miner’s SOL on the winning tile.</p></div><div><span>SOLO · 50%</span><strong>One weighted winner</strong><p>Each miner’s chance equals their share of SOL on the winning tile.</p></div></div><div class="worked-example"><span>EXAMPLE</span><p>A miner supplied <b>0.60 SOL</b> of the tile’s <b>1.00 SOL</b>. They receive 60% in Split mode or have a 60% chance in Solo mode.</p></div><details class="about-disclosure"><summary>Automation rules <i>+</i></summary><p>Auto-round repeats manually selected tiles every round. When Random is active, the chosen number of tiles is randomly reassigned at the start of each automated round.</p></details></article>
     
@@ -1055,9 +1057,14 @@ if (aboutContent && aboutNav) {
     if (panel) panel.innerHTML = markup;
   });
 
+  // Rewards are part of the staking mechanism, not a separate protocol chapter. Keep the
+  // detailed reward copy in the staking section and remove the legacy standalone panel so the
+  // contents list has one clear destination for all staking information.
+  aboutContent.querySelector('[data-about-panel="gold-payouts"]')?.remove();
+
   const navLabels = {
     intro: 'Protocol', mining: 'Mine',
-    'token-flow': 'Supply', fees: 'Fees', 'gold-payouts': 'Rewards',
+    'token-flow': 'Supply', fees: 'Fees',
     motherlode: 'Motherlode', 'referral-model': 'Referrals', 'staking-model': 'Staking',
   };
   Object.entries(navLabels).forEach(([name, label]) => {
@@ -2072,7 +2079,7 @@ const setAboutSection = (name) => {
   document.querySelectorAll('[data-about-panel]').forEach((panel) => panel.classList.toggle('active', panel.dataset.aboutPanel === target));
   const sectionTitles = {
     intro: 'Protocol', mining: 'Mine', 'token-flow': 'Supply', fees: 'Fees',
-    'gold-payouts': 'Rewards', motherlode: 'Motherlode', 'referral-model': 'Referrals',
+    motherlode: 'Motherlode', 'referral-model': 'Referrals',
     'staking-model': 'Staking',
   };
   const title = sectionTitles[target];
@@ -3440,8 +3447,10 @@ const ensureSocial = () => {
   return socialPromise;
 };
 
-// Pointer/focus intent loads chat immediately. Otherwise wait for an idle period and only warm it
-// on routes where chat is visible; Stake/Swap/History visitors never pay for Supabase or stickers.
+// Pointer/focus intent loads chat immediately. On Mine, initialise the social layer on the next
+// task so the composer is live even when the browser never reaches an idle callback (wallet
+// extensions and the chain poller can keep a tab perpetually busy). Other routes still avoid the
+// Supabase/sticker bundle entirely.
 const socialPanelElement = document.querySelector('.chat-panel');
 socialPanelElement?.addEventListener('pointerenter', () => { void ensureSocial(); }, { once: true, passive: true });
 socialPanelElement?.addEventListener('focusin', () => { void ensureSocial(); }, { once: true });
@@ -3452,11 +3461,7 @@ scheduleSocialLoad = (route) => {
     socialIdleHandle = 0;
     if (document.body.dataset.route === 'mine') void ensureSocial();
   };
-  if ('requestIdleCallback' in window) {
-    socialIdleHandle = window.requestIdleCallback(warm, { timeout: 2500 });
-  } else {
-    socialIdleHandle = window.setTimeout(warm, 1800);
-  }
+  socialIdleHandle = window.setTimeout(warm, 0);
 };
 scheduleSocialLoad(document.body.dataset.route);
 
@@ -3557,9 +3562,13 @@ if (tokenPill && tokenMenu) {
     </div>
     <nav class="token-menu-links" aria-label="MYNE market links"></nav>`;
   const linkHost = tokenMenu.querySelector('.token-menu-links');
+  // Use the configured pool URL when one exists. Before a pool is configured, the token page
+  // still gives users a stable Dexscreener destination once the MYNE mint is indexed.
+  const dexLink = dexscreenerUrl
+    || (addresses.BullionToken ? `https://dexscreener.com/solana/${addresses.BullionToken}` : 'https://dexscreener.com/solana');
   const links = [
     { href: explorerAddress(addresses.BullionToken), label: 'Explorer', note: 'View token contract' },
-    dexscreenerUrl && { href: dexscreenerUrl, label: 'Market', note: 'Chart, liquidity and trades' },
+    { href: dexLink, label: 'Dexscreener', note: 'Chart, liquidity and trades' },
   ].filter(Boolean);
   for (const l of links) {
     const a = document.createElement('a');
@@ -4810,6 +4819,9 @@ syncAutoControls();
 updateMine();
 updateStake();
 setRoute(window.location.hash.slice(1) || 'home', { updateHash: false });
+// Hash routing can land directly on Mine before the deferred scheduler is installed. Ensure the
+// composer is mounted for that deep link as well as for normal in-app navigation.
+if (document.body.dataset.route === 'mine') void ensureSocial();
 // Release the header only after the initial route has applied its visibility rules. This prevents
 // the landing page from flashing the full in-app menu while the module bootstraps.
 document.querySelector('#app')?.classList.add('app-ready');

@@ -1,7 +1,11 @@
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 import { getWallets } from '@wallet-standard/app';
 import { StandardConnect, StandardDisconnect, StandardEvents } from '@wallet-standard/features';
-import { SolanaSignAndSendTransaction, SolanaSignTransaction } from '@solana/wallet-standard-features';
+import {
+  SolanaSignAndSendTransaction,
+  SolanaSignMessage,
+  SolanaSignTransaction,
+} from '@solana/wallet-standard-features';
 import bs58 from 'bs58';
 import { NETWORK, PROTOCOL_READY } from '../app-config.js';
 
@@ -78,6 +82,17 @@ function standardCandidates() {
             chain: standardChain(NETWORK),
           })));
           return signed.map((result) => Transaction.from(result[0].signedTransaction));
+        },
+        async signMessage(message) {
+          const signer = feature(wallet, SolanaSignMessage);
+          if (!signer?.signMessage) throw new Error(`${wallet.name} does not support message signing`);
+          const signed = await signer.signMessage({
+            account: selectedAccount ?? wallet.accounts?.[0],
+            message: message instanceof Uint8Array ? message : new Uint8Array(message),
+          });
+          const signature = signed?.[0]?.signature;
+          if (!signature) throw new Error(`${wallet.name} did not return a message signature`);
+          return signature;
         },
         async signAndSendTransaction(transaction) {
           const signer = feature(wallet, SolanaSignAndSendTransaction);

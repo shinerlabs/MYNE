@@ -1238,6 +1238,10 @@ body[data-route="mine"] .board-panel > .board-motherlode + .slot-grid {
     transform: none !important;
   }
 
+  .topbar .header-social-x {
+    color: #ffffff !important;
+  }
+
   .topbar .header-social::before {
     content: "";
     position: absolute;
@@ -6556,7 +6560,7 @@ body[data-route="home"] .topbar .landing-nav {
   grid-column: 2 !important;
   justify-self: end !important;
   height: 100%;
-  margin-left: 0;
+  margin-right: clamp(12px, 2.5vw, 36px);
   display: flex;
   align-items: center;
   gap: clamp(30px, 3vw, 50px);
@@ -6568,7 +6572,7 @@ body[data-route="home"] .topbar .landing-nav button {
   border: 0;
   background: transparent;
   color: #92959b;
-  font: 720 clamp(15px, 1.05vw, 17px)/1 var(--font-sans);
+  font: 720 clamp(18px, 1.35vw, 22px)/1 var(--font-sans);
   letter-spacing: .08em;
   text-transform: uppercase;
   transition: color .16s ease;
@@ -6824,11 +6828,13 @@ body[data-route="home"] .network-footer {
   body[data-route="home"] { padding-bottom: 0 !important; }
 
   body[data-route="home"] .topbar .landing-nav {
+    justify-self: end !important;
+    margin-right: 12px;
     gap: clamp(17px, 5vw, 27px);
   }
 
   body[data-route="home"] .topbar .landing-nav button {
-    font-size: 12px;
+    font-size: 15px;
     letter-spacing: .06em;
   }
 

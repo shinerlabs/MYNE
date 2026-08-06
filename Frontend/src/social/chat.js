@@ -77,6 +77,10 @@ export const setChatComposeEnabled = (enabled, placeholder, gateMessage = 'Conne
       ? (getSession() ? 'Stickers · Enter send · Shift+Enter newline' : 'Guest chat · connect to unlock your profile')
       : 'Chat unavailable';
   }
+  const emptyCopy = document.querySelector('#chat-empty p');
+  if (emptyCopy) emptyCopy.textContent = enabled
+    ? 'Say hello to the miners.'
+    : 'Connect your wallet and say hello to the miners.';
   document.querySelector('.chat-gate')?.remove();
 
   if (!enabled && chatComposeEl?.parentElement) {
@@ -600,7 +604,11 @@ export async function loadChatHistory() {
     const strong = document.createElement('strong');
     strong.textContent = 'No messages yet';
     const p = document.createElement('p');
-    p.textContent = 'Connect your wallet and say hello to the miners.';
+    // Guest chat is intentionally open on devnet/testnet. Keep the empty state aligned with
+    // the composer so visitors are not told to connect before they can send a first message.
+    p.textContent = chatCanSend
+      ? 'Say hello to the miners.'
+      : 'Connect your wallet and say hello to the miners.';
     empty.append(strong, p);
     if (rows.length) empty.hidden = true;
     chatMessagesEl.appendChild(empty);

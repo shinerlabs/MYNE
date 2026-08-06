@@ -20,7 +20,8 @@ No MYNE program should reach mainnet until every gate below is satisfied.
   transfers are promised to be untaxed.
 - Mint exactly 100 MYNE to the documented launch-liquidity destination.
 - Set the mint authority to the program PDA if mining emissions continue on-chain.
-- Decide whether a freeze authority exists; disclose it or revoke it.
+- Revoke freeze authority at mint creation. MYNE must launch with no freeze authority; only the
+  protocol config PDA retains mint authority for capped mining emissions.
 - Enforce the 2,000,000 MYNE hard cap in the program before granting mint authority.
 
 ## Operational gates

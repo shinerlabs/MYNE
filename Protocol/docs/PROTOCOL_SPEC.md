@@ -18,8 +18,9 @@ ABIs in `Frontend/src/deployments`.
 - Trading fees are deferred and are not part of this protocol milestone. Wallet transfers remain
   ordinary SPL transfers.
 
-The mint decimals, metadata authority, freeze authority, and final mint-authority custody are not
-yet confirmed. These must be fixed before mint creation.
+The mint uses 9 decimals, has no freeze authority, and assigns mint authority to the protocol
+config PDA after the 100 MYNE genesis mint. Metadata authority and the final upgrade-authority
+custody remain deployment decisions; they must be recorded before mainnet.
 
 ## Mining rounds
 

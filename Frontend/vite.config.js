@@ -9,7 +9,10 @@ const bufferPolyfill = fileURLToPath(new URL('./node_modules/buffer/index.js', i
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const supabaseTarget = env.VITE_SUPABASE_URL || '';
+  // Keep the local proxy usable out of the box. VITE_SUPABASE_URL is normally set in
+  // deployments, but a fresh checkout has no .env file and an empty proxy target makes
+  // every chat/profile request fail before it reaches Supabase.
+  const supabaseTarget = env.VITE_SUPABASE_URL || 'https://tfyvarplanptbknnqzwn.supabase.co';
   const socialTarget = env.VITE_SOCIAL_API || 'http://127.0.0.1:4030';
 
   // Endpoints the Express social backend answers instead of Supabase, because
