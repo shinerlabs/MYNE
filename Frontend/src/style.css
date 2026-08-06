@@ -7253,8 +7253,8 @@ body[data-route="mine"] .control-column .round-miners-panel {
 .round-miners-panel .round-miners-head small { color: #6f7177; font-size: 7px; font-weight: 700; letter-spacing: .11em; }
 .round-miners-list {
   display: grid;
-  max-height: 410px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }

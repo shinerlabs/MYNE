@@ -4219,20 +4219,22 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
     roundMinersLabel.textContent = `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · ${confirmedMiners.length} MINER${confirmedMiners.length === 1 ? '' : 'S'}`;
   }
   roundMinersList.textContent = '';
-  if (!confirmedMiners.length) {
-    return;
-  }
-  const pageCount = Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE);
-  const pageStart = confirmedMinerPage * CONFIRMED_MINERS_PAGE_SIZE;
-  const pageRows = confirmedMiners.slice(pageStart, pageStart + CONFIRMED_MINERS_PAGE_SIZE);
+  const pageCount = Math.max(1, Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE));
   const pagination = document.querySelector('#round-miners-pagination');
   const pageLabel = document.querySelector('#round-miners-page-label');
   if (pagination && pageLabel) {
-    pagination.hidden = pageCount <= 1;
+    // Keep the controls present as a stable affordance even for a single page or
+    // an empty/transient roster; unavailable directions are visibly disabled.
+    pagination.hidden = false;
     pageLabel.textContent = `${confirmedMinerPage + 1} / ${pageCount}`;
     pagination.querySelector('[data-miners-page="prev"]').disabled = confirmedMinerPage === 0;
     pagination.querySelector('[data-miners-page="next"]').disabled = confirmedMinerPage >= pageCount - 1;
   }
+  if (!confirmedMiners.length) {
+    return;
+  }
+  const pageStart = confirmedMinerPage * CONFIRMED_MINERS_PAGE_SIZE;
+  const pageRows = confirmedMiners.slice(pageStart, pageStart + CONFIRMED_MINERS_PAGE_SIZE);
   pageRows.forEach((miner) => {
     const row = document.createElement('button');
     row.type = 'button';

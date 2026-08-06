@@ -7363,7 +7363,6 @@ body[data-route="mine"] .control-column > .deploy-panel::before {
 body[data-route="mine"] .deploy-panel > .quick-amounts button,
 body[data-route="mine"] .deploy-panel .configuration #all,
 body[data-route="mine"] .deploy-panel .configuration .auto-toggle,
-body[data-route="mine"] .deploy-panel .mine-currency-toggle,
 body[data-route="mine"] .deploy-panel > .deploy {
   background: #242424 !important;
   border: 0 !important;
@@ -7376,10 +7375,20 @@ body[data-route="mine"] .deploy-panel .configuration #all:hover,
 body[data-route="mine"] .deploy-panel .configuration #all:focus-visible,
 body[data-route="mine"] .deploy-panel .configuration .auto-toggle:hover,
 body[data-route="mine"] .deploy-panel .configuration .auto-toggle:focus-visible,
-body[data-route="mine"] .deploy-panel .mine-currency-toggle:hover,
-body[data-route="mine"] .deploy-panel .mine-currency-toggle:focus-visible,
 body[data-route="mine"] .deploy-panel > .deploy:hover {
   background: #2d2d2d !important;
+}
+
+/* SOL/USD is a view selector, not a surfaced action: keep the labels and inner
+   switch track, but remove the surrounding pill fill, border, and shadow. */
+body[data-route="mine"] .deploy-panel .mine-currency-toggle,
+body[data-route="mine"] .deploy-panel .mine-currency-toggle:hover,
+body[data-route="mine"] .deploy-panel .mine-currency-toggle:focus-visible,
+body[data-route="mine"] .deploy-panel .mine-currency-toggle.active {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: none;
 }
 
 body[data-route="mine"] .deploy-panel > .deploy.ready,
