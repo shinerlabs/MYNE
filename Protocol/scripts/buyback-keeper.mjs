@@ -131,7 +131,7 @@ async function ensureMyneAta(mint) {
 async function burnDelta(mint, ata, beforeBaseUnits) {
   const account = await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID);
   const delta = account.amount - beforeBaseUnits;
-  if (delta === 0n) return null;
+  assert.ok(delta > 0n, 'Swap produced no positive MYNE balance delta');
   const mintInfo = await splToken.getMint(provider.connection, mint, 'confirmed', TOKEN_PROGRAM_ID);
   const instruction = createBurnCheckedInstruction(
     ata, mint, payer.publicKey, delta, mintInfo.decimals, [], TOKEN_PROGRAM_ID,

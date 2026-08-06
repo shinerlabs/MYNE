@@ -3273,10 +3273,9 @@ const renderChain = (state) => {
   // PAYOUT, not passive income: it contradicted its own name, and the one number that explains
   // why waiting pays had nowhere to appear. It is also the only component never charged a fee,
   // which is worth saying out loud.
-  // ethSmart, not eth: passive accrues in small increments (measured live at 0.002-0.024 MYNE), and a
-  // fixed 3-decimal format renders anything under 0.0005 as "0.000" — indistinguishable from the bug
-  // this row just had. Adaptive precision keeps a real balance legible.
-  setRow('#rw-passive', chain.format.ethSmart(refined));
+  // Keep passive MYNE aligned with the mined MYNE row: both use the shared
+  // three-decimal token format so the reward columns remain visually consistent.
+  setRow('#rw-passive', chain.format.solIcon(refined));
   // NET = what actually lands in the wallet. Same figure the row above used to show. Held in a
   // variable because the claim BUTTON needs it too — it used to be labelled with the gross mined
   // amount while this row said something larger, so the passive share looked unclaimable.

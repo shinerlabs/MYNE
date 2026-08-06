@@ -1089,13 +1089,19 @@ pub mod myne_protocol {
         let net = gross
             .checked_sub(total_fee)
             .ok_or(MyneError::ArithmeticOverflow)?;
+        // The fallback path mints the 1% admin allocation separately when no
+        // referrer exists, so both mint legs must fit under the hard cap.
+        let total_mint = checked_add(net, admin_fee)?;
+        let max_supply = GENESIS_BASE_UNITS
+            .checked_mul(MAX_TOKENS / GENESIS_TOKENS)
+            .ok_or(MyneError::ArithmeticOverflow)?;
         require!(
             ctx.accounts
                 .mint
                 .supply
-                .checked_add(net)
+                .checked_add(total_mint)
                 .ok_or(MyneError::ArithmeticOverflow)?
-                <= MAX_TOKENS * 1_000_000_000,
+                <= max_supply,
             MyneError::InvalidSupply
         );
         let signer: &[&[&[u8]]] = &[&[CONFIG_SEED, &[ctx.accounts.config.bump]]];
