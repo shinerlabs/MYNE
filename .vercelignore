@@ -1,0 +1,11 @@
+# Deploy only the web app; local Solana ledgers and build artifacts are not needed.
+Protocol/.localnet/
+Protocol/target/
+Protocol/.anchor/
+Protocol/test-ledger/
+Protocol/.surfpool/
+Frontend/node_modules/
+node_modules/
+.pnpm-store/
+.git/
+**/.DS_Store

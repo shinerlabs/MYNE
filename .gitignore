@@ -23,3 +23,7 @@ node_modules/
 
 # Supabase CLI local project metadata
 supabase/.temp/
+.vercel
+.env*
+!.env.example
+!.env.local.example

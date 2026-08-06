@@ -92,9 +92,11 @@ Initialization always leaves the protocol paused. Before the admin can unpause i
 `LiquidityGate` PDA must be initialized with the exact official Meteora pool address and its owner
 program. The gate records the declared minimum SOL and MYNE thresholds for the pool-registration
 runbook and prevents miners or other users from substituting a competing pool before emissions
-begin. Unpausing checks that the exact registered account still exists and is owned by the
-registered Meteora program; settlement repeats this check before moving the first round's 2%
-buyback/burn allocation. Pool-specific reserve decoding remains a required deployment check.
+begin. The `config.paused` flag is the single protocol activation latch: one successful unpause
+starts rounds, mining, staking, referrals, emissions, and buyback accounting together. Unpausing
+checks that the exact registered account still exists and is owned by the registered Meteora
+program; settlement repeats this check before moving the first round's 2% buyback/burn allocation.
+Pool-specific reserve decoding remains a required deployment check.
 `claim_myne` also respects the pause flag, so an emergency pause cannot leave a token-minting
 escape hatch.
 
