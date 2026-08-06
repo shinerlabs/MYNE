@@ -54,6 +54,7 @@ export const profileDisplayName = () => {
  */
 export const avatarPublicUrl = (path, wallet) => {
   if (path) {
+    if (path.startsWith('data:image/')) return path;
     if (path.startsWith('http://') || path.startsWith('https://')) return path;
     if (path.startsWith('/api/avatars/')) return `/rounds${path}`;
     if (path.startsWith('/')) return path;

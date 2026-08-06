@@ -19,10 +19,15 @@ import { createClient } from '@supabase/supabase-js';
  * branch stays live) and nginx mirrors the Vite proxy table. Once 0003 is applied and the
  * functions are deployed, plain `build` is correct again and the mode can go away.
  */
-export const REMOTE_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+// These are publishable client values. Vercel should still define the VITE_* variables,
+// but the fallback keeps chat/profile surfaces working when a deployment was created before
+// the project environment variables were added.
+const DEFAULT_SUPABASE_URL = 'https://tfyvarplanptbknnqzwn.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_YsDuGXn2C0MY8zx0ArhlZA_h4qFNpds';
+export const REMOTE_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
 const useProxy = import.meta.env.MODE !== 'production';
 export const SUPABASE_URL = useProxy ? `${window.location.origin}/supabase` : REMOTE_SUPABASE_URL;
-export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 export const FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
 /** Express social backend, reached through the `/rounds` proxy prefix. */
