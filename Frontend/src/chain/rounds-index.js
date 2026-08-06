@@ -199,6 +199,12 @@ export async function loadMyBetRounds(address) {
   }
 }
 
+/** Fast account activity check used by mainnet social access policy. */
+export async function countMyBetRounds(address) {
+  const rounds = await loadMyBetRounds(address);
+  return rounds?.ids ? rounds.ids.size : null;
+}
+
 /**
  * Settled rounds to check for an unclaimed win.
  *

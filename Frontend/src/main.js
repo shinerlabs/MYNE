@@ -6,7 +6,7 @@ import './brand-uniform.css';
 import { LINKS, PRODUCT } from './app-config.js';
 import * as chain from './chain/mine-page.js';
 import { WALLET_LOGOS } from './wallet-logos.js';
-import { loadRoundBets, loadDrandLink } from './chain/rounds-index.js';
+import { loadRoundBets, loadDrandLink, countMyBetRounds } from './chain/rounds-index.js';
 import { loadRoundHistory } from './chain/rounds-page.js';
 import { readReferralStats, readReferrerOf, setReferrer, claimReferral, readLeaderboard, readMyReferrals } from './chain/referral.js';
 import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/config.js';
@@ -3386,6 +3386,8 @@ const ensureSocial = () => {
         connectWallet: () => chain.connectWallet(),
         setRoute: (route, options) => setRoute(route, options),
         subscribe: (fn) => chain.subscribe(fn),
+        chatRequiresMinedRounds: NETWORK.cluster === 'mainnet-beta',
+        getMinedRoundCount: countMyBetRounds,
         // Passed through the adapter rather than imported by the social layer: `copyText` carries
         // the clipboard fallback for non-secure contexts, and the one-way coupling stays intact.
         copyText,

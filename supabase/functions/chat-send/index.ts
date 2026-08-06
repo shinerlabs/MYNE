@@ -6,6 +6,15 @@ Deno.serve(async (req) => {
   const guestId = req.headers.get('x-guest-id')?.trim() || '';
   const isGuest = !session && /^guest_[a-z0-9-]{12,100}$/i.test(guestId);
   if (!session && !isGuest) return json({ error: 'Guest identity missing' }, 401);
+  // Mainnet can switch on server-side enforcement with CHAT_REQUIRE_MINED_ROUNDS=true. Devnet
+  // and testnet deliberately leave guest chat open for testing and onboarding.
+  if (Deno.env.get('CHAT_REQUIRE_MINED_ROUNDS') === 'true') {
+    if (!session) return json({ error: 'Connect a wallet to use mainnet chat' }, 401);
+    const { data: bets, error: betError } = await supabase
+      .from('mine_round_bets').select('round_id').eq('bettor', session.walletAddress.toLowerCase()).limit(10000);
+    const minedRounds = new Set((bets ?? []).map((row) => String(row.round_id)));
+    if (betError || minedRounds.size < 5) return json({ error: 'Mine at least 5 rounds to unlock chat' }, 403);
+  }
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const { body } = await bodyJson(req);
   if (typeof body !== 'string' || body.trim().length < 1 || body.length > 300) return json({ error: 'Message must be 1–300 characters' }, 400);

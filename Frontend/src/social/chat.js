@@ -34,6 +34,7 @@ let chatSendButtonEl = null;
 let chatStatusEl = null;
 let chatCharCountEl = null;
 let chatHintEl = null;
+let chatCanSend = true;
 
 export const setChatAdmin = (value) => { isChatAdmin = Boolean(value); };
 export const getMessageIndex = () => messageIndex;
@@ -57,8 +58,9 @@ const syncChatCharCount = () => {
   chatInputEl.style.height = `${Math.min(chatInputEl.scrollHeight, 120)}px`;
 };
 
-export const setChatComposeEnabled = (enabled, placeholder) => {
+export const setChatComposeEnabled = (enabled, placeholder, gateMessage = 'Connect your wallet to chat.') => {
   if (!chatInputEl) return;
+  chatCanSend = Boolean(enabled);
   // Never actually disabled — a dead input can't explain why it's dead.
   chatInputEl.disabled = false;
   chatInputEl.readOnly = !enabled;
@@ -81,8 +83,16 @@ export const setChatComposeEnabled = (enabled, placeholder) => {
     const gate = document.createElement('div');
     gate.className = 'chat-gate';
     const text = document.createElement('span');
-    text.textContent = 'Chat is temporarily unavailable.';
-    gate.append(text);
+    text.textContent = gateMessage;
+    if (!host.getAccount()) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Connect wallet';
+      btn.addEventListener('click', () => host.connectWallet?.());
+      gate.append(text, btn);
+    } else {
+      gate.append(text);
+    }
     chatComposeEl.parentElement.insertBefore(gate, chatComposeEl);
   }
 };
@@ -610,6 +620,10 @@ export async function loadChatHistory() {
 // ------------------------------------------------------------------ sending
 async function sendChatMessage() {
   if (!chatInputEl) return;
+  if (!chatCanSend) {
+    host.notify(chatHintEl?.textContent || 'Chat access is not available yet');
+    return;
+  }
 
   const caption = chatInputEl.value.trim();
   const imagePath = stickers?.getPending() || null;

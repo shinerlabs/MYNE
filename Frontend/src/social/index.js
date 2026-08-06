@@ -87,9 +87,22 @@ export function mountSocial(host) {
     const previous = lastAccount;
     lastAccount = key;
 
-    // Basic chat is available without wallet signing during launch. Connection still unlocks
-    // profiles, reactions, replies and authenticated moderation actions.
-    setChatComposeEnabled(true);
+    // Devnet/testnet stays open for testing. Mainnet requires five mined rounds before chat.
+    let chatAllowed = true;
+    let chatGate = '';
+    if (host.chatRequiresMinedRounds) {
+      if (!account) {
+        chatAllowed = false;
+        chatGate = 'Connect your wallet to chat on mainnet.';
+      } else {
+        const mined = await host.getMinedRoundCount?.(account);
+        chatAllowed = Number.isFinite(mined) && mined >= 5;
+        if (!chatAllowed) chatGate = mined == null
+          ? 'Your mined-round history could not be verified yet.'
+          : `Mine ${Math.max(0, 5 - mined)} more round${5 - mined === 1 ? '' : 's'} to unlock chat.`;
+      }
+    }
+    setChatComposeEnabled(chatAllowed, chatAllowed ? undefined : 'Chat locked', chatGate);
 
     if (!account) {
       // Only a REAL disconnect drops the session (previous held an address).
@@ -116,6 +129,13 @@ export function mountSocial(host) {
 
   void syncAccount({ force: true });
   host.subscribe?.(() => { void syncAccount(); });
+  // A connected mainnet miner can cross the five-round threshold while remaining on the page.
+  // Recheck periodically without tying an RPC/index query to every chain clock tick.
+  if (host.chatRequiresMinedRounds) {
+    window.setInterval(() => {
+      if (host.getAccount()) void syncAccount({ force: true });
+    }, 60_000);
+  }
 
   return {
     syncAccount,
