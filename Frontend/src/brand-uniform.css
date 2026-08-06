@@ -7311,8 +7311,55 @@ body[data-route="mine"] .deploy-panel > .quick-amounts button:focus-visible {
 /* Carry the landing hero's dotted assay into the mining control surface. Keep the field quiet
    enough that the amount input and action controls remain the visual priority. */
 body[data-route="mine"] .control-column > .deploy-panel {
+  position: relative;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  background: #09090b !important;
+}
+
+/* Let the hero dots dissolve into the page instead of ending at a rectangular panel edge. The
+   field lives on its own layer so the controls stay crisp and only the SOL entry surface reads as
+   translucent glass. */
+body[data-route="mine"] .control-column > .deploy-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
   background:
     radial-gradient(circle, rgba(255, 255, 255, .035) 0 1px, transparent 1.5px) 0 0 / 13px 13px,
     radial-gradient(circle at 50% 50%, rgba(255, 255, 255, .025), transparent 58%),
-    #09090b !important;
+    transparent;
+  -webkit-mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 28%, rgba(0,0,0,.82) 56%, transparent 100%);
+  mask-image: radial-gradient(ellipse 78% 72% at 50% 48%, #000 28%, rgba(0,0,0,.82) 56%, transparent 100%);
+}
+
+/* Controls are solid touch targets; the SOL amount field above is the only glass surface. */
+body[data-route="mine"] .deploy-panel > .quick-amounts button,
+body[data-route="mine"] .deploy-panel .configuration #all,
+body[data-route="mine"] .deploy-panel .configuration .auto-toggle,
+body[data-route="mine"] .deploy-panel .mine-currency-toggle,
+body[data-route="mine"] .deploy-panel > .deploy {
+  background: #242424 !important;
+  border: 0 !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.06) !important;
+}
+
+body[data-route="mine"] .deploy-panel > .quick-amounts button:hover,
+body[data-route="mine"] .deploy-panel > .quick-amounts button:focus-visible,
+body[data-route="mine"] .deploy-panel .configuration #all:hover,
+body[data-route="mine"] .deploy-panel .configuration #all:focus-visible,
+body[data-route="mine"] .deploy-panel .configuration .auto-toggle:hover,
+body[data-route="mine"] .deploy-panel .configuration .auto-toggle:focus-visible,
+body[data-route="mine"] .deploy-panel .mine-currency-toggle:hover,
+body[data-route="mine"] .deploy-panel .mine-currency-toggle:focus-visible,
+body[data-route="mine"] .deploy-panel > .deploy:hover {
+  background: #2d2d2d !important;
+}
+
+body[data-route="mine"] .deploy-panel > .deploy.ready,
+body[data-route="mine"] .deploy-panel > .deploy.ready:hover {
+  background: #f1f1f1 !important;
+  box-shadow: none !important;
 }
