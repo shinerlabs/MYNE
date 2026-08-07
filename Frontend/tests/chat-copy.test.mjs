@@ -41,5 +41,10 @@ test('chat emoji and sticker media stays compact inside the social rail', () => 
   assert.match(chat, /img\.width = 88;[\s\S]*img\.height = 88;/);
   assert.match(baseStyles, /\.chat-media img \{[\s\S]*width:\s*88px;[\s\S]*height:\s*88px;/);
   assert.match(styles, /\.emoji-picker button \{[\s\S]*font-size:\s*15px/);
-  assert.match(styles, /\.reaction-fly \{[\s\S]*font-size:\s*14px/);
+});
+
+test('chat reactions render only in their counted pill', () => {
+  assert.doesNotMatch(chat, /animateReaction|reaction-fly/);
+  assert.doesNotMatch(styles, /reaction-fly|reaction-rise/);
+  assert.match(chat, /renderReactionBar\(entry, entry\.reactions\)/);
 });

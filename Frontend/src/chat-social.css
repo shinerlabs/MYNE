@@ -88,18 +88,6 @@
 .chat-reaction b { font-weight: 600; font-size: 11px; opacity: .8; }
 .chat-reaction > span { font-size: 11px; }
 
-/* floating emoji on new reaction */
-.reaction-fly {
-  position: absolute; right: 14px; bottom: 8px; pointer-events: none;
-  font-size: 14px; animation: reaction-rise 1s cubic-bezier(.3, .7, .4, 1) forwards;
-}
-@keyframes reaction-rise {
-  0%   { opacity: 0; transform: translate(0, 4px) scale(.6); }
-  20%  { opacity: 1; transform: translate(calc(var(--drift) * .3), -8px) scale(1.15); }
-  100% { opacity: 0; transform: translate(var(--drift), -46px) scale(.9); }
-}
-@media (prefers-reduced-motion: reduce) { .reaction-fly { display: none; } }
-
 .emoji-picker {
   position: fixed; z-index: 60; display: flex; gap: 2px; padding: 5px;
   background: #17171a; border: 1px solid #2a2a2e; border-radius: 10px;

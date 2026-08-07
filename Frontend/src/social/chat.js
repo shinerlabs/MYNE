@@ -180,19 +180,6 @@ const renderReactionBar = (entry, reactions) => {
   bar.hidden = !bar.childElementCount;
 };
 
-const animateReaction = (messageId, emoji) => {
-  const entry = messageIndex.get(messageId)
-    || messageIndex.get(Number(messageId))
-    || messageIndex.get(String(messageId));
-  if (!entry) return;
-  const fly = document.createElement('span');
-  fly.className = 'reaction-fly';
-  fly.textContent = emoji;
-  fly.style.setProperty('--drift', `${(Math.random() * 40 - 20).toFixed(1)}px`);
-  entry.el.appendChild(fly);
-  fly.addEventListener('animationend', () => fly.remove(), { once: true });
-};
-
 async function toggleReaction(messageId, emoji) {
   if (!host.requireWallet('React to messages')) return;
   const mid = Number(messageId);
@@ -209,7 +196,6 @@ async function toggleReaction(messageId, emoji) {
     entry.reactions.set(emoji, Math.max(0, (entry.reactions.get(emoji) || 0) + (had ? -1 : 1)));
     if (had) myReactions.delete(key); else myReactions.add(key);
     renderReactionBar(entry, entry.reactions);
-    if (!had) animateReaction(mid, emoji);
   }
 
   try {
@@ -682,9 +668,6 @@ export async function wireChatRealtime(handlers = {}) {
       if (!entry) return;
       entry.reactions.set(payload.emoji, payload.count);
       renderReactionBar(entry, entry.reactions);
-      if (payload.reacted && payload.walletAddress !== getMyProfile()?.walletAddress) {
-        animateReaction(mid, payload.emoji);
-      }
     })
     .on('broadcast', { event: 'profile' }, ({ payload }) => handlers.onProfile?.(payload))
     .on('broadcast', { event: 'message_delete' }, ({ payload }) => {

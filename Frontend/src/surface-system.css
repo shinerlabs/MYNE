@@ -239,7 +239,6 @@ body[data-route]:not([data-route="home"]) :is(
 }
 
 /* Small neutral identity surfaces use the same dark grey everywhere. */
-img[src="/myne-mark-ui.png"],
 body[data-route="mine"] .round-miner-avatar,
 .chat-avatar {
   background-color: var(--surface-icon) !important;
