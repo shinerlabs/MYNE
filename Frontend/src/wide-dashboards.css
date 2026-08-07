@@ -43,6 +43,14 @@ body[data-route="stake"] .staking-metrics strong {
   align-items: start;
 }
 
+/* Stake uses named rows so every responsive mode has one source of truth for vertical order.
+   This prevents older grid-row and margin experiments from moving either column independently. */
+body[data-route="stake"] .staking-dashboard {
+  grid-template-areas:
+    "history history"
+    "overview actions";
+}
+
 .referrals-dashboard {
   grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
 }
@@ -53,8 +61,7 @@ body[data-route="stake"] .staking-metrics strong {
 /* The staking history is the shared context for both the rewards summary and the position
    controls, so it owns the first full-width row instead of competing with the composer. */
 body[data-route="stake"] .staking-dashboard > .staking-history {
-  grid-column: 1 / -1;
-  grid-row: 1;
+  grid-area: history !important;
   width: 100% !important;
   max-width: 100% !important;
   min-width: 0;
@@ -62,10 +69,8 @@ body[data-route="stake"] .staking-dashboard > .staking-history {
   box-sizing: border-box;
 }
 
-body[data-route="stake"] .staking-dashboard > .staking-overview,
-body[data-route="stake"] .staking-dashboard > .staking-actions {
-  grid-row: 2;
-}
+body[data-route="stake"] .staking-dashboard > .staking-overview { grid-area: overview !important; }
+body[data-route="stake"] .staking-dashboard > .staking-actions { grid-area: actions !important; }
 
 .staking-overview,
 .staking-actions,
@@ -206,8 +211,25 @@ body[data-route="referrals"] .referral-row {
   }
 
   body[data-route="stake"] .staking-overview {
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
     align-content: stretch;
+  }
+
+  body[data-route="stake"] :is(.staking-overview, .staking-actions) {
+    align-self: stretch !important;
+    margin: 0 !important;
+  }
+
+  body[data-route="stake"] .staking-actions {
+    grid-template-rows: minmax(0, 1fr);
+    align-content: stretch;
+  }
+
+  body[data-route="stake"] .staking-actions > .staking-layout,
+  body[data-route="stake"] .staking-actions .stake-composer {
+    min-height: 0 !important;
+    height: 100% !important;
+    margin: 0 !important;
   }
 
   body[data-route="stake"] .staking-overview > .stake-rewards,
@@ -254,11 +276,37 @@ body[data-route="referrals"] .referral-row {
   .staking-dashboard,
   .referrals-dashboard { grid-template-columns: 1fr; }
 
+  body[data-route="stake"] .staking-dashboard {
+    grid-template-areas:
+      "history"
+      "overview"
+      "actions";
+    grid-template-rows: auto auto auto !important;
+    row-gap: 18px;
+  }
+
+  /* Let the dashboard gap establish the rhythm. Route-specific margins previously doubled it at
+     several breakpoints and made the chart, rewards and composer appear vertically offset. */
   body[data-route="stake"] .staking-dashboard > .staking-history,
-  body[data-route="stake"] .staking-dashboard > .staking-overview,
-  body[data-route="stake"] .staking-dashboard > .staking-actions {
-    grid-column: 1;
-    grid-row: auto;
+  body[data-route="stake"] .staking-dashboard :is(
+    .staking-overview,
+    .staking-actions,
+    .stake-rewards,
+    .staking-position-strip,
+    .staking-layout,
+    .stake-composer
+  ) {
+    margin: 0 !important;
+  }
+
+  body[data-route="stake"] :is(.staking-overview, .staking-actions) {
+    gap: 18px;
+    align-content: start;
+  }
+
+  body[data-route="stake"] .staking-actions .stake-composer {
+    min-height: 0 !important;
+    height: auto !important;
   }
 
   body[data-route="stake"] .staking-dashboard .eth-claim-hero {

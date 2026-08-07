@@ -49,8 +49,8 @@ test('staking history spans the dashboard above the stake and unstake controls',
   const chartStart = source.indexOf('<section class="staking-history panel"', dashboardStart);
   const actionsStart = source.indexOf('<div class="staking-dashboard-column staking-actions">', dashboardStart);
   assert.ok(dashboardStart >= 0 && chartStart > dashboardStart && chartStart < actionsStart);
-  assert.match(styles, /\.staking-dashboard > \.staking-history \{[\s\S]*grid-column:\s*1 \/ -1;[\s\S]*grid-row:\s*1;/);
-  assert.match(styles, /\.staking-dashboard > \.staking-actions \{[\s\S]*grid-row:\s*2;/);
+  assert.match(styles, /\.staking-dashboard > \.staking-history \{[\s\S]*grid-area:\s*history !important/);
+  assert.match(styles, /\.staking-dashboard > \.staking-actions \{\s*grid-area:\s*actions !important/);
 });
 
 test('claimable SOL actions stack below the primary balance without collisions', () => {
@@ -60,8 +60,20 @@ test('claimable SOL actions stack below the primary balance without collisions',
 
 test('staking overview and actions finish on the same desktop baseline', () => {
   assert.match(styles, /@media \(min-width: 901px\)[\s\S]*\.staking-dashboard,[\s\S]*align-items:\s*stretch/);
-  assert.match(styles, /\.staking-overview \{[\s\S]*grid-template-rows:\s*auto minmax\(0, 1fr\)/);
+  assert.match(styles, /\.staking-overview \{[\s\S]*grid-template-rows:\s*minmax\(0, 1fr\) auto/);
   assert.match(styles, /\.staking-overview > \.staking-position-strip \{[\s\S]*margin:\s*0 !important/);
+  assert.match(styles, /\.staking-actions > \.staking-layout,[\s\S]*\.stake-composer \{[\s\S]*height:\s*100% !important/);
+});
+
+test('stake vertical order and spacing are explicit at every responsive mode', () => {
+  assert.match(styles, /\.staking-dashboard \{[\s\S]*grid-template-areas:[\s\S]*"history history"[\s\S]*"overview actions"/);
+  assert.match(styles, /@media \(max-width: 900px\)[\s\S]*grid-template-areas:[\s\S]*"history"[\s\S]*"overview"[\s\S]*"actions"/);
+  assert.match(styles, /\.staking-dashboard > \.staking-history,[\s\S]*\.stake-composer[\s\S]*margin:\s*0 !important/);
+});
+
+test('staking history keeps its accessible label without a native hover tooltip', () => {
+  assert.match(source, /<svg viewBox="0 0 800 120" role="img" aria-label="Staked MYNE over the past 30 days/);
+  assert.doesNotMatch(source, /<title>Total MYNE staked over the past 30 days<\/title>/);
 });
 
 test('referral cards retain a two-column dashboard without creating a third implicit column', () => {

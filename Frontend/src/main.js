@@ -1620,7 +1620,6 @@ const renderStakingHistory = ({ points, current }) => {
     const gradientId = `stake-area-${index}`;
     host.querySelector('[data-staking-chart-plot]').innerHTML = `
       <svg viewBox="0 0 800 120" role="img" aria-label="Staked MYNE over the past 30 days, from ${compactStaked(chartPoints[0].value)} to ${currentLabel}">
-        <title>Total MYNE staked over the past 30 days</title>
         <defs><linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9edff" stop-opacity=".22"/><stop offset=".55" stop-color="#efc8f4" stop-opacity=".08"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient></defs>
         <g class="staking-history-grid"><path d="M12 14H788"/><path d="M12 61H788"/><path d="M12 108H788"/></g>
         <path class="staking-history-area" d="${area}" fill="url(#${gradientId})"/>
