@@ -41,10 +41,10 @@ body,
 }
 
 /* The main data cards use one elevation across routes. Mining's board, chat and dotted deploy
-   panel intentionally stay transparent and are therefore not included here. */
+   panel, plus the route-level stat rails, intentionally stay transparent and are not included. */
 body[data-route="stake"] :is(.staking-history, .stake-rewards, .stake-composer),
-body[data-route="referrals"] :is(.referral-metrics, .referral-link-block, .referral-performance, .my-referrals, .referral-leaderboard),
-body[data-route="rounds"] :is(.feature-metrics, .ledger-panel),
+body[data-route="referrals"] :is(.referral-link-block, .referral-performance, .my-referrals, .referral-leaderboard),
+body[data-route="rounds"] .ledger-panel,
 body[data-route="about"] :is(.about-nav, .about-content) {
   background: var(--surface-panel) !important;
   border-color: transparent !important;
@@ -53,9 +53,37 @@ body[data-route="about"] :is(.about-nav, .about-content) {
 }
 
 body[data-route="stake"] :is(.staking-history, .stake-rewards, .stake-composer),
-body[data-route="referrals"] :is(.referral-metrics, .referral-link-block, .referral-performance, .my-referrals, .referral-leaderboard),
-body[data-route="rounds"] :is(.feature-metrics, .ledger-panel) {
+body[data-route="referrals"] :is(.referral-link-block, .referral-performance, .my-referrals, .referral-leaderboard),
+body[data-route="rounds"] .ledger-panel {
   border-radius: var(--surface-radius-panel) !important;
+}
+
+/* Top-level dashboard metrics belong directly to the page canvas, as on Stake. Keep the shared
+   rules between values, but remove the enclosing card so Referral and Rounds open with the same
+   unboxed brand hierarchy. */
+body[data-route="referrals"] .feature-shell[data-page="referrals"] .referral-metrics,
+body[data-route="rounds"] .feature-shell[data-page="rounds"] .feature-metrics {
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+body[data-route="referrals"] .feature-shell[data-page="referrals"] .referral-metrics article,
+body[data-route="rounds"] .feature-shell[data-page="rounds"] .feature-metrics article {
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* The panel itself is not a card. Its masked dot layer supplies atmosphere; form controls retain
+   their solid surfaces below. Reassert this after all legacy route rules in the cascade. */
+body[data-route="mine"] .control-column > .deploy-panel {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 /* Secondary fields and grouped controls are darker than cards, but lighter than the page. */

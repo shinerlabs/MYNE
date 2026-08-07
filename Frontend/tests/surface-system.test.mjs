@@ -28,12 +28,22 @@ test('empty mining tiles use the neutral tile layer while brand states remain ex
 
 test('dashboard cards and supporting data share one route-independent elevation system', () => {
   assert.match(styles, /body\[data-route="stake"\][\s\S]*\.staking-history/);
-  assert.match(styles, /body\[data-route="referrals"\][\s\S]*\.referral-metrics/);
+  assert.match(styles, /body\[data-route="referrals"\][\s\S]*\.referral-link-block/);
   assert.match(styles, /body\[data-route="rounds"\][\s\S]*\.ledger-panel/);
   assert.match(styles, /body\[data-route="about"\][\s\S]*\.about-content/);
   assert.match(styles, /\.about-statline > span/);
   assert.match(styles, /background:\s*var\(--surface-inset\) !important/);
   assert.match(styles, /border-color:\s*var\(--surface-rule\) !important/);
+});
+
+test('route-level metric rails sit directly on the page canvas', () => {
+  assert.match(styles, /body\[data-route="referrals"\][\s\S]*\.referral-metrics,[\s\S]*body\[data-route="rounds"\][\s\S]*\.feature-metrics \{[\s\S]*background:\s*transparent !important/);
+  assert.match(styles, /\.referral-metrics article,[\s\S]*\.feature-metrics article \{[\s\S]*box-shadow:\s*none !important/);
+});
+
+test('mining composer has no rectangular card surface', () => {
+  assert.match(styles, /body\[data-route="mine"\] \.control-column > \.deploy-panel \{[\s\S]*background:\s*transparent !important/);
+  assert.match(styles, /body\[data-route="mine"\] :is\(\.quick-amounts button, \.configuration #all, \.deploy\)[\s\S]*background-color:\s*var\(--surface-control\) !important/);
 });
 
 test('round filters use the same solid control surface as the rest of the app', () => {

@@ -7355,7 +7355,7 @@ body[data-route="mine"] .control-column > .deploy-panel {
   border: 0 !important;
   outline: 0 !important;
   box-shadow: none !important;
-  background: #09090b !important;
+  background: transparent !important;
 }
 
 /* Let the hero dots dissolve into the page instead of ending at a rectangular panel edge. The
