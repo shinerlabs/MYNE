@@ -79,6 +79,7 @@ test('MYNE metadata creation is fixed, hosted, simulated, and explicitly submitt
   assert.match(source, /https:\/\/x\.com\/myne_solana/);
   assert.match(source, /TokenStandard\.Fungible/);
   assert.match(source, /sellerFeeBasisPoints: percentAmount\(0\)/);
+  assert.match(source, /accountExists\(metadataPda\[0\]/);
   assert.match(source, /simulateTransaction/);
   assert.match(source, /SUBMIT_MAINNET_TOKEN_METADATA !== mintAddress/);
 });

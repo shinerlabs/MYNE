@@ -124,7 +124,7 @@ assert.equal(String(umi.identity.publicKey), payer.publicKey.toBase58());
 const umiMint = publicKey(mintAddress);
 const metadataPda = findMetadataPda(umi, { mint: umiMint });
 
-if (await umi.rpc.accountExists(metadataPda, { commitment: 'confirmed' })) {
+if (await umi.rpc.accountExists(metadataPda[0], { commitment: 'confirmed' })) {
   const existing = await fetchMetadataFromSeeds(umi, { mint: umiMint }, { commitment: 'confirmed' });
   assert.equal(existing.name, TOKEN_NAME, 'Existing metadata name differs');
   assert.equal(existing.symbol, TOKEN_SYMBOL, 'Existing metadata symbol differs');
