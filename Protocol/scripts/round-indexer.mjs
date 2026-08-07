@@ -7,7 +7,7 @@
  * canonical archive hash on-chain.
  */
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import anchor from '@anchor-lang/core';
 import {
@@ -25,6 +25,7 @@ import {
   minerRegistrationProjection,
   myneClaimProjection,
 } from './referral-index-policy.mjs';
+import { normalizeAnchorEventData, normalizeAnchorEventName } from './anchor-event-data.mjs';
 
 const { AnchorProvider, EventParser, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -54,6 +55,7 @@ const startSlot = Number(process.env.ROUND_INDEXER_START_SLOT ?? -1);
 const referralStartSlot = Number(process.env.REFERRAL_INDEXER_START_SLOT ?? startSlot);
 const maxPages = Number(process.env.ROUND_INDEXER_MAX_PAGES || 100);
 const requireBuybackEvidence = process.env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE === '1';
+const indexerInstanceId = randomUUID();
 assert.ok(Number.isInteger(intervalMs) && intervalMs >= 1000, 'ROUND_INDEXER_INTERVAL_MS must be >= 1000');
 assert.ok(Number.isInteger(referralStartSlot), 'REFERRAL_INDEXER_START_SLOT must be an integer');
 assert.ok(Number.isInteger(maxPages) && maxPages > 0, 'ROUND_INDEXER_MAX_PAGES must be positive');
@@ -102,6 +104,25 @@ async function rest(path, { method = 'GET', body, prefer } = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+async function acquireIndexerLease() {
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/acquire_mine_keeper_lease`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRole,
+      Authorization: `Bearer ${serviceRole}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      p_lease_name: `round-indexer:${PROGRAM_ID.toBase58()}:${rpcIdentity}`,
+      p_holder: indexerInstanceId,
+      p_ttl_seconds: 120,
+    }),
+  });
+  const body = await response.json().catch(() => null);
+  assert.ok(response.ok, `Round indexer lease request failed (${response.status})`);
+  return body === true;
+}
+
 const upsert = (table, rows, conflict) => rest(
   `${table}?on_conflict=${encodeURIComponent(conflict)}`,
   { method: 'POST', body: Array.isArray(rows) ? rows : [rows], prefer: 'resolution=merge-duplicates,return=minimal' },
@@ -147,8 +168,8 @@ function bytes(value) {
 }
 
 async function processEvent(event, signature, slot) {
-  const data = event.data;
-  switch (event.name) {
+  const data = normalizeAnchorEventData(event.data);
+  switch (normalizeAnchorEventName(event.name)) {
     case 'RoundOpened': {
       await upsert('mine_rounds', {
         round_id: asString(data.roundId),
@@ -372,9 +393,14 @@ async function registeredReferrer(authority) {
 }
 
 async function processReferralEvents(events, signature, slot) {
+  const normalizedEvents = events.map((event) => ({
+    ...event,
+    name: normalizeAnchorEventName(event.name),
+    data: normalizeAnchorEventData(event.data),
+  }));
   const pairedRoutes = new Set();
-  for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
-    const event = events[eventIndex];
+  for (let eventIndex = 0; eventIndex < normalizedEvents.length; eventIndex += 1) {
+    const event = normalizedEvents[eventIndex];
     if (event.name === 'MinerRegistered') {
       const registration = minerRegistrationProjection({
         data: event.data, signature, slot, eventIndex,
@@ -396,7 +422,7 @@ async function processReferralEvents(events, signature, slot) {
 
     // v2 is a companion event rather than an in-place MyneClaimed layout change, preserving
     // decoding of historical logs. It is emitted immediately after the stable claim event.
-    const next = events[eventIndex + 1];
+    const next = normalizedEvents[eventIndex + 1];
     const route = next?.name === 'ClaimFeeRoutedV2' ? next : null;
     if (route) pairedRoutes.add(eventIndex + 1);
     const claimant = new PublicKey(event.data.authority).toBase58();
@@ -416,7 +442,7 @@ async function processReferralEvents(events, signature, slot) {
     );
   }
 
-  const orphanedRoute = events.findIndex(
+  const orphanedRoute = normalizedEvents.findIndex(
     (event, index) => event.name === 'ClaimFeeRoutedV2' && !pairedRoutes.has(index),
   );
   assert.equal(
@@ -424,6 +450,26 @@ async function processReferralEvents(events, signature, slot) {
     -1,
     'ClaimFeeRoutedV2 must immediately follow the MyneClaimed event it audits',
   );
+}
+
+async function replayTransactions(signatures) {
+  let transactions = 0;
+  let events = 0;
+  for (const signature of signatures) {
+    assert.match(signature, /^[1-9A-HJ-NP-Za-km-z]{64,88}$/, 'Replay signature is not valid base58');
+    const transaction = await provider.connection.getTransaction(signature, {
+      commitment: 'finalized', maxSupportedTransactionVersion: 0,
+    });
+    assert.ok(transaction?.meta?.logMessages, `Finalized replay transaction ${signature} is unavailable`);
+    assert.equal(transaction.meta.err, null, `Replay transaction ${signature} failed on chain`);
+    const parsed = [...parser.parseLogs(transaction.meta.logMessages)];
+    assert.ok(parsed.length > 0, `Replay transaction ${signature} contains no MYNE events`);
+    for (const event of parsed) await processEvent(event, signature, transaction.slot);
+    await processReferralEvents(parsed, signature, transaction.slot);
+    transactions += 1;
+    events += parsed.length;
+  }
+  return { transactions, events };
 }
 
 async function signaturesSince(previous, minimumSlot = startSlot) {
@@ -597,6 +643,15 @@ async function archiveReadyRounds() {
 }
 
 export async function indexerTick() {
+  if (!(await acquireIndexerLease())) {
+    return {
+      indexed: 0,
+      archived: 0,
+      referralsIndexed: 0,
+      skipped: true,
+      reason: 'round-indexer-lease-held-by-another-instance',
+    };
+  }
   const indexed = await indexTransactions();
   const archived = await archiveReadyRounds();
   const referralsIndexed = await indexReferralTransactions();
@@ -604,6 +659,17 @@ export async function indexerTick() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  const replaySignatures = process.argv
+    .filter((argument) => argument.startsWith('--replay-signature='))
+    .map((argument) => argument.slice('--replay-signature='.length));
+  if (replaySignatures.length) {
+    console.log(JSON.stringify({
+      at: new Date().toISOString(),
+      event: 'round-indexer-replay',
+      ...(await replayTransactions(replaySignatures)),
+    }));
+    process.exit(0);
+  }
   const once = process.argv.includes('--once');
   do {
     try {
