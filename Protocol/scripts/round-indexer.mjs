@@ -191,7 +191,8 @@ function bytes(value) {
 
 async function processEvent(event, signature, slot) {
   const data = normalizeAnchorEventData(event.data);
-  switch (normalizeAnchorEventName(event.name)) {
+  const eventName = normalizeAnchorEventName(event.name);
+  switch (eventName) {
     case 'RoundOpened': {
       await upsert('mine_rounds', {
         round_id: asString(data.roundId),
@@ -354,7 +355,7 @@ async function processEvent(event, signature, slot) {
         receipt: receiptPda(roundId, authority, nonce).toBase58(),
         authority,
         nonce,
-        status: event.name === 'ReceiptClaimed' ? 'claimed' : event.name === 'ReceiptRefunded' ? 'refunded' : 'closed',
+        status: eventName === 'ReceiptClaimed' ? 'claimed' : eventName === 'ReceiptRefunded' ? 'refunded' : 'closed',
         sol_lamports: asString(data.solLamports || data.lamports || 0),
         myne_base_units: asString(data.myneBaseUnits || 0),
         motherlode_base_units: asString(data.motherlodeBaseUnits || 0),
@@ -362,11 +363,11 @@ async function processEvent(event, signature, slot) {
         slot,
         updated_at: new Date().toISOString(),
       }, 'round_id,receipt,status');
-      const statusFilter = event.name === 'ReceiptClosed' ? 'closed' : 'claimed,refunded';
+      const statusFilter = eventName === 'ReceiptClosed' ? 'closed' : 'claimed,refunded';
       const rows = await rest(`mine_receipt_settlements?round_id=eq.${roundId}&status=in.(${statusFilter})&select=receipt`);
       await rest(`mine_rounds?round_id=eq.${roundId}`, {
         method: 'PATCH',
-        body: event.name === 'ReceiptClosed'
+        body: eventName === 'ReceiptClosed'
           ? { closed_receipts: new Set((rows || []).map((row) => row.receipt)).size, updated_at: new Date().toISOString() }
           : { processed_receipts: new Set((rows || []).map((row) => row.receipt)).size, updated_at: new Date().toISOString() },
         prefer: 'return=minimal',

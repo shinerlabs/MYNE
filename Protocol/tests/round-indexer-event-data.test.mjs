@@ -63,6 +63,19 @@ test('DeploymentCreated only writes columns present in the immutable bet ledger'
   assert.doesNotMatch(deploymentCase, /rent_payer|data\.rentPayer/);
 });
 
+test('receipt settlement status is derived from the normalized Anchor event name', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const receiptCases = source.slice(
+    source.indexOf("case 'ReceiptClaimed'"),
+    source.indexOf("case 'BuybackCompleted'"),
+  );
+  assert.match(source, /const eventName = normalizeAnchorEventName\(event\.name\)/);
+  assert.match(receiptCases, /status: eventName === 'ReceiptClaimed'/);
+  assert.match(receiptCases, /eventName === 'ReceiptRefunded'/);
+  assert.match(receiptCases, /eventName === 'ReceiptClosed'/);
+  assert.doesNotMatch(receiptCases, /event\.name ===/);
+});
+
 test('refund-only archival follows finalized Solana time rather than the host clock', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   const archiveBody = source.slice(
