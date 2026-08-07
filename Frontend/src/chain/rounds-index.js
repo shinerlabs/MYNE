@@ -2,6 +2,9 @@ import { supabase, isSocialConfigured } from '../social/config.js';
 import { ROUND_DURATION } from './config.js';
 import { nowSeconds as chainNowSeconds } from './round.js';
 import { summariseStakingRewardWindow } from './staking-apy.js';
+import {
+  commitmentHexFromAccount, describeRandomnessRound, normalizeProofHex,
+} from './randomness-mode.js';
 
 /**
  * Round history read from the Supabase index maintained by Protocol/scripts/round-indexer.mjs.
@@ -41,6 +44,13 @@ const unwrap = (n) => (n === null || n === undefined ? 0n : BigInt(n));
 
 /** Postgres `numeric(78,0)` arrives as a string — BigInt keeps wei exact. */
 function fromRow(r) {
+  const randomnessCommitSlotEncoded = r.randomness_commit_slot == null
+    ? 0n
+    : unwrap(r.randomness_commit_slot);
+  const randomnessMeta = describeRandomnessRound({
+    commitSlot: randomnessCommitSlotEncoded,
+    resolved: r.resolved,
+  });
   return {
     roundId: BigInt(r.round_id),
     resolved: r.resolved,
@@ -53,12 +63,95 @@ function fromRow(r) {
     potForWinners: unwrap(r.pot_for_winners_wei),
     bullionForWinners: unwrap(r.bullion_for_winners_wei),
     payoutMulWad: unwrap(r.payout_mul_wad),
-    randomnessId: r.randomness_id || null,
+    randomnessId: randomnessMeta.mode === 'server' ? null : (r.randomness_id || null),
+    randomnessMode: randomnessMeta.mode,
+    randomnessState: randomnessMeta.state,
+    randomnessCommitment: randomnessMeta.mode === 'server'
+      ? commitmentHexFromAccount(r.randomness_id)
+      : null,
     // Prefer the byte-preserving hex form. Decimal remains compatible with rows indexed before
     // randomness_hex was added and is normalized by chain/randomness-proof.js.
     randomnessValue: r.randomness_hex || (r.randomness_value ? unwrap(r.randomness_value) : null),
-    randomnessCommitSlot: r.randomness_commit_slot == null ? null : unwrap(r.randomness_commit_slot),
+    randomnessCommitSlot: randomnessMeta.slot,
+    randomnessCommitSlotEncoded,
   };
+}
+
+const SERVER_PROOF_COLUMNS = [
+  'round_id', 'resolved', 'randomness_id', 'randomness_value::text', 'randomness_hex',
+  'randomness_commit_slot', 'randomness_provider_kind', 'randomness_commitment_hex',
+  'randomness_reveal_hex', 'randomness_target_slot::text',
+  'randomness_entropy_slot::text', 'randomness_entropy_hash_hex',
+].join(', ');
+const BASE_PROOF_COLUMNS = [
+  'round_id', 'resolved', 'randomness_id', 'randomness_value::text',
+  'randomness_hex', 'randomness_commit_slot',
+].join(', ');
+let serverProofColumnsAvailable = null;
+
+const optionalBig = (value) => (value === null || value === undefined || value === ''
+  ? null
+  : BigInt(value));
+
+function randomnessProofFromRow(row) {
+  if (!row) return null;
+  const encodedSlot = optionalBig(row.randomness_commit_slot) ?? 0n;
+  const meta = describeRandomnessRound({ commitSlot: encodedSlot, resolved: row.resolved });
+  const indexedProvider = String(row.randomness_provider_kind ?? row.randomness_provider ?? '').toLowerCase();
+  const mode = meta.mode === 'server' || indexedProvider.includes('server') ? 'server' : 'switchboard';
+  const entropySlot = optionalBig(row.randomness_entropy_slot ?? row.entropy_slot)
+    ?? (mode === 'server' ? meta.slot : null);
+  return {
+    roundId: BigInt(row.round_id),
+    mode,
+    state: mode === 'server' ? meta.state : (row.resolved ? 'settled' : meta.state),
+    randomnessAccount: mode === 'switchboard' ? (row.randomness_id || null) : null,
+    commitmentHex: mode === 'server'
+      ? (normalizeProofHex(row.randomness_commitment_hex ?? row.commitment_hex)
+        || commitmentHexFromAccount(row.randomness_id))
+      : null,
+    revealHex: normalizeProofHex(row.randomness_reveal_hex ?? row.reveal_hex),
+    targetSlot: optionalBig(row.randomness_target_slot ?? row.target_slot),
+    entropySlot,
+    slotHashHex: normalizeProofHex(row.randomness_entropy_hash_hex ?? row.slot_hash),
+    randomnessHex: normalizeProofHex(row.randomness_hex)
+      || (row.randomness_value ? normalizeProofHex(BigInt(row.randomness_value).toString(16).padStart(64, '0')) : null),
+    encodedSlot,
+  };
+}
+
+/**
+ * Load the optional server reveal proof without making the round ledger depend
+ * on a database migration. Older deployments fall back to the original round
+ * fields and still expose the on-chain commitment, masked slot and output.
+ */
+export async function loadRoundRandomnessProof(roundId) {
+  if (!(await indexAvailable())) return null;
+  try {
+    if (serverProofColumnsAvailable !== false) {
+      const { data, error } = await supabase
+        .from('mine_rounds')
+        .select(SERVER_PROOF_COLUMNS)
+        .eq('round_id', String(roundId))
+        .limit(1);
+      if (!error) {
+        serverProofColumnsAvailable = true;
+        return randomnessProofFromRow(data?.[0]);
+      }
+      const missingColumn = error.code === '42703' || error.code === 'PGRST204'
+        || /column .* does not exist|schema cache/i.test(error.message ?? '');
+      if (missingColumn) serverProofColumnsAvailable = false;
+    }
+    const { data, error } = await supabase
+      .from('mine_rounds')
+      .select(BASE_PROOF_COLUMNS)
+      .eq('round_id', String(roundId))
+      .limit(1);
+    if (error) return null;
+    return randomnessProofFromRow(data?.[0]);
+  } catch {
+    return null;
+  }
 }
 
 /**
