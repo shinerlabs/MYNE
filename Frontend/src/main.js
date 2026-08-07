@@ -219,7 +219,7 @@ const claimPanel = `<section class="claim-panel panel rewards-panel collapsed" a
   </div>
   <div class="claimable-rounds" id="claimable-rounds" hidden></div>
   <div class="rewards-actions">
-    <button class="claim-eth-only reward-action" id="claim-eth-only" type="button" data-reward-action="sol"><span>SOL auto-paid</span><small>Sent when each round settles</small></button>
+    <button class="claim-eth-only reward-action" id="claim-eth-only" type="button" data-reward-action="sol"><span>Claim SOL</span><small>Withdraw accrued SOL to your wallet</small></button>
     <button class="claim-all reward-action" id="claim-all" type="button" data-reward-action="all"${isPremine ? ' disabled' : ''}><span data-reward-action-label>${isPremine ? 'MYNE locked' : 'Claim all'}</span><small>${isPremine ? 'Available after launch' : 'SOL + MYNE · 10% fee'}</small></button>
   </div>
 
@@ -3969,10 +3969,15 @@ const renderChain = (state) => {
   // header used to be hardwired to the unrefined figure, so pressing a badge that read "5.000"
   // opened a panel headed "0.000", which reads as a bug even though both numbers were right.
   const pendingGld = claimableTotals.count > 0;
+  // Processed receipts move SOL into the durable StakePosition claim ledger;
+  // receipts the keeper has not reached yet remain exact round estimates. A
+  // receipt leaves the second bucket as it enters the first, so this sum never
+  // counts one reward twice.
+  const claimableSol = (state.claimableSol ?? 0n) + claimableTotals.eth;
   // Claiming pays BOTH assets, so both are shown; the unrefined balance is MYNE only, so it is not
   // padded with a meaningless 0 SOL.
-  const headline = pendingGld
-    ? `${solIcon()} ${chain.format.ethSmart(claimableTotals.eth)} · <img src="/myne-token-icon.svg" alt=""/> ${chain.format.solIcon(claimableTotals.bullion)}`
+  const headline = pendingGld || claimableSol > 0n
+    ? `${solIcon()} ${chain.format.ethSmart(claimableSol)} · <img src="/myne-token-icon.svg" alt=""/> ${chain.format.solIcon(state.unclaimed + claimableTotals.bullion)}`
     : `<img src="/myne-token-icon.svg" alt=""/> ${unrefined}`;
   // REWARDS rows (the card under the deploy panel). Kept here so they follow the same refresh as
   // the rest of the claim surface rather than drifting on their own timer.
@@ -3981,7 +3986,7 @@ const renderChain = (state) => {
   // Round rewards are credited LAZILY — `_addUserRewardToTotalUnclaimed` runs inside the claim —
   // so `state.unclaimed` is 0 for a win you have not claimed yet. Showing it alone rendered 0.000
   // beside a claim button offering 0.600, which is the one case this panel exists for.
-  setRow('#rw-eth', chain.format.ethSmart(claimableTotals.eth));
+  setRow('#rw-eth', chain.format.ethSmart(claimableSol));
   // Same pair the claimable-rounds box used to show: what is sitting in won-but-unclaimed rounds.
   // ALL mined MYNE not yet in the wallet, which is two buckets: `state.unclaimed` (what an SOL-only
   // claim leaves behind, plus redistribution credited to you) and `claimableTotals.bullion` (won
@@ -4030,13 +4035,13 @@ const renderChain = (state) => {
   const burnBtn = document.querySelector('#rewards-stake');
   if (ethBtn) {
     const pendingReceipt = claimableTotals.count > 0;
-    ethBtn.disabled = !pendingReceipt;
+    ethBtn.disabled = claimableSol <= 0n;
     const label = ethBtn.querySelector('span');
     const detail = ethBtn.querySelector('small');
-    if (label) label.textContent = pendingReceipt ? 'Settle pending SOL' : 'SOL auto-paid';
+    if (label) label.textContent = 'Claim SOL';
     if (detail) detail.textContent = pendingReceipt
-      ? 'Receive now · keep MYNE accruing'
-      : 'Sent when each round settles';
+      ? 'Process rewards · withdraw to wallet'
+      : 'Withdraw accrued SOL to your wallet';
   }
   // "Claim All" covers BOTH exits, because from the user's side they are one intent: take what
   // I have earned. There are two on-chain paths and which applies is an implementation detail:
@@ -4048,7 +4053,7 @@ const renderChain = (state) => {
   const refinable = state.unclaimed ?? 0n;
   if (allBtn && !isPremine) {
     const hasRounds = claimableTotals.count > 0;
-    allBtn.disabled = !hasRounds && refinable === 0n;
+    allBtn.disabled = !hasRounds && refinable === 0n && claimableSol === 0n;
     // Label with what LANDS IN THE WALLET, not the gross mined figure. The old label showed
     // `refinable` (mined only) while the row directly above said "You receive" and a larger number,
     // because passive MYNE is paid whole and carries no fee. Two different numbers on adjacent
@@ -4059,8 +4064,8 @@ const renderChain = (state) => {
     if (label) label.textContent = hasRounds
       ? 'Claim All'
       : (refinable > 0n ? 'Claim MYNE' : 'Claim All');
-    if (detail) detail.textContent = hasRounds
-      ? 'Pending SOL + MYNE · 10% fee'
+    if (detail) detail.textContent = hasRounds || claimableSol > 0n
+      ? (refinable > 0n || hasRounds ? 'SOL + MYNE · 10% MYNE fee' : 'SOL · no claim fee')
       : 'MYNE · 10% fee';
   }
   if (burnBtn) burnBtn.disabled = claimableTotals.count === 0 && refinable === 0n;
@@ -4068,7 +4073,9 @@ const renderChain = (state) => {
   if (headStrong) headStrong.innerHTML = headline;
   // ...and the label says which of the two it is, so the number is never ambiguous.
   const headingLabel = document.querySelector('.claim-heading .eyebrow');
-  if (headingLabel) headingLabel.textContent = isPremine ? 'MINED · LOCKED' : (pendingGld ? 'CLAIMABLE' : 'UNREFINED');
+  if (headingLabel) headingLabel.textContent = isPremine
+    ? 'MINED · LOCKED'
+    : (pendingGld || claimableSol > 0n ? 'CLAIMABLE' : 'UNREFINED');
   // The standalone "Claim <n> MYNE" button that used to live here is removed. It called
   // withdrawUnrefinedBullion() — the only UI exit for the contract's `unclaimed` MYNE bucket, which
   // is what an SOL-only claim leaves behind. It reverts during premine anyway (GldLockedDuringPremine),
@@ -4686,19 +4693,15 @@ document.querySelector('.claim-panel').addEventListener('click', async (event) =
   action.classList.add('is-busy');
   action.setAttribute('aria-busy', 'true');
   try {
-    // The permissionless lifecycle worker may have paid SOL and credited MYNE
-    // since the panel's last render. Re-read both sources before deciding which
-    // instruction remains necessary.
+    // The permissionless lifecycle worker may have accrued SOL and credited
+    // MYNE since the panel's last render. Re-read both sources before deciding
+    // which owner-signed withdrawal remains necessary.
     await Promise.all([
       refreshRoundHistory({ force: true }),
       chain.refreshMiner(),
     ]);
     const ids = claimableRounds.map((r) => r.roundId);
     if (action.dataset.rewardAction === 'sol') {
-      if (!ids.length) {
-        notify('SOL from settled rounds has already been paid to your wallet');
-        return;
-      }
       await chain.claimEthOnly(ids);
     } else if (action.dataset.rewardAction === 'all') {
       await chain.claimAll(ids);
