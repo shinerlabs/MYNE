@@ -103,6 +103,22 @@ test('MYNE genesis mint is atomic, simulation-first, and exact-address guarded',
   assert.match(source, /getGenesisHash/);
 });
 
+test('Mainnet initialization is atomic, paused, and exact-address guarded', async () => {
+  const source = await readFile(
+    new URL('../scripts/mainnet-initialize.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /createSetAuthorityInstruction/);
+  assert.match(source, /initializeProtocol/);
+  assert.match(source, /SWITCHBOARD_MAINNET_PROGRAM/);
+  assert.match(source, /getGenesisHash\(\)/);
+  assert.match(source, /simulateTransaction/);
+  assert.match(source, /SUBMIT_MAINNET_INITIALIZE !== config\.toBase58\(\)/);
+  assert.match(source, /confirmTransaction[\s\S]*'finalized'/);
+  assert.match(source, /state\.paused, true/);
+  assert.match(source, /mintState\.mintAuthority\?\.equals\(config\)/);
+});
+
 test('Mainnet artifact provenance requires the production feature in the binary', async () => {
   const [workspace, build, manifest, preflight, workflow] = await Promise.all([
     readFile(new URL('../Cargo.toml', import.meta.url), 'utf8'),

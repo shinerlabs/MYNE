@@ -14,6 +14,7 @@
     "round:lifecycle": "node scripts/round-lifecycle-keeper.mjs",
     "prepare:mainnet-mint": "node scripts/create-mainnet-mint.mjs",
     "prepare:mainnet-metadata": "node scripts/create-mainnet-token-metadata.mjs",
+    "initialize:mainnet": "node scripts/mainnet-initialize.mjs",
     "addresses:mainnet": "node scripts/derive-mainnet-addresses.mjs",
     "prepare:admin-ata": "node scripts/prepare-admin-fallback-ata.mjs",
     "chat:admin": "node scripts/provision-chat-admin.mjs",
