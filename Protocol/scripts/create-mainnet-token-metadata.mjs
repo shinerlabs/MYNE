@@ -139,7 +139,9 @@ if (await umi.rpc.accountExists(metadataPda[0], { commitment: 'confirmed' })) {
   process.exit(0);
 }
 
-const latestBlockhash = await umi.rpc.getLatestBlockhash({ commitment: 'confirmed' });
+// Use a finalized blockhash so an RPC provider's load-balanced nodes all agree
+// that it is valid before we sign and simulate the release transaction.
+const latestBlockhash = await umi.rpc.getLatestBlockhash({ commitment: 'finalized' });
 const builder = createV1(umi, {
   mint: umiMint,
   authority: umi.identity,
