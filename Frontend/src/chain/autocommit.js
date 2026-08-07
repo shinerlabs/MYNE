@@ -11,6 +11,8 @@ export const UNLIMITED_PLAYS = 4294967295;
 export const MAX_PLAYS_PER_EXECUTION = 1n;
 const planPda = (account) => derivePda('auto_plan', new PublicKey(account));
 const toBig = (value) => BigInt(value?.toString?.() ?? value ?? 0);
+export const AUTO_PLAN_FUNDING_BPS = 9_000n;
+const BPS_DENOMINATOR = 10_000n;
 
 export function evenAllocation(count) {
   if (count < 1) return [];
@@ -41,19 +43,52 @@ export async function readPlan(account = getAccount()) {
 }
 
 const BET_RECEIPT_ACCOUNT_BYTES = 468;
+const FEE_PARAMS_CACHE_MS = 60_000;
+let feeParamsCache = null;
+let feeParamsCacheAt = 0;
 
-export async function readFeeParams() {
+export async function readFeeParams({ force = false } = {}) {
+  if (!force && feeParamsCache && Date.now() - feeParamsCacheAt < FEE_PARAMS_CACHE_MS) {
+    return feeParamsCache;
+  }
   const receiptRent = await connection.getMinimumBalanceForRentExemption(BET_RECEIPT_ACCOUNT_BYTES);
-  return { accountDeposit: 0n, maxFee: BigInt(receiptRent) };
+  feeParamsCache = { accountDeposit: 0n, maxFee: BigInt(receiptRent) };
+  feeParamsCacheAt = Date.now();
+  return feeParamsCache;
 }
 export function requiredDeposit({ amountPerPlay, fundRounds, maxFee = 0n }) {
   return (amountPerPlay + maxFee) * BigInt(fundRounds);
+}
+
+/** Keep 10% of the live wallet balance outside an Auto-round transfer for rent and tx fees. */
+export function maxAutoPlanFundingLamports(walletBalanceLamports) {
+  const balance = toBig(walletBalanceLamports);
+  if (balance <= 0n) return 0n;
+  return (balance * AUTO_PLAN_FUNDING_BPS) / BPS_DENOMINATOR;
+}
+
+export function affordableAutoPlanRounds({ walletBalance, amountPerPlay, maxFee }) {
+  const perRound = toBig(amountPerPlay) + toBig(maxFee);
+  return perRound > 0n ? maxAutoPlanFundingLamports(walletBalance) / perRound : 0n;
+}
+
+async function assertFundingWithinWalletBudget(value, authority) {
+  const funding = toBig(value);
+  if (funding <= 0n) return;
+  // Re-read immediately before instruction construction; the render balance can be stale after
+  // another tab or wallet action. This is the transaction-boundary enforcement, not just UI copy.
+  const liveBalance = BigInt(await connection.getBalance(authority, 'confirmed'));
+  const maximum = maxAutoPlanFundingLamports(liveBalance);
+  if (funding > maximum) {
+    throw new Error(`Auto-round funding is limited to 90% of this wallet's SOL balance (${Number(maximum) / 1e9} SOL available)`);
+  }
 }
 
 export async function configurePlan({ tiles, ethPerTile, deposit, rewardMode = 'accumulate' }) {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
   const authority = new PublicKey(account);
+  await assertFundingWithinWalletBudget(deposit, authority);
   const amounts = Array(GRID).fill(0n);
   const perTile = parseEther(String(ethPerTile));
   tiles.forEach((tile) => { amounts[Number(tile) - 1] = perTile; });
@@ -80,6 +115,7 @@ export async function configurePlan({ tiles, ethPerTile, deposit, rewardMode = '
 export async function depositToPlan(value) {
   const account = getAccount();
   const authority = new PublicKey(account);
+  await assertFundingWithinWalletBudget(value, authority);
   const { program } = await getWritableProgram();
   return sendInstructions([await program.methods.fundAutoPlan(asBn(value)).accounts({
     autoPlan: planPda(account), authority, systemProgram: SystemProgram.programId,
