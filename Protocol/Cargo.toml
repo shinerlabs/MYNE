@@ -9,7 +9,7 @@ resolver = "2"
 solana = "3.1.10"
 
 [workspace.dependencies]
-anchor-lang = "=1.0.2"
+anchor-lang = "=1.1.2"
 anchor-spl = { version = "=1.0.2", features = ["token"] }
 
 [profile.release]
