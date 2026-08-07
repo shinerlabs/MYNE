@@ -797,7 +797,7 @@ pub mod myne_protocol {
             now,
             opened_at,
             betting_ends_at,
-            ctx.accounts.config.randomness_program != Pubkey::default(),
+            ctx.accounts.config.randomness_program,
         )?;
         let round = &mut ctx.accounts.round;
         round.bump = ctx.bumps.round;

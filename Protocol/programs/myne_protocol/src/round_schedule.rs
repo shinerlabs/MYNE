@@ -12,9 +12,9 @@ pub(crate) fn assert_round_can_open_at(
     now: i64,
     opened_at: i64,
     betting_ends_at: i64,
-    provider_backed: bool,
+    randomness_program: Pubkey,
 ) -> Result<()> {
-    let opening_window_starts_at = if provider_backed {
+    let opening_window_starts_at = if randomness_program != Pubkey::default() {
         opened_at
             .checked_sub(PROVIDER_PREPARATION_LEAD_SECONDS)
             .ok_or(MyneError::ArithmeticOverflow)?
@@ -51,30 +51,64 @@ pub(crate) fn assert_round_accepting_deployments_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BETTING_DURATION_SECONDS;
+    use crate::{
+        BETTING_DURATION_SECONDS, SERVER_RANDOMNESS_PROGRAM, SWITCHBOARD_DEVNET_PROGRAM,
+        SWITCHBOARD_MAINNET_PROGRAM,
+    };
 
     const OPENED_AT: i64 = 1_000;
     const BETTING_ENDS_AT: i64 = OPENED_AT + BETTING_DURATION_SECONDS as i64;
 
     #[test]
-    fn provider_round_preopen_is_accepted_at_the_bounded_lead() {
+    fn every_approved_provider_mode_can_preopen_at_the_bounded_lead() {
         let earliest = OPENED_AT - PROVIDER_PREPARATION_LEAD_SECONDS;
-        assert!(assert_round_can_open_at(earliest, OPENED_AT, BETTING_ENDS_AT, true).is_ok());
-        assert!(assert_round_can_open_at(OPENED_AT - 1, OPENED_AT, BETTING_ENDS_AT, true).is_ok());
+        for randomness_program in [
+            SWITCHBOARD_DEVNET_PROGRAM,
+            SWITCHBOARD_MAINNET_PROGRAM,
+            SERVER_RANDOMNESS_PROGRAM,
+        ] {
+            assert!(assert_round_can_open_at(
+                earliest,
+                OPENED_AT,
+                BETTING_ENDS_AT,
+                randomness_program,
+            )
+            .is_ok());
+            assert!(assert_round_can_open_at(
+                OPENED_AT - 1,
+                OPENED_AT,
+                BETTING_ENDS_AT,
+                randomness_program,
+            )
+            .is_ok());
+        }
     }
 
     #[test]
     fn provider_round_preopen_rejects_even_one_second_too_early() {
         let too_early = OPENED_AT - PROVIDER_PREPARATION_LEAD_SECONDS - 1;
-        assert!(assert_round_can_open_at(too_early, OPENED_AT, BETTING_ENDS_AT, true).is_err());
+        assert!(assert_round_can_open_at(
+            too_early,
+            OPENED_AT,
+            BETTING_ENDS_AT,
+            SERVER_RANDOMNESS_PROGRAM,
+        )
+        .is_err());
     }
 
     #[test]
     fn local_default_round_keeps_the_original_no_preopen_policy() {
+        assert!(assert_round_can_open_at(
+            OPENED_AT - 1,
+            OPENED_AT,
+            BETTING_ENDS_AT,
+            Pubkey::default(),
+        )
+        .is_err());
         assert!(
-            assert_round_can_open_at(OPENED_AT - 1, OPENED_AT, BETTING_ENDS_AT, false).is_err()
+            assert_round_can_open_at(OPENED_AT, OPENED_AT, BETTING_ENDS_AT, Pubkey::default(),)
+                .is_ok()
         );
-        assert!(assert_round_can_open_at(OPENED_AT, OPENED_AT, BETTING_ENDS_AT, false).is_ok());
     }
 
     #[test]
