@@ -1,3 +1,4 @@
+import './browser-globals.js';
 import './style.css';
 import './chat-social.css';
 import './stake-compact.css';

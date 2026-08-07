@@ -1,4 +1,2 @@
-import { Buffer } from 'buffer';
-
-globalThis.Buffer = Buffer;
+import './browser-globals.js';
 await import('./local-viewer.js');
