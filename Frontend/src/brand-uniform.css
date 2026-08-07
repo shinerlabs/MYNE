@@ -1903,9 +1903,15 @@ body[data-route="referrals"] .referral-flex-trigger:hover { background: #202024;
     );
     width: 1344px !important;
     max-width: none !important;
-    height: 608px !important;
-    grid-template-columns: 240px 580px 500px !important;
-    grid-template-rows: 608px !important;
+    /* Keep the board/control composition intact while giving chat the same useful rail width as
+       the ORE reference. When width forces the workspace to zoom down, extend the row back to the
+       viewport floor so the composer does not float halfway up the page. */
+    height: max(
+      608px,
+      calc((100dvh - 92px - var(--premine-banner-h, 0px)) / var(--mine-ui-scale))
+    ) !important;
+    grid-template-columns: 280px 540px 500px !important;
+    grid-template-rows: minmax(0, 1fr) !important;
     gap: 12px !important;
     margin: 8px 18px 0 !important;
     zoom: var(--mine-ui-scale);
@@ -1928,7 +1934,11 @@ body[data-route="referrals"] .referral-flex-trigger:hover { background: #202024;
     transform-origin: top left;
   }
 
-  body[data-route="mine"] .workspace.page-view.active .chat-panel,
+  body[data-route="mine"] .workspace.page-view.active .chat-panel {
+    width: 100%;
+    height: 100% !important;
+  }
+
   body[data-route="mine"] .workspace.page-view.active .board-panel {
     width: 100%;
     height: 608px !important;
@@ -7569,4 +7579,34 @@ body[data-route="mine"] .deploy-panel .configuration .auto-toggle.active:focus-v
   border: 0 !important;
   box-shadow: none !important;
   outline: 0 !important;
+}
+
+/* Chat is a transparent live rail, not another card. The feed owns the flexible space and the
+   composer owns the final row, which keeps the input against the bottom edge at every height. */
+body[data-route="mine"] .workspace > .chat-panel,
+body[data-route="mine"] #chat-drawer .chat-panel {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body[data-route="mine"] .workspace > .chat-panel::after,
+body[data-route="mine"] #chat-drawer .chat-panel::after {
+  display: none !important;
+}
+
+body[data-route="mine"] .chat-panel > .social-content.active,
+body[data-route="mine"] .chat-panel .chat-messages {
+  min-height: 0;
+}
+
+body[data-route="mine"] .chat-panel .chat-compose-shell {
+  position: sticky;
+  z-index: 4;
+  bottom: 0;
+  width: 100%;
+  flex: 0 0 auto;
+  margin-top: auto;
+  background: transparent !important;
 }
