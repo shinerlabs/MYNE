@@ -16,6 +16,7 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
+import { loadExplicitSwitchboardEnv } from './production-switchboard-env.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -26,7 +27,7 @@ setProvider(provider);
 const payer = provider.wallet.payer;
 assert.ok(payer, 'A file-backed lifecycle keeper wallet is required');
 const program = new Program(idl, provider);
-const { program: switchboardProgram } = await sb.AnchorUtils.loadEnv();
+const { program: switchboardProgram } = await loadExplicitSwitchboardEnv();
 assert.equal(
   switchboardProgram.provider.wallet.publicKey.toBase58(),
   payer.publicKey.toBase58(),

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { Keypair } from '@solana/web3.js';
 import {
@@ -55,4 +56,17 @@ test('live supervisor defines every required worker with separated wallets', () 
   for (const spec of specs.filter((entry) => entry.name !== 'buyback-keeper')) {
     assert.equal(spec.walletPath, '/tmp/randomness.json');
   }
+});
+
+test('production Switchboard workers never depend on a host Solana CLI config', async () => {
+  const [roundKeeper, lifecycle, explicitEnv] = await Promise.all([
+    readFile(new URL('../scripts/switchboard-round-keeper.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/round-lifecycle-keeper.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/production-switchboard-env.mjs', import.meta.url), 'utf8'),
+  ]);
+  assert.doesNotMatch(roundKeeper, /AnchorUtils\.loadEnv/);
+  assert.doesNotMatch(lifecycle, /AnchorUtils\.loadEnv/);
+  assert.match(explicitEnv, /ANCHOR_PROVIDER_URL/);
+  assert.match(explicitEnv, /ANCHOR_WALLET/);
+  assert.match(explicitEnv, /loadProgramFromConnection/);
 });

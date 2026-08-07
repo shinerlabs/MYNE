@@ -15,13 +15,14 @@ import anchor from '@anchor-lang/core';
 import * as sb from '@switchboard-xyz/on-demand';
 import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
+import { loadExplicitSwitchboardEnv } from './production-switchboard-env.mjs';
 
-const { AnchorProvider, Program } = anchor;
+const { AnchorProvider, Program, Wallet } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 
-const { keypair, connection, program: switchboardProgram } = await sb.AnchorUtils.loadEnv();
-const provider = new AnchorProvider(connection, switchboardProgram.provider.wallet, { commitment: 'confirmed' });
+const { keypair, connection, program: switchboardProgram } = await loadExplicitSwitchboardEnv();
+const provider = new AnchorProvider(connection, new Wallet(keypair), { commitment: 'confirmed' });
 const myne = new Program(idl, provider);
 const commitment = 'confirmed';
 const txOpts = { commitment, skipPreflight: false, maxRetries: 3 };
