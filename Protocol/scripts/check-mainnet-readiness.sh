@@ -117,10 +117,12 @@ test -f scripts/migrate-fee-schedule-v6.mjs
 test -f scripts/mainnet-liquidity-policy.mjs
 test -f scripts/mainnet-register-liquidity-gate.mjs
 test -f scripts/mainnet-activate.mjs
+test -f scripts/refund-mainnet-deployer.mjs
 grep -q 'LB_PAIR_ACCOUNT_LEN = 904' scripts/mainnet-liquidity-policy.mjs
 grep -q 'SUBMIT_MAINNET_LIQUIDITY_GATE' scripts/mainnet-register-liquidity-gate.mjs
 grep -q 'CONFIRM_INDEPENDENT_SECURITY_REVIEW' scripts/mainnet-activate.mjs
 grep -q 'SUBMIT_MAINNET_ACTIVATE' scripts/mainnet-activate.mjs
+grep -q 'SUBMIT_MAINNET_REFUND' scripts/refund-mainnet-deployer.mjs
 grep -q 'CONFIRM_CREATE_MYNE_MINT' scripts/create-mainnet-mint.mjs
 grep -q 'CONFIRM_LIQUIDITY_DESTINATION' scripts/create-mainnet-mint.mjs
 grep -q 'SUBMIT_MAINNET_MINT' scripts/create-mainnet-mint.mjs

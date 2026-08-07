@@ -17,6 +17,7 @@
     "initialize:mainnet": "node scripts/mainnet-initialize.mjs",
     "mainnet:register-liquidity": "node scripts/mainnet-register-liquidity-gate.mjs",
     "mainnet:activate": "node scripts/mainnet-activate.mjs",
+    "mainnet:refund-deployer": "node scripts/refund-mainnet-deployer.mjs",
     "addresses:mainnet": "node scripts/derive-mainnet-addresses.mjs",
     "prepare:admin-ata": "node scripts/prepare-admin-fallback-ata.mjs",
     "chat:admin": "node scripts/provision-chat-admin.mjs",

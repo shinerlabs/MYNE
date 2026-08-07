@@ -143,6 +143,21 @@ test('Mainnet liquidity registration decodes Meteora and is simulation-first', a
   assert.match(activate, /activeConfig\.paused, false/);
 });
 
+test('Mainnet deployer refund preserves the reviewed transaction-fee reserve', async () => {
+  const source = await readFile(
+    new URL('../scripts/refund-mainnet-deployer.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /EXPECTED_DEPLOYER/);
+  assert.match(source, /DEFAULT_RESERVE_LAMPORTS = 50_000_000n/);
+  assert.match(source, /getFeeForMessage/);
+  assert.match(source, /simulateTransaction/);
+  assert.match(source, /SUBMIT_MAINNET_REFUND/);
+  assert.match(source, /confirmTransaction[\s\S]*'finalized'/);
+  assert.match(source, /sourceAfter[\s\S]*reserveLamports/);
+  assert.match(source, /destinationAfter[\s\S]*transferLamports/);
+});
+
 test('Mainnet artifact provenance requires the production feature in the binary', async () => {
   const [workspace, build, manifest, preflight, workflow] = await Promise.all([
     readFile(new URL('../Cargo.toml', import.meta.url), 'utf8'),
