@@ -2,7 +2,7 @@ import { connection } from './client.js';
 import {
   fetchProtocolAccount, getProtocolConfig, protocolPdas,
 } from './anchor-client.js';
-import { reconcileBurnTotals } from './burn-accounting.js';
+import { combineBurnTotals } from './burn-accounting.js';
 import { loadCompletedBuybackBurnBaseUnits } from './burn-index.js';
 
 const TTL_MS = 5_000;
@@ -21,13 +21,12 @@ export async function readSupplyStats(force = false) {
     if (!stakePool || completedBuybackBurn === null) {
       throw new Error('Verified burn accounting is unavailable');
     }
-    const totals = reconcileBurnTotals({
-      totalEmittedBaseUnits: config.totalEmittedBaseUnits,
+    const totals = combineBurnTotals({
       currentSupplyBaseUnits: supply.value.amount,
       stakingBurnBaseUnits: stakePool.totalBurn,
       completedBuybackBurnBaseUnits: completedBuybackBurn,
     });
-    if (!totals) throw new Error('Indexed burns do not reconcile with the on-chain mint supply');
+    if (!totals) throw new Error('Burn accounting contains an invalid base-unit value');
     const max = BigInt(config.maxTokens.toString()) * 1_000_000_000n;
     return { max, ...totals };
   })().finally(() => { request = null; });

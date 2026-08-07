@@ -7,56 +7,37 @@ const asBaseUnits = (value) => {
   return BigInt(value);
 };
 
-const completedRound = (value) => {
-  const round = Array.isArray(value) ? (value.length === 1 ? value[0] : null) : value;
-  return round?.resolved === true && round?.buyback_completed === true;
-};
-
 /**
- * Sum only indexed burns whose round has reached the on-chain
- * `BuybackCompleted` state. Invalid or duplicate evidence fails closed.
+ * Adapt the single aggregate row exposed by the public burn read model.
+ * A zero-row state is valid; every other internally inconsistent shape fails.
  */
-export function sumCompletedBuybackBurnRows(rows) {
-  if (!Array.isArray(rows)) return null;
-  const seen = new Set();
-  let total = 0n;
-  for (const row of rows) {
-    const roundId = asBaseUnits(row?.round_id);
-    const sequence = asBaseUnits(row?.sequence);
-    const burned = asBaseUnits(row?.burned_base_units);
-    const signature = typeof row?.burn_signature === 'string' ? row.burn_signature.trim() : '';
-    if (roundId === null || sequence === null || burned === null || burned === 0n
-      || !signature || !completedRound(row?.mine_rounds)) return null;
-    const key = `${roundId}:${sequence}`;
-    if (seen.has(key)) return null;
-    seen.add(key);
-    total += burned;
-  }
-  return total;
+export function completedBuybackBurnFromStatsRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  const burned = asBaseUnits(row.completed_buyback_burn_base_units);
+  const executions = asBaseUnits(row.completed_buyback_executions);
+  const latest = row.latest_completed_buyback_round === null
+    ? null
+    : asBaseUnits(row.latest_completed_buyback_round);
+  if (burned === null || executions === null) return null;
+  if (executions === 0n) return burned === 0n && latest === null ? 0n : null;
+  if (burned === 0n || latest === null) return null;
+  return burned;
 }
 
-/**
- * Reconcile the two named burn sources against the mint's actual supply loss.
- * This prevents a stale/malformed index from presenting an apparently precise
- * burn total. Any unattributed token burn remains unavailable until indexed.
- */
-export function reconcileBurnTotals({
-  totalEmittedBaseUnits,
+/** Combine the two protocol-defined burn sources without lossy number casts. */
+export function combineBurnTotals({
   currentSupplyBaseUnits,
   stakingBurnBaseUnits,
   completedBuybackBurnBaseUnits,
 }) {
-  const emitted = asBaseUnits(totalEmittedBaseUnits);
   const current = asBaseUnits(currentSupplyBaseUnits);
   const staking = asBaseUnits(stakingBurnBaseUnits);
   const buyback = asBaseUnits(completedBuybackBurnBaseUnits);
-  if ([emitted, current, staking, buyback].some((value) => value === null)) return null;
-  if (current > emitted) return null;
+  if ([current, staking, buyback].some((value) => value === null)) return null;
   const burned = staking + buyback;
-  if (burned !== emitted - current) return null;
   return {
     current,
-    supplied: emitted,
+    supplied: current + burned,
     burned,
     burnedStaking: staking,
     burnedBuyback: buyback,

@@ -34,7 +34,7 @@ import {
   affordableAutoPlanRounds, maxAutoPlanFundingLamports, requiredDeposit,
 } from './chain/autocommit.js';
 import {
-  confirmedMinerRoundKey, previousConfirmedRoundId, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
+  confirmedMinerRoundKey, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
 import { readSupplyStats } from './chain/supply.js';
@@ -5117,18 +5117,18 @@ const scheduleRoundMinersRefresh = (state) => {
   window.clearTimeout(roundMinerFetchTimer);
   const fetchConfirmedMiners = async () => {
     const requestedRound = confirmed.roundId;
-    // The panel must describe exactly currentRound - 1. A rollover can happen while the RPC
-    // request is in flight, so never paint a response that is no longer adjacent to the live UI.
-    const expectedPrevious = previousConfirmedRoundId(chain.state.roundId);
-    if (expectedPrevious === null || String(expectedPrevious) !== String(requestedRound)) return;
-    // Receipt scans are cached for normal reads, but a new confirmed round must always start
-    // from a fresh scan. Otherwise the first read can race the final deployment and preserve the
-    // previous roster forever because an empty result is treated as a transient RPC response.
-    invalidateReceiptCache();
     try {
+      // Empty numeric rounds have no Round PDA, so `lastResolved` can legitimately be several
+      // ids behind the live clock. It is the latest indexed PLAYED round and is authoritative for
+      // this panel. Guard it before and after the RPC read so an older request can never repaint a
+      // newer confirmed roster.
+      if (String(chain.state.lastResolved?.roundId) !== String(requestedRound)) return;
+      // Receipt scans are cached for normal reads, but a new confirmed round must always start
+      // from a fresh scan. Otherwise the first read can race the final deployment and preserve the
+      // previous roster forever because an empty result is treated as a transient RPC response.
+      invalidateReceiptCache();
       const result = await readRoundWinners(requestedRound);
       if (String(chain.state.lastResolved?.roundId) !== String(requestedRound)) return;
-      if (String(previousConfirmedRoundId(chain.state.roundId)) !== String(requestedRound)) return;
       if (!result.miners.length && confirmedMinerFetchAttempt < 8) {
         confirmedMinerFetchAttempt += 1;
         roundMinerFetchTimer = window.setTimeout(fetchConfirmedMiners, 750);
