@@ -209,6 +209,17 @@ export function disconnect() {
 
 export const protocolAvailable = () => PROTOCOL_READY;
 export function readableError(error) {
-  if (/reject|cancel/i.test(error?.message || '')) return 'Transaction rejected';
+  const messages = [];
+  const seen = new Set();
+  for (let current = error; current && !seen.has(current); current = current.cause ?? current.error) {
+    seen.add(current);
+    if (typeof current === 'string') messages.push(current);
+    else if (current?.message) messages.push(current.message);
+  }
+  const detail = messages.join(' · ');
+  if (/reject|cancel/i.test(detail)) return 'Transaction rejected';
+  if (/extension-created tab.*blocked|popup|pop-up|user activation|user gesture|notallowederror|window.*(?:blocked|open)/i.test(detail)) {
+    return 'Wallet popup was blocked — click Connect and choose your wallet again';
+  }
   return (error?.message || 'Transaction failed').split('\n')[0];
 }

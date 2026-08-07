@@ -31,6 +31,33 @@ export function calculateSpend({ balanceLamports, reserveLamports, maxSpendLampo
   };
 }
 
+/**
+ * Select the oldest indexed allocation that can still require a buyback.
+ * The database is only a bounded work queue; the keeper must fetch the Round
+ * PDA and treat its on-chain buybackCompleted flag as the no-double-spend
+ * authority before quoting or signing anything.
+ */
+export function selectIndexedBuybackRound(rows, { cursorRound, currentRound }) {
+  const cursor = BigInt(String(cursorRound));
+  const current = BigInt(String(currentRound));
+  assert.ok(cursor >= 0n && current >= 0n, 'Buyback round bounds must be non-negative');
+  if (cursor > current) return null;
+  return (rows || [])
+    .filter((row) => {
+      const roundId = BigInt(String(row.round_id));
+      return roundId >= cursor
+        && roundId <= current
+        && row.resolved === true
+        && row.buyback_completed !== true
+        && BigInt(String(row.total_wager_wei || 0)) > 0n;
+    })
+    .sort((left, right) => {
+      const leftId = BigInt(String(left.round_id));
+      const rightId = BigInt(String(right.round_id));
+      return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+    })[0] || null;
+}
+
 export function meteoraRouteForProgram(poolProgram) {
   const value = String(poolProgram);
   if (value === METEORA_DLMM_PROGRAM_TEXT) {

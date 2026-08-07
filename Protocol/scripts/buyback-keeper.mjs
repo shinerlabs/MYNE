@@ -18,6 +18,7 @@ import * as splToken from '@solana/spl-token';
 import {
   calculateSpend,
   meteoraRouteForProgram,
+  selectIndexedBuybackRound,
   validateJupiterEndpoint,
   validateDirectMeteoraQuote,
 } from './buyback-policy.mjs';
@@ -140,6 +141,34 @@ async function acquireBuybackLease() {
   const body = await response.json().catch(() => null);
   assert.ok(response.ok, `Buyback lease request failed (${response.status})`);
   return body === true;
+}
+
+async function indexedBuybackBacklog(cursorRound, currentRound) {
+  assert.match(supabaseUrl, /^https:\/\//, 'SUPABASE_URL must use HTTPS for indexed buyback selection');
+  assert.ok(serviceRole, 'SUPABASE_SERVICE_ROLE_KEY is required for indexed buyback selection');
+  const query = new URLSearchParams({
+    resolved: 'eq.true',
+    buyback_completed: 'eq.false',
+    total_wager_wei: 'gt.0',
+    round_id: `gte.${cursorRound}`,
+    order: 'round_id.asc',
+    limit: '100',
+    select: 'round_id,resolved,buyback_completed,total_wager_wei',
+  });
+  // PostgREST cannot express two operators for one key through URLSearchParams;
+  // append the finalized upper bound explicitly.
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/mine_rounds?${query}&round_id=lte.${currentRound}`,
+    {
+      headers: {
+        apikey: serviceRole,
+        Authorization: `Bearer ${serviceRole}`,
+      },
+    },
+  );
+  const body = await response.json().catch(() => null);
+  assert.ok(response.ok && Array.isArray(body), `Indexed buyback backlog failed (${response.status})`);
+  return body;
 }
 
 async function loadState() {
@@ -541,22 +570,55 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const currentRound = Math.floor((nowSeconds - initializedAt) / roundDuration) - 1;
   if (currentRound < 0) return { skipped: true, reason: 'no-settled-round-yet' };
   const state = await loadState();
-  // A new production journal must begin at the configured launch round so a
-  // keeper outage cannot silently strand earlier 1% allocations. Dry-run can
-  // inspect the latest round without creating operational state.
-  const initialRound = state.nextRound == null
-    ? Number(process.env.BUYBACK_START_ROUND ?? (dryRun ? currentRound : 0))
-    : Number(state.nextRound);
-  assert.ok(Number.isSafeInteger(initialRound) && initialRound >= 0, 'BUYBACK_START_ROUND must be a non-negative integer');
-  const roundId = BigInt(process.env.MYNE_ROUND_ID || Math.min(initialRound, currentRound));
+  // Select from the durable indexed backlog rather than probing sequential
+  // numeric IDs. Empty rounds have no PDA, so a missing launch journal or a
+  // gap must advance to the first real settled allocation instead of pinning
+  // the worker forever at round zero.
+  const forcedRound = process.env.MYNE_ROUND_ID == null
+    ? null : readInteger(process.env.MYNE_ROUND_ID, 'MYNE_ROUND_ID');
+  const initialRound = forcedRound ?? Number(
+    state.nextRound ?? process.env.BUYBACK_START_ROUND ?? 0,
+  );
+  assert.ok(
+    Number.isSafeInteger(initialRound) && initialRound >= 0,
+    'BUYBACK_START_ROUND must be a non-negative integer',
+  );
+  const backlogUpperBound = forcedRound ?? currentRound;
+  if (initialRound > backlogUpperBound) {
+    return { skipped: true, reason: 'no-indexed-buyback-backlog' };
+  }
+  const indexedRows = await indexedBuybackBacklog(initialRound, backlogUpperBound);
+  const indexedRound = selectIndexedBuybackRound(indexedRows, {
+    cursorRound: initialRound,
+    currentRound: backlogUpperBound,
+  });
+  if (!indexedRound) {
+    return { skipped: true, reason: 'no-indexed-buyback-backlog' };
+  }
+  const roundId = BigInt(String(indexedRound.round_id));
   const roundSeed = Buffer.alloc(8);
   roundSeed.writeBigUInt64LE(roundId);
   const [roundAddress] = PublicKey.findProgramAddressSync([Buffer.from('round'), roundSeed], PROGRAM_ID);
   if (!(await provider.connection.getAccountInfo(roundAddress, 'confirmed'))) {
-    return { skipped: true, reason: 'round-not-opened', round: roundId.toString() };
+    return {
+      skipped: true,
+      reason: 'indexed-round-account-missing-reconcile-required',
+      round: roundId.toString(),
+    };
   }
   const roundState = await program.account.round.fetch(roundAddress);
   if (!roundState.settled) return { skipped: true, reason: 'round-not-settled', round: roundId.toString() };
+  if (roundState.buybackCompleted) {
+    if (forcedRound == null) {
+      state.nextRound = Number(roundId + 1n);
+      await saveState(state);
+    }
+    return {
+      skipped: true,
+      reason: 'round-buyback-completed-on-chain',
+      round: roundId.toString(),
+    };
+  }
   const allocation = (BigInt(roundState.grossDeployedLamports.toString()) * 100n) / 10_000n;
   const roundKey = roundId.toString();
   const journal = roundJournal(state, roundKey);

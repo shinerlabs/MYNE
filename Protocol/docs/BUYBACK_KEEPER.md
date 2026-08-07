@@ -13,8 +13,10 @@ pool-specific swap accounts, price movement, and slippage must be handled by the
 
 1. Read `ProtocolConfig` and `LiquidityGate` from the configured program.
 2. Require the gate to be verified and require the keeper signer to equal `buyback_wallet`.
-3. Read the latest settled round and reconcile the emitted 1% allocation against that round's
-   gross deployment and `RoundFeesDistributed` evidence.
+3. Query the bounded round index for the oldest resolved, positive-volume row at or above the
+   durable cursor that is not yet marked buyback-complete. Empty numeric rounds are skipped because
+   they never had a PDA. Fetch that exact Round PDA and use its on-chain `buybackCompleted` flag as
+   the final no-double-spend authority before quoting or signing.
 4. Preserve a SOL reserve and cap each buyback amount.
 5. Select `Meteora DAMM v2` or `Meteora DLMM` from the exact pool program stored in the on-chain
    gate, then request a direct Jupiter quote restricted to that one venue.
@@ -70,8 +72,11 @@ fresh independent review of that endpoint. Endpoint allowlisting does not replac
 transaction inspection or the tiny Mainnet canary.
 
 `BUYBACK_START_ROUND` is used only when creating a new journal. Set it to the first production
-round (normally `0`). Thereafter the durable journal advances sequentially, including across
-outages, so earlier allocations cannot be skipped merely because the keeper restarted later.
+round (normally `0`). The cursor is a lower bound, not a requirement that every numeric round have
+an account: the keeper advances to the first eligible indexed round. If the journal is lost, the
+same query starts from the configured bound and recovers the oldest incomplete allocation. A stale
+database `buyback_completed=false` cannot cause a duplicate purchase because the keeper rechecks
+the Round PDA and advances without spending when its on-chain flag is already true.
 The durable journal and its backups are launch-critical: do not run live mode on ephemeral disk,
 and alert immediately if the journal cannot be loaded or its indexed transaction evidence disagrees.
 If an RPC cannot establish whether a saved swap landed, the keeper now stops that round instead of

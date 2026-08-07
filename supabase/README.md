@@ -4,6 +4,12 @@ Supabase provides a rebuildable, read-only projection of finalized Solana
 events and the wallet-authenticated social layer. It is not authoritative for
 mining, staking, balances, payouts, referral ownership, or protocol state.
 
+Migration `20260808090000_server_randomness_proofs.sql` adds the provider-aware
+round proof fields and the indexed buyback backlog. Apply it before enabling
+the server commit-reveal worker. It preserves existing Switchboard columns and
+v2 archive hashes; server commitments are hex evidence, never account links,
+and server target/entropy slots use unsigned-safe `numeric(20,0)` columns.
+
 ## Wallet-only chat
 
 Migration `20260807140000_wallet_chat_hardening.sql` is the wallet-only chat

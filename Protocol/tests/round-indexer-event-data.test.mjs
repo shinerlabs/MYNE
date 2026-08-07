@@ -87,3 +87,60 @@ test('refund-only archival follows finalized Solana time rather than the host cl
   assert.match(archiveBody, /Number\(round\.refund_at\) > chainNow/);
   assert.doesNotMatch(archiveBody, /Date\.now\(\)/);
 });
+
+test('server randomness events use distinct proof fields instead of legacy account and slot columns', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const serverCases = source.slice(
+    source.indexOf("case 'RoundServerCommitmentBound'"),
+    source.indexOf("case 'DeploymentCreated'"),
+  );
+  assert.match(serverCases, /randomness_provider_kind: SERVER_PROVIDER_KIND/);
+  assert.match(serverCases, /randomness_commitment_hex:/);
+  assert.match(serverCases, /randomness_reveal_hex:/);
+  assert.match(serverCases, /randomness_target_slot:/);
+  assert.match(serverCases, /randomness_entropy_slot:/);
+  assert.match(serverCases, /randomness_entropy_hash_hex:/);
+  assert.match(serverCases, /randomness_id: null/);
+  assert.match(serverCases, /randomness_commit_slot: null/);
+  assert.doesNotMatch(serverCases, /new PublicKey\(data\.commitment\)/);
+});
+
+test('settlement classifies the tagged server slot without persisting it as signed bigint', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const settledCase = source.slice(
+    source.indexOf("case 'RoundSettled'"),
+    source.indexOf("case 'ReceiptClaimed'"),
+  );
+  assert.match(settledCase, /rawCommitSlot & SERVER_RANDOMNESS_SLOT_FLAG/);
+  assert.match(settledCase, /randomness_id: null/);
+  assert.match(settledCase, /randomness_commit_slot: null/);
+  assert.match(settledCase, /requireRoundRandomnessProof\(proof/);
+  assert.match(settledCase, /new PublicKey\(data\.randomnessAccount\)\.toBase58\(\)/);
+});
+
+test('archive attestation fails closed until provider-specific randomness proof is complete', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const archiveBody = source.slice(
+    source.indexOf('async function archiveReadyRounds'),
+    source.indexOf('export async function indexerTick'),
+  );
+  assert.match(archiveBody, /requireRoundRandomnessProof\(indexedRound/);
+  assert.match(archiveBody, /provider_kind: round\.randomness_provider_kind/);
+  assert.match(archiveBody, /commitment_hex: round\.randomness_commitment_hex/);
+  assert.match(archiveBody, /entropy_hash_hex: round\.randomness_entropy_hash_hex/);
+});
+
+test('server proof migration uses unsigned-safe numeric slots and preserves Switchboard columns', async () => {
+  const migration = await readFile(
+    new URL('../../supabase/migrations/20260808090000_server_randomness_proofs.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(migration, /randomness_provider_kind text/);
+  assert.match(migration, /randomness_target_slot numeric\(20,0\)/);
+  assert.match(migration, /randomness_entropy_slot numeric\(20,0\)/);
+  assert.doesNotMatch(migration, /randomness_(?:target|entropy)_slot bigint/);
+  assert.match(migration, /randomness_id is null and randomness_commit_slot is null/);
+  assert.match(migration, /set randomness_provider_kind = 'switchboard'/);
+  assert.match(migration, /provider_kind = 'switchboard'/);
+  assert.match(migration, /mine_rounds_buyback_backlog_idx/);
+});

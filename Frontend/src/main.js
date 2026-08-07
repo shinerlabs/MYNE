@@ -14,7 +14,9 @@ import {
 } from './chain/anchor-client.js';
 import * as chain from './chain/mine-page.js';
 import { WALLET_LOGOS } from './wallet-logos.js';
-import { loadRoundBets, countMyBetRounds, loadIndexedRounds } from './chain/rounds-index.js';
+import {
+  loadRoundBets, countMyBetRounds, loadIndexedRounds, loadRoundRandomnessProof,
+} from './chain/rounds-index.js';
 import { loadRoundHistory } from './chain/rounds-page.js';
 import {
   readReferralStats, readReferrerOf, setReferrer, readLeaderboard,
@@ -26,6 +28,7 @@ import {
 import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/config.js';
 import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, invalidateReceiptCache } from './chain/lottery.js';
 import { randomnessHex } from './chain/randomness-proof.js';
+import { isServerRandomnessProgram } from './chain/randomness-mode.js';
 import {
   confirmedMinerRoundKey, previousConfirmedRoundId, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
@@ -301,7 +304,7 @@ document.querySelector('#app').innerHTML = `
 
   <main class="workspace page-view" data-page="mine">
     ${socialPanel}
-    <section class="board-panel panel" aria-label="Mining tiles"><div class="slot-grid">${slots.map(([id, value]) => `<button class="slot" data-slot="${id}" aria-label="Tile ${id}, ${value} SOL deployed" aria-pressed="false"><span>#${id}</span><strong>${value}</strong></button>`).join('')}</div><div class="board-footer"><div class="round-reward" tabindex="0" aria-describedby="round-reward-tip"><span class="round-reward-label"><img src="/myne-token-icon.svg" alt=""/><b>+${isPremine ? '0.3' : '1'}</b><small>/ ROUND</small></span><aside class="round-reward-tip" id="round-reward-tip" role="tooltip"><strong>Mine ${isPremine ? '0.3' : '1'} MYNE</strong><p>${isPremine ? 'Premine emission is reduced until launch, and mined MYNE stays locked until liquidity opens.' : 'Mine MYNE every round for a chance to receive the Motherlode and staking bonus.'}</p></aside></div><button class="switchboard-proof-trigger" id="switchboard-proof-trigger" type="button" aria-haspopup="dialog" aria-label="Verify randomness via Switchboard"><span>Verifiably random via</span><img src="/switchboard-logo.svg" alt="Switchboard"/><b aria-hidden="true">↗</b></button></div></section>
+    <section class="board-panel panel" aria-label="Mining tiles"><div class="slot-grid">${slots.map(([id, value]) => `<button class="slot" data-slot="${id}" aria-label="Tile ${id}, ${value} SOL deployed" aria-pressed="false"><span>#${id}</span><strong>${value}</strong></button>`).join('')}</div><div class="board-footer"><div class="round-reward" tabindex="0" aria-describedby="round-reward-tip"><span class="round-reward-label"><img src="/myne-token-icon.svg" alt=""/><b>+${isPremine ? '0.3' : '1'}</b><small>/ ROUND</small></span><aside class="round-reward-tip" id="round-reward-tip" role="tooltip"><strong>Mine ${isPremine ? '0.3' : '1'} MYNE</strong><p>${isPremine ? 'Premine emission is reduced until launch, and mined MYNE stays locked until liquidity opens.' : 'Mine MYNE every round for a chance to receive the Motherlode and staking bonus.'}</p></aside></div><button class="switchboard-proof-trigger" id="switchboard-proof-trigger" type="button" aria-haspopup="dialog" aria-label="Verify the round randomness proof"><span>Verifiably random on</span><img src="/solana-logo.svg" alt="Solana"/><b aria-hidden="true">↗</b></button></div></section>
     <aside class="control-column"><section class="round-summary panel"><div class="summary-stat"><span>DEPLOYED</span><strong>${solIcon('summary-eth')} 0.00</strong><small>≈— USDC</small></div><div class="summary-stat"><span>MOTHERLODE</span><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong><small>MYNE</small></div><div class="summary-stat"><span>TIME</span><strong>—</strong><small>Round #—</small></div></section><section class="deploy-panel panel"><div class="deploy-head"><div><span class="eyebrow">MINT MYNE</span><h2>Configure mine</h2></div><div class="refine-chip" id="mined-chip"><span>${isPremine ? 'MINED · LOCKED' : 'UNCLAIMED'}</span><b><img src="/myne-token-icon.svg" alt=""/> <em id="mined-chip-value">0.000</em></b></div></div><button class="last-round" data-route="rounds"><span>Last round</span><aside>${icon('grid')} #— <b>—</b> ${icon('chevron')}</aside></button><div class="amount-label-bar"><label class="amount-label" for="amount"><span>SOL per tile</span><small>Balance — SOL</small></label><button class="mine-currency-toggle" id="mine-currency-toggle" type="button" aria-pressed="false" aria-label="Show mining values in USDC"><span>SOL</span><i></i><b><span>USDC</span></b></button></div><div class="amount-display"><i class="extraction-field" aria-hidden="true"></i>${solIcon('amount-eth mine-sol-mark')}${usdcIcon('amount-usd-mark mine-usdc-mark')}<input id="amount" value="" placeholder="0.00" inputmode="decimal" aria-label="SOL per tile" autocomplete="off" autocorrect="off" spellcheck="false"/><span>SOL</span></div><div class="quick-amounts"><button data-add="0.0001">+0.0001</button><button data-add="0.001">+0.001</button><button data-add="0.01">+0.01</button><button data-add="0.1">+0.1</button></div><small class="amount-min" hidden></small><div class="configuration"><div class="config-row"><div><b>Tiles</b><small id="tile-helper">No tiles selected</small></div><div class="stepper"><button id="all">ALL</button><button id="tiles-minus" aria-label="Remove tile">${icon('minus')}</button><strong id="tile-count">0</strong><button id="tiles-plus" aria-label="Add tile">${icon('plus')}</button></div></div><div class="config-row auto-row"><div><b>Auto-round</b><small id="auto-helper">Manually enter each round</small></div><button class="auto-toggle" id="auto-round" role="switch" aria-checked="false"><span></span><b>Off</b></button></div><div class="config-row rounds-config"><div><b>Rounds</b><small id="round-helper">Repeat deployment</small></div><div class="stepper compact"><button id="rounds-minus" aria-label="Remove round">${icon('minus')}</button><strong id="round-count">1</strong><button id="rounds-plus" aria-label="Add round">${icon('plus')}</button></div><button class="until-balance-toggle" id="until-balance" role="switch" aria-checked="false" title="Fund as many rounds as your wallet balance allows"><span></span><b>Max</b></button></div><div class="config-row auto-claim-row" hidden><div><b>Auto-claim</b><small>Settle and reclaim after each round</small></div><button class="auto-toggle" id="auto-claim" role="switch" aria-checked="true"><span></span><b>On</b></button></div></div><div class="total-row per-round-row" id="per-round-row" hidden><div><span>Total per round</span></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('per-round-eth mine-sol-mark')}${usdcIcon('per-round-usdc mine-usdc-mark')}</span><em id="per-round-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="total-row"><div><span>Total deployment</span><small id="total-detail">0 tiles × 0.00 SOL × 1 round</small></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('total-eth mine-sol-mark')}${usdcIcon('total-usdc mine-usdc-mark')}</span><em id="total-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="auto-plan" id="auto-plan" hidden></div><button class="deploy" id="deploy"><i class="mine-button-mark"><img src="/myne-token-icon.svg" alt=""/></i><span>MINE</span><b aria-hidden="true">→</b></button><div class="security-note">${icon('shield')} Transactions settle on Solana</div></section><section class="miners round-results panel" hidden aria-live="polite"><div class="miners-head"><div><span class="eyebrow">CONFIRMED ROUND · #—</span><h2>Miners</h2></div><button data-route="rounds">History</button></div><div class="settlement-result"><span><small>WINNING TILE</small><strong>#—</strong></span><span><small>OUTCOME · 50/50</small><strong>${solIcon()} 0.00</strong></span><span><small>REWARD</small><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong></span></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="next-round"><span>NEXT ROUND</span><b>—</b></div></section></aside>
   </main>
 
@@ -705,14 +708,43 @@ const notify = (message) => { const toast = document.querySelector('#toast'); to
  * the reader run the same on-chain consistency check used by the history page. No secret,
  * wallet connection, or transaction is required to inspect a proof.
  */
-const openSwitchboardProof = () => {
-  const latest = chain.state.lastResolved || (chain.state.currentRound?.resolved ? chain.state.currentRound : null);
+const proofHash = (value) => value
+  ? `<code class="proof-hash">${value}</code>`
+  : 'Awaiting index';
+
+const openRandomnessProof = async () => {
+  const currentServerRound = chain.state.currentRound?.randomnessMode === 'server'
+    && !chain.state.currentRound.resolved
+    && ['commitment-bound', 'entropy-locked'].includes(chain.state.currentRound.randomnessState)
+    ? chain.state.currentRound
+    : null;
+  const latest = currentServerRound
+    || chain.state.lastResolved
+    || (chain.state.currentRound?.resolved ? chain.state.currentRound : null);
   const roundId = latest?.roundId ?? latest?.id ?? null;
   const randomness = latest?.randomnessValue ?? latest?.randomness ?? null;
   const randomnessAccount = latest?.randomnessId ?? latest?.randomnessAccount ?? null;
   const winningSquare = Number(latest?.winningSquare ?? -1);
+  const indexedProof = roundId === null ? null : await loadRoundRandomnessProof(roundId);
+  const randomnessMode = latest?.randomnessMode ?? indexedProof?.mode ?? 'switchboard';
+  const serverMode = randomnessMode === 'server';
+  const randomnessState = latest?.randomnessState ?? indexedProof?.state ?? 'uncommitted';
+  const commitment = indexedProof?.commitmentHex ?? latest?.randomnessCommitment ?? null;
+  const targetSlot = indexedProof?.targetSlot
+    ?? (randomnessState === 'entropy-locked' ? latest?.randomnessCommitSlot : null);
+  const entropySlot = indexedProof?.entropySlot
+    ?? (randomnessState === 'settled' ? latest?.randomnessCommitSlot : null);
   const providerId = import.meta.env.VITE_MYNE_RANDOMNESS_PROGRAM_ID || 'Configured in the deployed protocol';
-  const proofReady = roundId !== null && randomness !== null && winningSquare >= 0 && winningSquare < 25;
+  const proofReady = Boolean(latest?.resolved) && roundId !== null && randomness !== null
+    && winningSquare >= 0 && winningSquare < 25;
+  const serverProofReady = Boolean(commitment && indexedProof?.revealHex
+    && entropySlot !== null && indexedProof?.slotHashHex);
+  const verifyReady = proofReady && (!serverMode || serverProofReady);
+  const serverStateLabel = {
+    'commitment-bound': 'Commitment bound · entropy slot pending',
+    'entropy-locked': `Future Solana slot ${targetSlot ?? '—'} locked`,
+    settled: serverProofReady ? 'Full proof available' : 'Settled · reveal proof indexing',
+  }[randomnessState] ?? 'Awaiting server commitment';
 
   const dlg = document.createElement('dialog');
   dlg.className = 'confirm-dialog switchboard-proof-dialog';
@@ -721,19 +753,30 @@ const openSwitchboardProof = () => {
   panel.method = 'dialog';
   panel.className = 'confirm-panel switchboard-proof-panel';
   panel.innerHTML = `
-    <div class="switchboard-proof-brand"><img src="/switchboard-logo.svg" alt="Switchboard"/></div>
+    <div class="switchboard-proof-brand"><img src="/${serverMode ? 'solana-logo.svg' : 'switchboard-logo.svg'}" alt="${serverMode ? 'Solana' : 'Switchboard'}"/></div>
     <h2 class="confirm-title" id="switchboard-proof-title">Randomness proof</h2>
-    <p class="confirm-lead">The winning tile is derived from a Switchboard-revealed value after bidding closes. The contract validates the provider, round binding and reveal before settlement.</p>
+    <p class="confirm-lead">${serverMode
+      ? 'A secret is committed before bidding. After bidding closes, the contract locks a future Solana slot and combines its blockhash with the reveal. Neither input can select the winner alone.'
+      : 'The winning tile is derived from a Switchboard-revealed value after bidding closes. The contract validates the provider, round binding and reveal before settlement.'}</p>
     <dl class="confirm-rows switchboard-proof-rows">
-      <dt>Status</dt><dd data-proof-status>${proofReady ? 'Proof available' : 'Awaiting a resolved round'}</dd>
+      <dt>Status</dt><dd data-proof-status>${serverMode ? serverStateLabel : (proofReady ? 'Proof available' : 'Awaiting a resolved round')}</dd>
       <dt>Round</dt><dd>${roundId === null ? '—' : `#${roundNo(roundId)}`}</dd>
       <dt>Winning tile</dt><dd>${proofReady ? `#${winningSquare + 1}` : '—'}</dd>
-      <dt>Provider</dt><dd>${providerId}</dd>
-      <dt>Randomness account</dt><dd>${randomnessAccount ? `<a href="${explorerAddress(randomnessAccount)}" target="_blank" rel="noreferrer">${chain.format.short(randomnessAccount)} ↗</a>` : 'Awaiting index'}</dd>
+      <dt>Provider</dt><dd>${serverMode ? 'MYNE commitment + Solana SlotHashes' : providerId}</dd>
+      ${serverMode ? `
+        <dt>Commitment</dt><dd>${proofHash(commitment)}</dd>
+        <dt>Target slot</dt><dd>${targetSlot ?? 'Awaiting lock'}</dd>
+        <dt>Entropy slot</dt><dd>${entropySlot ?? 'Awaiting settlement'}</dd>
+        <dt>Reveal</dt><dd>${proofHash(indexedProof?.revealHex)}</dd>
+        <dt>Solana slot hash</dt><dd>${proofHash(indexedProof?.slotHashHex)}</dd>
+        <dt>Randomness output</dt><dd>${proofHash(randomness === null ? null : randomnessHex(randomness))}</dd>
+      ` : `<dt>Randomness account</dt><dd>${randomnessAccount ? `<a href="${explorerAddress(randomnessAccount)}" target="_blank" rel="noreferrer">${chain.format.short(randomnessAccount)} ↗</a>` : 'Awaiting index'}</dd>`}
     </dl>
-    <p class="switchboard-proof-note">Anyone can independently verify a resolved round. No wallet signature is needed.</p>
-    <div class="confirm-actions"><button type="button" class="confirm-cancel">Close</button><button type="button" class="confirm-go" data-proof-verify ${proofReady ? '' : 'disabled'}>${proofReady ? 'Verify round' : 'Waiting for proof'}</button></div>
-    <a class="switchboard-doc-link" href="https://docs.switchboard.xyz/docs-by-chain/solana-svm/randomness/randomness-tutorial" target="_blank" rel="noreferrer">How Switchboard randomness works ↗</a>`;
+    <p class="switchboard-proof-note">${serverMode
+      ? 'The commitment is data, not a Solana account. The verifier recomputes both hashes and checks the recorded slot hash against Solana RPC.'
+      : 'Anyone can independently verify a resolved round. No wallet signature is needed.'}</p>
+    <div class="confirm-actions"><button type="button" class="confirm-cancel">Close</button><button type="button" class="confirm-go" data-proof-verify ${verifyReady ? '' : 'disabled'}>${verifyReady ? 'Verify round' : (proofReady ? 'Proof data indexing' : 'Waiting for proof')}</button></div>
+    ${serverMode ? '' : '<a class="switchboard-doc-link" href="https://docs.switchboard.xyz/docs-by-chain/solana-svm/randomness/randomness-tutorial" target="_blank" rel="noreferrer">How Switchboard randomness works ↗</a>'}`;
   dlg.append(panel);
   document.body.append(dlg);
 
@@ -742,13 +785,18 @@ const openSwitchboardProof = () => {
   dlg.addEventListener('click', (event) => { if (event.target === dlg) close(); });
   const verify = panel.querySelector('[data-proof-verify]');
   verify?.addEventListener('click', async () => {
-    if (!proofReady) return;
+    if (!verifyReady) return;
     verify.disabled = true;
     verify.textContent = 'Checking…';
     try {
-      const result = await verifyRoundFairness(BigInt(roundId), randomness, winningSquare);
+      const result = await verifyRoundFairness(BigInt(roundId), randomness, winningSquare, indexedProof);
       const status = panel.querySelector('[data-proof-status]');
-      status.textContent = result?.ok ? 'Verified on-chain' : 'Could not verify';
+      status.textContent = result?.ok
+        ? (serverMode ? 'Verified against Solana entropy' : 'Verified on-chain')
+        : serverMode && result?.outcomeMatches && result?.serverCommitmentMatches
+          && result?.serverOutputMatches && result?.solanaSlotHashMatches === null
+          ? 'Hashes verified · historical block unavailable from RPC'
+          : 'Could not verify';
       status.classList.toggle('proof-ok', Boolean(result?.ok));
       verify.textContent = result?.ok ? 'Verified' : 'Try again';
       verify.disabled = Boolean(result?.ok);
@@ -761,7 +809,7 @@ const openSwitchboardProof = () => {
   dlg.showModal();
   panel.querySelector('.confirm-cancel').focus();
 };
-document.querySelector('#switchboard-proof-trigger')?.addEventListener('click', openSwitchboardProof);
+document.querySelector('#switchboard-proof-trigger')?.addEventListener('click', () => { void openRandomnessProof(); });
 
 /**
  * In-app confirmation for irreversible actions.
@@ -889,7 +937,16 @@ const walletDeepLinks = () => {
  * textContent and icons are only rendered when client.js has confirmed a `data:image/` URI.
  * A wallet that supplies neither still gets a usable row via a monogram.
  */
-const walletPicker = (wallets, lastRdns) => new Promise((resolve) => {
+const walletPicker = (wallets, lastRdns, connectSelected) => new Promise((resolve, reject) => {
+  // Start `provider.connect()` while the wallet-row click still owns browser user activation.
+  // Resolving an rdns and calling connect after the dialog `close` event loses that activation;
+  // several Wallet Standard extensions then have their approval tab blocked as a popup.
+  let settled = false;
+  const dismiss = () => {
+    if (settled) return;
+    settled = true;
+    resolve(null);
+  };
   const dlg = document.createElement('dialog');
   dlg.className = 'confirm-dialog wallet-dialog';
 
@@ -951,7 +1008,19 @@ const walletPicker = (wallets, lastRdns) => new Promise((resolve) => {
       chevron.className = 'wallet-chevron';
       chevron.textContent = '›';
       row.append(chevron);
-      row.addEventListener('click', () => { dlg.dataset.pick = wallet.rdns; dlg.close(); });
+      row.addEventListener('click', () => {
+        if (settled) return;
+        settled = true;
+        try {
+          // An async function executes through its first await synchronously, so the
+          // extension's connect()/window.open path is entered in this trusted click.
+          resolve(connectSelected(wallet.rdns));
+        } catch (error) {
+          reject(error);
+        } finally {
+          dlg.close();
+        }
+      });
       list.append(row);
     }
   } else {
@@ -995,9 +1064,8 @@ const walletPicker = (wallets, lastRdns) => new Promise((resolve) => {
   document.body.append(dlg);
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
   dlg.addEventListener('close', () => {
-    const pick = dlg.dataset.pick || null;
     dlg.remove();
-    resolve(pick);
+    dismiss();
   });
   dlg.showModal();
 });
@@ -1224,6 +1292,11 @@ const renderTransparencyAddresses = async () => {
     }
   }
   ledger.replaceChildren();
+  const configuredRandomness = config?.randomnessProgram || PROGRAMS.randomness;
+  const serverRandomness = isServerRandomnessProgram(
+    configuredRandomness,
+    protocolProgramId || PROGRAMS.protocol,
+  );
   const entries = [
     { group: 'CORE', label: 'MYNE mint', address: config?.mint || PROGRAMS.tokenMint, note: 'Canonical SPL token mint · no freeze authority at launch' },
     { group: 'CORE', label: 'Protocol program', address: protocolProgramId || PROGRAMS.protocol, note: 'Executable MYNE Anchor program' },
@@ -1232,7 +1305,14 @@ const renderTransparencyAddresses = async () => {
     { group: 'ACCOUNTING', label: 'Mining rewards ledger', address: protocolPdas.miningPool, note: 'Tracks unclaimed MYNE and the 9% passive claim-fee distribution' },
     { group: 'LIQUIDITY', label: 'Liquidity gate', address: protocolPdas.liquidityGate, note: 'Locks Mainnet activation to the verified Meteora MYNE/SOL pool' },
     { group: 'LIQUIDITY', label: 'Meteora pool', address: gate?.pool, note: 'Official MYNE/WSOL Meteora pool registered and verified on-chain' },
-    { group: 'INTEGRATIONS', label: 'Switchboard program', address: config?.randomnessProgram || PROGRAMS.randomness, note: 'Pinned randomness provider program for this deployment' },
+    {
+      group: 'INTEGRATIONS',
+      label: serverRandomness ? 'MYNE randomness program' : 'Switchboard program',
+      address: configuredRandomness,
+      note: serverRandomness
+        ? 'Commit-reveal mode mixed with a future Solana SlotHashes entry'
+        : 'Pinned Switchboard randomness provider for this deployment',
+    },
   ];
   let previousGroup = '';
   entries.forEach((entry) => {
@@ -5100,7 +5180,7 @@ const renderRoundHistory = () => {
       <button class="round-record" aria-expanded="false">
         <span class="round-number">#${roundNo(r.roundId)}</span><span class="winning-tile">${icon('grid')} Tile ${tile}</span><span class="round-mode ${r.mode}">${label}</span><span>${solIcon()} ${chain.format.ethSmart(r.totalWager)}</span><span>${winnerCount}</span><time>${relTime(r.endsAt)}</time><i>${icon('chevron')}</i>
       </button>
-      <div class="round-detail" hidden data-round-id="${r.roundId}" data-square="${r.winningSquare}" data-prize="${r.potForWinners}" data-winner-total="${r.winnerTotal}" data-solo="${r.singleMinerRound ? '1' : ''}" data-winner="${r.singleMinerWinner || ''}" data-randomness="${r.randomnessValue == null ? '' : randomnessHex(r.randomnessValue)}" data-randomness-account="${r.randomnessId ?? ''}" data-randomness-commit-slot="${r.randomnessCommitSlot ?? ''}" data-wager="${r.totalWager}">
+      <div class="round-detail" hidden data-round-id="${r.roundId}" data-square="${r.winningSquare}" data-prize="${r.potForWinners}" data-winner-total="${r.winnerTotal}" data-solo="${r.singleMinerRound ? '1' : ''}" data-winner="${r.singleMinerWinner || ''}" data-randomness="${r.randomnessValue == null ? '' : randomnessHex(r.randomnessValue)}" data-randomness-mode="${r.randomnessMode ?? 'switchboard'}" data-randomness-state="${r.randomnessState ?? 'settled'}" data-randomness-account="${r.randomnessId ?? ''}" data-randomness-commitment="${r.randomnessCommitment ?? ''}" data-randomness-commit-slot="${r.randomnessCommitSlot ?? ''}" data-wager="${r.totalWager}">
         <div><span>RESULT</span><strong>${result}</strong></div>
         <div><span>SETTLEMENT</span><strong class="round-settlement">—</strong></div>
         <div><span>NETWORK</span><strong>Solana</strong></div>
@@ -5347,8 +5427,10 @@ const loadSettlement = async (detail) => {
  * The `+MYNE` tag marks the solo winner.
  */
 /**
- * The fairness strip: winning square, total deployed, bound Switchboard account and a local
- * recomputation of the exact SHA-256 domain separation used by settle_round_core.
+ * The fairness strip keeps each round's immutable provider mode. Legacy
+ * Switchboard rounds retain their account link; server rounds instead expose
+ * commitment bytes plus the masked Solana entropy slot and never turn the
+ * commitment into an Explorer address.
  */
 const loadFairness = async (detail) => {
   const host = detail.querySelector('.round-fairness');
@@ -5357,8 +5439,14 @@ const loadFairness = async (detail) => {
   host.dataset.loaded = '1';
 
   const randomness = detail.dataset.randomness;
+  const indexedProof = await loadRoundRandomnessProof(roundId);
+  const randomnessMode = indexedProof?.mode ?? detail.dataset.randomnessMode ?? 'switchboard';
+  const serverMode = randomnessMode === 'server';
   const randomnessAccount = detail.dataset.randomnessAccount;
+  const fallbackCommitment = detail.dataset.randomnessCommitment || null;
   const commitSlot = detail.dataset.randomnessCommitSlot;
+  const commitment = indexedProof?.commitmentHex ?? fallbackCommitment;
+  const entropySlot = indexedProof?.entropySlot ?? (detail.dataset.randomnessState === 'settled' && commitSlot ? BigInt(commitSlot) : null);
   const square = Number(detail.dataset.square);
   const deployed = detail.dataset.wager ? chain.format.ethSmart(BigInt(detail.dataset.wager)) : null;
   host.hidden = false;
@@ -5368,10 +5456,20 @@ const loadFairness = async (detail) => {
     deployed
       ? `<span class="fair-item">Total deployed <b>${deployed}</b></span>`
       : '',
-    randomnessAccount
-      ? `<a class="fair-link" href="${explorerAddress(randomnessAccount)}" target="_blank" rel="noreferrer">Switchboard account ↗</a>`
-      : '<span class="fair-pending muted">Switchboard account pending index</span>',
-    commitSlot ? `<span class="fair-item">Committed at slot <b>${commitSlot}</b></span>` : '',
+    serverMode
+      ? `<span class="fair-item">Server commitment ${commitment ? `<code class="fair-hash">${commitment}</code>` : '<b>pending index</b>'}</span>`
+      : randomnessAccount
+        ? `<a class="fair-link" href="${explorerAddress(randomnessAccount)}" target="_blank" rel="noreferrer">Switchboard account ↗</a>`
+        : '<span class="fair-pending muted">Switchboard account pending index</span>',
+    serverMode
+      ? `<span class="fair-item">Solana entropy slot <b>${entropySlot ?? 'pending'}</b></span>`
+      : commitSlot ? `<span class="fair-item">Committed at slot <b>${commitSlot}</b></span>` : '',
+    serverMode && indexedProof?.revealHex
+      ? `<span class="fair-item">Reveal <code class="fair-hash">${indexedProof.revealHex}</code></span>`
+      : '',
+    serverMode && indexedProof?.slotHashHex
+      ? `<span class="fair-item">Slot hash <code class="fair-hash">${indexedProof.slotHashHex}</code></span>`
+      : '',
     `<span class="fair-note"></span>`,
     randomness
       ? `<button type="button" class="fair-verify">verify</button>`
@@ -5382,7 +5480,7 @@ const loadFairness = async (detail) => {
   btn?.addEventListener('click', async () => {
     btn.disabled = true;
     btn.textContent = 'checking…';
-    const r = await verifyRoundFairness(BigInt(roundId), randomness, square);
+    const r = await verifyRoundFairness(BigInt(roundId), randomness, square, indexedProof);
     if (!r) { btn.textContent = 'unavailable'; btn.disabled = false; return; }
     btn.replaceWith(renderVerdict(r));
   });
@@ -5397,15 +5495,21 @@ const loadFairness = async (detail) => {
  */
 const renderVerdict = (r) => {
   const wrap = document.createElement('span');
-  wrap.className = `fair-verdict ${r.ok ? 'ok' : 'bad'}`;
+  const incompleteServerProof = r.randomnessMode === 'server' && r.outcomeMatches && !r.serverProofComplete;
+  wrap.className = `fair-verdict ${r.ok ? 'ok' : incompleteServerProof ? 'pending' : 'bad'}`;
   const checks = [
     ['indexed randomness matches the on-chain round', r.randomnessMatches],
     [`hash derives tile #${Number(r.winningSquare) + 1}`, r.squareMatches],
     [`hash derives ${r.soloMode ? 'solo' : 'split'} mode`, r.modeMatches],
     [`hash derives Motherlode ${r.motherlodeHit ? 'hit' : 'miss'}`, r.motherlodeMatches],
   ];
-  wrap.innerHTML = `<b>${r.ok ? '✓ verified' : '✗ not verified'}</b>`
-    + checks.map(([t, pass]) => `<i class="${pass ? 'pass' : 'fail'}">${pass ? '✓' : '✗'} ${t}</i>`).join('');
+  if (r.randomnessMode === 'server') checks.push(
+    ['reveal matches the pre-betting commitment', r.serverCommitmentMatches],
+    ['reveal + Solana slot hash match the on-chain output', r.serverOutputMatches],
+    ['recorded hash matches the produced Solana block', r.solanaSlotHashMatches],
+  );
+  wrap.innerHTML = `<b>${r.ok ? '✓ verified' : incompleteServerProof ? '… entropy proof incomplete' : '✗ not verified'}</b>`
+    + checks.map(([t, pass]) => `<i class="${pass === null ? 'pending' : pass ? 'pass' : 'fail'}">${pass === null ? '…' : pass ? '✓' : '✗'} ${t}</i>`).join('');
   return wrap;
 };
 

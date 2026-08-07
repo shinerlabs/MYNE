@@ -268,8 +268,9 @@ async function runTx(pendingMessage, action, onDone) {
  * The connect picker, supplied by the UI layer via `setWalletChooser`.
  *
  * Kept as an injected callback for the same reason the social layer takes a host adapter:
- * this module talks to chains, not to the DOM. Given the discovered wallets it resolves to
- * an rdns to connect with, or null if the user backed out.
+ * this module talks to chains, not to the DOM. Given the discovered wallets and the connect
+ * callback, it starts the selected wallet connection inside the trusted picker click and
+ * resolves when that connection finishes (or null if the user backed out).
  */
 let walletChooser = null;
 export const setWalletChooser = (fn) => { walletChooser = fn; };
@@ -294,9 +295,7 @@ export async function connectWallet(rdns) {
     // Discover BEFORE the picker opens so the sheet renders its final list at once rather
     // than growing an entry at a time while the user is already reading it.
     const wallets = await discoverWallets();
-    const chosen = await walletChooser(wallets, getLastWalletRdns());
-    if (!chosen) return; // dismissed, or sent off to install — not an error
-    await connect(chosen);
+    await walletChooser(wallets, getLastWalletRdns(), connect);
   } catch (error) {
     notify(readableError(error));
   }

@@ -164,14 +164,18 @@ the MYNE program in this milestone. The current on-chain fee schedule is limited
 
 ## Randomness and settlement
 
-Recent blockhashes, timestamps and validator-controlled values are not acceptable randomness.
-Production pins Switchboard On-Demand. The keeper creates and binds a fresh, uncommitted request
-before bids are accepted. Every manual deployment and Auto-round execution supplies that exact
-account, and the program rejects the deployment unless its seed slot, reveal slot and value are all
-still zero. Only after betting closes does one transaction execute Switchboard commit followed by
-`record_round_randomness_commit`. After the committed seed slot is available, one transaction
-executes reveal followed by verified settlement. Settlement checks the exact owner, authority,
-bound account, recorded seed slot, current reveal slot and value.
+Recent blockhashes, timestamps and validator-controlled values are not sufficient by themselves.
+Every production round records its provider kind and retains a provider-specific public proof.
+Historical Switchboard On-Demand rounds remain unchanged: the keeper binds a fresh, uncommitted
+request before bids, commits after betting closes and reveals immediately before verified
+settlement.
+
+The temporary server commit-reveal provider commits a secret before the first deployment. After
+betting closes, anyone can lock a future target slot; settlement reveals the committed preimage and
+mixes it with the smallest produced `SlotHashes` entry at or after that target. A missing or aged-out
+slot fails closed into the existing refund path. The commitment and output are domain-separated by
+the MYNE program, mint and round. The reveal and `RoundSettled` event must occur atomically in the
+same transaction.
 
 Every request stores the round/roll identity before randomness exists. Fulfilment is one-shot.
 Settlement derives domain-separated values for tile, Split/Solo mode, Solo ticket and Motherlode
@@ -182,6 +186,15 @@ hit so one draw is not reused ambiguously.
 The frontend performs scoped PDA/account reads for authoritative recent rounds, receipts, balances
 and claim eligibility. Structured Anchor events permit a read-only indexer to accelerate long-term
 history and charts without becoming a source of truth.
+
+The archive index stores `provider_kind` and keeps provider evidence in distinct fields. A
+Switchboard request remains an account address with a plain commit slot. A server commitment is
+stored only as 32-byte hex; it is never linked as an Explorer account, and the on-chain high-bit
+mode tag is never written into a signed PostgreSQL `bigint`. Server proof version 3 separately
+commits the commitment, reveal, target slot, actual entropy slot and hash, output, and the three
+event transaction identities. The indexer recomputes both domain-separated hashes and requires the
+reveal and settlement transaction to match before attesting the archive. Switchboard archive
+snapshots retain their existing version 2 shape and hash.
 
 ## Upgrade and operations policy — required before Mainnet
 

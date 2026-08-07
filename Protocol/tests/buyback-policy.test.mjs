@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   calculateSpend,
@@ -8,6 +9,7 @@ import {
   METEORA_DLMM_PROGRAM_TEXT,
   NATIVE_SOL_MINT,
   meteoraRouteForProgram,
+  selectIndexedBuybackRound,
   validateJupiterEndpoint,
   validateDirectMeteoraQuote,
 } from '../scripts/buyback-policy.mjs';
@@ -115,4 +117,42 @@ test('buyback binds Jupiter routing to the exact registered Meteora program', ()
     outputMint: quote.outputMint,
     expectedAmmLabel: METEORA_DLMM_LABEL,
   }), /Meteora DLMM/);
+});
+
+test('buyback cursor gaps select the first real indexed unsettled allocation', () => {
+  const selected = selectIndexedBuybackRound([
+    { round_id: '299', resolved: true, buyback_completed: false, total_wager_wei: '100000000' },
+    { round_id: '302', resolved: true, buyback_completed: false, total_wager_wei: '200000000' },
+  ], { cursorRound: 0, currentRound: 310 });
+  assert.equal(selected.round_id, '299');
+});
+
+test('buyback journal loss restarts at oldest indexed incomplete positive-volume round', () => {
+  const selected = selectIndexedBuybackRound([
+    { round_id: '314', resolved: true, buyback_completed: false, total_wager_wei: '50000000' },
+    { round_id: '287', resolved: true, buyback_completed: false, total_wager_wei: '50000000' },
+    { round_id: '299', resolved: true, buyback_completed: false, total_wager_wei: '50000000' },
+  ], { cursorRound: 0, currentRound: 314 });
+  assert.equal(selected.round_id, '287');
+});
+
+test('buyback indexed selection excludes future, empty, unresolved and indexed-complete rounds', () => {
+  const selected = selectIndexedBuybackRound([
+    { round_id: '286', resolved: true, buyback_completed: false, total_wager_wei: '50000000' },
+    { round_id: '287', resolved: false, buyback_completed: false, total_wager_wei: '50000000' },
+    { round_id: '288', resolved: true, buyback_completed: false, total_wager_wei: '0' },
+    { round_id: '289', resolved: true, buyback_completed: true, total_wager_wei: '50000000' },
+    { round_id: '290', resolved: true, buyback_completed: false, total_wager_wei: '50000000' },
+    { round_id: '315', resolved: true, buyback_completed: false, total_wager_wei: '50000000' },
+  ], { cursorRound: 287, currentRound: 314 });
+  assert.equal(selected.round_id, '290');
+});
+
+test('buyback keeper re-checks the authoritative on-chain completion flag', async () => {
+  const source = await readFile(new URL('../scripts/buyback-keeper.mjs', import.meta.url), 'utf8');
+  assert.match(source, /indexedBuybackBacklog/);
+  assert.match(source, /if \(roundState\.buybackCompleted\)/);
+  assert.match(source, /round-buyback-completed-on-chain/);
+  assert.match(source, /indexed-round-account-missing-reconcile-required/);
+  assert.doesNotMatch(source, /dryRun \? currentRound : 0/);
 });

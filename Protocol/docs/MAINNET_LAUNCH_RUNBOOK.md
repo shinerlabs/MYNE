@@ -180,7 +180,8 @@ Review the entire simulation and only then repeat with
 back. Verify the retired mint authority is `None`, the new mint authority/config mint are the config
 PDA, the supply remains exactly 100 MYNE, the protocol remains paused, and the old CA is publicly
 labelled deprecated rather than hidden. This read-back is a hard stop: the production-feature
-binary rejects every randomness mode except Switchboard Mainnet and always enforces the production liquidity gate.
+binary accepts only the reviewed Switchboard Mainnet and server commit-reveal modes, and always
+enforces the production liquidity gate.
 Production keepers independently refuse a cluster/provider mismatch, and the administrator must
 still refuse to proceed on any disagreement.
 
@@ -201,6 +202,7 @@ supabase/migrations/20260807133000_referral_read_model_v1.sql
 supabase/migrations/20260807140000_wallet_chat_hardening.sql
 supabase/migrations/20260807141000_wallet_validator_lint_cleanup.sql
 supabase/migrations/20260807142000_chat_admin_provisioning.sql
+supabase/migrations/20260808090000_server_randomness_proofs.sql
 ```
 
 The wallet-chat cut-over invalidates old sessions and removes guest/null rows. After the final
@@ -215,7 +217,11 @@ Run the event indexer from a recorded start slot with finalized reads and servic
 Before activation, prove that a synthetic `RoundFeesDistributed` event persists every allocation
 field. Confirm `archive_verified` remains false for an observed archive event until the canonical
 snapshot exists and its hash matches the on-chain `Round.archive_hash`; only then may the lifecycle
-keeper close receipts. Run the lifecycle keeper with the same randomness role. Set:
+keeper close receipts. For server commit-reveal, also prove the provider kind, commitment, reveal,
+unflagged target slot, actual entropy slot/hash and all event transaction identities are present;
+the archived reveal signature must be the settlement signature. Never place the tagged on-chain
+u64 in `randomness_commit_slot` or expose commitment bytes as an Explorer account. Run the lifecycle
+keeper with the same randomness role. Set:
 
 ```text
 ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1

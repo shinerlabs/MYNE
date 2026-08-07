@@ -1,3 +1,7 @@
+import { PublicKey } from '@solana/web3.js';
+
+import { normalizeProofHex } from './randomness-mode.js';
+
 const text = (value) => new TextEncoder().encode(value);
 
 const hexByte = (value) => Number.parseInt(value, 16);
@@ -46,12 +50,16 @@ const roundIdBytes = (roundId) => {
   return bytes;
 };
 
-const hash = async (domain, roundId, randomness) => {
-  const parts = [text('MYNE_V1'), text(domain), roundIdBytes(roundId), randomnessBytes(randomness)];
+const digest = async (parts) => {
   const input = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
   let offset = 0;
   for (const part of parts) { input.set(part, offset); offset += part.length; }
   return new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', input));
+};
+
+const hash = async (domain, roundId, randomness) => {
+  const parts = [text('MYNE_V1'), text(domain), roundIdBytes(roundId), randomnessBytes(randomness)];
+  return digest(parts);
 };
 
 const sample = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, 8).getBigUint64(0, true);
@@ -74,3 +82,34 @@ export async function deriveRoundProof(roundId, randomness) {
   };
 }
 
+/**
+ * Recompute both hashes used by MYNE server commit/reveal settlement. The
+ * reveal alone cannot select an outcome: the output also commits to the first
+ * produced Solana slot hash at/after the locked target.
+ */
+export async function deriveServerEntropyProof({
+  programId, mint, roundId, reveal, entropySlot, slotHash,
+  commitment = null, randomness = null,
+}) {
+  const programBytes = new PublicKey(programId).toBytes();
+  const mintBytes = new PublicKey(mint).toBytes();
+  const revealBytes = randomnessBytes(reveal);
+  const slotHashBytes = randomnessBytes(slotHash);
+  const commitmentBytes = await digest([
+    text('MYNE_SERVER_COMMIT_V1'), programBytes, mintBytes, roundIdBytes(roundId), revealBytes,
+  ]);
+  const randomnessBytesDerived = await digest([
+    text('MYNE_SERVER_OUTPUT_V1'), programBytes, mintBytes, roundIdBytes(roundId), revealBytes,
+    roundIdBytes(entropySlot), slotHashBytes,
+  ]);
+  const commitmentHex = randomnessHex(commitmentBytes);
+  const randomnessHexDerived = randomnessHex(randomnessBytesDerived);
+  const expectedCommitment = normalizeProofHex(commitment);
+  const expectedRandomness = normalizeProofHex(randomness);
+  return {
+    commitmentHex,
+    randomnessHex: randomnessHexDerived,
+    commitmentMatches: expectedCommitment === null ? null : commitmentHex === expectedCommitment,
+    randomnessMatches: expectedRandomness === null ? null : randomnessHexDerived === expectedRandomness,
+  };
+}
