@@ -12,7 +12,7 @@ test('provider keeper binds uncommitted randomness, commits after close, then re
   const bind = source.indexOf('[createIx, openIx, bindIx]');
   const bettingClose = source.indexOf('waitForChainTimestamp(bettingEndsAt)');
   const commit = source.indexOf('randomnessClient.commitIx(queue, keypair.publicKey)');
-  const record = source.indexOf('.recordRoundRandomnessCommit(ROUND_ID)');
+  const record = source.indexOf('.recordRoundRandomnessCommit(ROUND_ID_BN)');
   const atomicCommit = source.indexOf('[commitIx, recordIx]');
   const seedWait = source.indexOf('connection.getSlot(commitment)) <= commitSlot');
   const reveal = source.indexOf('randomnessClient.revealIx(keypair.publicKey)');
@@ -30,6 +30,19 @@ test('provider keeper binds uncommitted randomness, commits after close, then re
   assert.ok(reveal < settle && settle < atomicSettle, 'Reveal and settlement ordering is invalid');
   assert.doesNotMatch(source, /createAndCommitIxs/);
   assert.match(source, /executeAutoPlan[\s\S]*randomnessAccount: randomnessPubkey/);
+});
+
+test('Switchboard keeper converts the native round id to BN at every Anchor u64 boundary', async () => {
+  const source = await readFile(
+    new URL('../scripts/switchboard-round-keeper.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /const ROUND_ID_BN = new anchor\.BN\(ROUND_ID\.toString\(\)\)/);
+  assert.match(source, /\.openRound\(ROUND_ID_BN\)/);
+  assert.match(source, /\.bindRoundRandomness\(ROUND_ID_BN\)/);
+  assert.match(source, /\.executeAutoPlan\(ROUND_ID_BN, new anchor\.BN\(nonce\.toString\(\)\)\)/);
+  assert.match(source, /\.recordRoundRandomnessCommit\(ROUND_ID_BN\)/);
+  assert.doesNotMatch(source, /\.methods\.(?:openRound|bindRoundRandomness|executeAutoPlan|recordRoundRandomnessCommit)\(ROUND_ID(?:,|\))/);
 });
 
 test('manual and demo clients supply the deploy randomness account explicitly', async () => {

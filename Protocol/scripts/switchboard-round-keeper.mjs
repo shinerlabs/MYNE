@@ -60,6 +60,9 @@ const scheduledRound = Math.floor(
 );
 assert.ok(scheduledRound >= 0, 'Protocol schedule has not started');
 const ROUND_ID = BigInt(process.env.MYNE_ROUND_ID || scheduledRound);
+// Anchor's u64 instruction coder requires BN values. Keep the native bigint for
+// deterministic PDA seeds and arithmetic, and use this BN at every IDL boundary.
+const ROUND_ID_BN = new anchor.BN(ROUND_ID.toString());
 const CONFIRM = process.env.CONFIRM_SWITCHBOARD_KEEPER;
 const LIVE_AUTHORIZED = process.env.SWITCHBOARD_KEEPER_LIVE === PROGRAM_ID.toBase58();
 if (!LIVE_AUTHORIZED) {
@@ -140,11 +143,11 @@ if (!roundState) {
   );
   randomnessPubkey = randomness.pubkey;
   const openIx = await myne.methods
-    .openRound(ROUND_ID)
+    .openRound(ROUND_ID_BN)
     .accounts({ config, round, payer: keypair.publicKey, systemProgram: SystemProgram.programId })
     .instruction();
   const bindIx = await myne.methods
-    .bindRoundRandomness(ROUND_ID)
+    .bindRoundRandomness(ROUND_ID_BN)
     .accounts({ config, round, randomnessAccount: randomnessPubkey, authority: keypair.publicKey })
     .instruction();
 
@@ -225,7 +228,7 @@ for (const indexed of activePlanIndex) {
     nonceSeed.writeBigUInt64LE(nonce);
     const miner = pda('miner', authority.toBuffer());
     const receipt = pda('bet', roundSeed, authority.toBuffer(), nonceSeed);
-    const ix = await myne.methods.executeAutoPlan(ROUND_ID, new anchor.BN(nonce.toString())).accounts({
+    const ix = await myne.methods.executeAutoPlan(ROUND_ID_BN, new anchor.BN(nonce.toString())).accounts({
       config, autoPlan, miner, round, receipt, executor: keypair.publicKey,
       randomnessAccount: randomnessPubkey,
       systemProgram: SystemProgram.programId,
@@ -276,7 +279,7 @@ if (!roundState.settled && asBigInt(roundState.randomnessCommitSlot) === 0n) {
   assert.equal(asBigInt(latestRandomness.revealSlot), 0n, 'Refusing an already revealed randomness request');
   const commitIx = await randomnessClient.commitIx(queue, keypair.publicKey);
   const recordIx = await myne.methods
-    .recordRoundRandomnessCommit(ROUND_ID)
+    .recordRoundRandomnessCommit(ROUND_ID_BN)
     .accounts({ config, round, randomnessAccount: randomnessPubkey, authority: keypair.publicKey })
     .instruction();
   commitSig = (await sendKeeperInstructions([commitIx, recordIx])).signature;
