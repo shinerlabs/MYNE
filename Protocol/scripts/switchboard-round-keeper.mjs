@@ -61,12 +61,25 @@ const network = requireMatchingSolanaNetwork({
 });
 const isMainnet = network === 'mainnet-beta';
 const queue = sb.getDefaultQueueAddress(isMainnet);
+const indexedRows = async (path) => {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
+  });
+  const text = await response.text();
+  assert.ok(response.ok, `Indexed read failed (${response.status}): ${text}`);
+  return text ? JSON.parse(text) : [];
+};
 const scheduledRound = Math.floor(
   (Math.floor(Date.now() / 1000) - Number(configState.initializedAt.toString()))
   / Number(configState.roundDurationSeconds.toString()),
 );
 assert.ok(scheduledRound >= 0, 'Protocol schedule has not started');
-const ROUND_ID = BigInt(process.env.MYNE_ROUND_ID || scheduledRound);
+const explicitRoundId = String(process.env.MYNE_ROUND_ID || '').trim();
+const resumableRounds = explicitRoundId ? [] : await indexedRows(
+  'mine_rounds?resolved=eq.false&closed_signature=is.null&opened_at=not.is.null&select=round_id&order=round_id.asc&limit=2',
+);
+const resumedFromIndex = !explicitRoundId && resumableRounds.length > 0;
+const ROUND_ID = BigInt(explicitRoundId || resumableRounds[0]?.round_id || scheduledRound);
 // Anchor's u64 instruction coder requires BN values. Keep the native bigint for
 // deterministic PDA seeds and arithmetic, and use this BN at every IDL boundary.
 const ROUND_ID_BN = new anchor.BN(ROUND_ID.toString());
@@ -80,15 +93,6 @@ roundSeed.writeBigUInt64LE(ROUND_ID);
 const stakePool = pda('stake_pool');
 const liquidityGate = pda('liquidity_gate');
 const round = pda('round', roundSeed);
-
-const indexedRows = async (path) => {
-  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
-    headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
-  });
-  const text = await response.text();
-  assert.ok(response.ok, `Indexed read failed (${response.status}): ${text}`);
-  return text ? JSON.parse(text) : [];
-};
 
 const buildKeeperTransaction = async (ixs, extraSigners, units) => {
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(commitment);
@@ -164,6 +168,14 @@ let randomnessPubkey = roundState?.randomnessAccount ?? null;
 let bindSig = null;
 let commitSig = null;
 if (!roundState) {
+  if (resumedFromIndex) {
+    console.log(JSON.stringify({
+      event: 'round-index-ahead-of-rpc',
+      round: ROUND_ID.toString(),
+      status: 'waiting-for-index-reconciliation',
+    }));
+    process.exit(0);
+  }
   const randomnessKeypair = Keypair.generate();
   const [randomness, createIx] = await sb.Randomness.create(
     switchboardProgram,
@@ -199,6 +211,15 @@ if (!roundState) {
 const randomnessClient = new sb.Randomness(switchboardProgram, randomnessPubkey);
 const asBigInt = (value) => BigInt(value?.toString?.() ?? value ?? 0);
 const bettingEndsAt = Number(roundState.bettingEndsAt.toString());
+const refundAt = Number(roundState.refundAt.toString());
+if (!roundState.settled && (await chainTimeSeconds()) >= refundAt) {
+  console.log(JSON.stringify({
+    event: 'round-expired-awaiting-lifecycle',
+    round: ROUND_ID.toString(),
+    totalReceipts: roundState.totalReceipts.toString(),
+  }));
+  process.exit(0);
+}
 const initialRandomness = await randomnessClient.loadData();
 if (asBigInt(roundState.randomnessCommitSlot) === 0n) {
   assert.equal(asBigInt(initialRandomness.seedSlot), 0n, 'Bound randomness was committed without an atomic MYNE record');

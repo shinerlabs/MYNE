@@ -68,6 +68,17 @@ test('Switchboard keeper tolerates confirmed-state RPC propagation lag', async (
   assert.match(source, /Math\.min\(4_000, 250 \* \(2 \*\* attempt\)\)/);
 });
 
+test('Switchboard keeper resumes the oldest indexed open round before scheduling another', async () => {
+  const source = await readFile(
+    new URL('../scripts/switchboard-round-keeper.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /mine_rounds\?resolved=eq\.false&closed_signature=is\.null&opened_at=not\.is\.null&select=round_id&order=round_id\.asc&limit=2/);
+  assert.match(source, /const ROUND_ID = BigInt\(explicitRoundId \|\| resumableRounds\[0\]\?\.round_id \|\| scheduledRound\)/);
+  assert.match(source, /if \(resumedFromIndex\) \{[\s\S]*round-index-ahead-of-rpc[\s\S]*process\.exit\(0\)/);
+  assert.match(source, /round-expired-awaiting-lifecycle/);
+});
+
 test('manual and demo clients supply the deploy randomness account explicitly', async () => {
   const [lottery, capabilities, localKeeper, localTest] = await Promise.all([
     readFile(new URL('../../Frontend/src/chain/lottery.js', import.meta.url), 'utf8'),
