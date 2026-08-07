@@ -10,8 +10,12 @@
   --surface-control-raised: #2c2c2e;
   --surface-tile: linear-gradient(145deg, #151517 0%, #0f0f11 100%);
   --surface-rule: rgba(255,255,255,.065);
-  --surface-rule-strong: rgba(255,255,255,.18);
+  --surface-rule-strong: rgba(255,255,255,.13);
   --surface-icon: #292a2e;
+  --surface-text-secondary: #b8bac0;
+  --surface-text-tertiary: #85888e;
+  --surface-radius-panel: 16px;
+  --surface-radius-inset: 11px;
 
   /* Neutralise the original slightly warm greys retained by older components. */
   --black: var(--surface-page);
@@ -44,7 +48,14 @@ body[data-route="rounds"] :is(.feature-metrics, .ledger-panel),
 body[data-route="about"] :is(.about-nav, .about-content) {
   background: var(--surface-panel) !important;
   border-color: transparent !important;
+  border-radius: var(--surface-radius-panel) !important;
   box-shadow: inset 0 1px rgba(255,255,255,.02) !important;
+}
+
+body[data-route="stake"] :is(.staking-history, .stake-rewards, .stake-composer),
+body[data-route="referrals"] :is(.referral-metrics, .referral-link-block, .referral-performance, .my-referrals, .referral-leaderboard),
+body[data-route="rounds"] :is(.feature-metrics, .ledger-panel) {
+  border-radius: var(--surface-radius-panel) !important;
 }
 
 /* Secondary fields and grouped controls are darker than cards, but lighter than the page. */
@@ -52,13 +63,25 @@ body[data-route="mine"] .amount-display,
 body[data-route="stake"] :is(.stake-amount, .stake-quick-actions),
 body[data-route="referrals"] .referral-link {
   background: var(--surface-inset) !important;
+  border-radius: var(--surface-radius-inset) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.018) !important;
+}
+
+body[data-route="stake"] :is(.stake-amount, .stake-quick-actions),
+body[data-route="mine"] .amount-display {
+  border-radius: var(--surface-radius-inset) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.018) !important;
 }
 
 body[data-route="mine"] :is(.quick-amounts button, .configuration #all, .deploy),
-body[data-route="rounds"] .round-filters,
 body[data-route="referrals"] :is(.referral-link button, .referral-claim-action),
 body[data-route="stake"] :is(.stake-flex-trigger, .stake-quick-actions button) {
   background-color: var(--surface-control) !important;
+}
+
+body[data-route="rounds"] .feature-shell[data-page="rounds"] .round-filters {
+  background: var(--surface-control) !important;
+  border-radius: var(--surface-radius-inset) !important;
 }
 
 body[data-route="mine"] :is(.quick-amounts button, .configuration #all, .deploy):hover,
@@ -80,7 +103,72 @@ body[data-route="mine"] .slot:not(.selected):not(.has-position):not(.round-winne
 }
 
 body[data-route="mine"] .slot:not(.selected):not(.has-position):not(.round-winner):hover {
-  border-color: rgba(255,255,255,.30) !important;
+  border-color: rgba(255,255,255,.24) !important;
+}
+
+/* Supporting data inside a page card uses the same inset layer on every dashboard. Dividers use
+   one shared rule rather than route-specific whites with slightly different opacity. */
+body[data-route="about"] :is(
+  .about-statline > span,
+  .principle-grid > div,
+  .about-rule-table > div,
+  .steps-list > div,
+  .about-split > div,
+  .worked-example,
+  .protocol-callout,
+  .motherlode-grid > div,
+  .motherlode-formula,
+  .claim-model,
+  .forge-about-split > div
+) {
+  background: var(--surface-inset) !important;
+  border-color: var(--surface-rule) !important;
+}
+
+body[data-route="referrals"] :is(
+  .referral-metrics article + article,
+  .referral-performance > strong + strong
+) {
+  border-color: var(--surface-rule) !important;
+}
+
+body[data-route="rounds"] :is(
+  .feature-metrics article + article,
+  .ledger-head,
+  .round-row,
+  .round-table-head
+) {
+  border-color: var(--surface-rule) !important;
+}
+
+body[data-route="stake"] :is(
+  .stake-position-strip article + article,
+  .stake-tier-tabs,
+  .stake-mode-tabs
+) {
+  border-color: var(--surface-rule) !important;
+}
+
+/* Shared copy levels keep labels and explanatory text equally cool and legible across routes. */
+body[data-route]:not([data-route="home"]) :is(
+  .feature-hero p,
+  .about-lead,
+  .ledger-head p,
+  .stake-caution,
+  .stake-amount-label small,
+  .empty-state
+) {
+  color: var(--surface-text-secondary) !important;
+}
+
+body[data-route]:not([data-route="home"]) :is(
+  .eyebrow,
+  .feature-metrics small,
+  .referral-performance small,
+  .round-table-head,
+  .about-nav > span
+) {
+  color: var(--surface-text-tertiary) !important;
 }
 
 /* Small neutral identity surfaces use the same dark grey everywhere. */
