@@ -161,6 +161,54 @@ body[data-route="referrals"] .referral-row {
   gap: 7px;
 }
 
+/* Desktop columns must share a baseline. Several late legacy rules add bottom margins to the
+   staking summary and top margins to referral cards; combined with grid gaps, those margins make
+   the columns appear to drift even though their outer tracks are correct. */
+@media (min-width: 901px) {
+  .staking-dashboard,
+  .referrals-dashboard {
+    align-items: stretch;
+  }
+
+  body[data-route="stake"] .staking-overview {
+    grid-template-rows: auto minmax(0, 1fr);
+    align-content: stretch;
+  }
+
+  body[data-route="stake"] .staking-overview > .stake-rewards,
+  body[data-route="stake"] .staking-overview > .staking-position-strip {
+    margin: 0 !important;
+  }
+
+  body[data-route="stake"] .staking-overview > .staking-position-strip,
+  body[data-route="stake"] .staking-overview > .staking-position-strip > article {
+    min-height: 0 !important;
+    height: auto !important;
+  }
+
+  body[data-route="referrals"] :is(.referrals-primary, .referrals-secondary) {
+    height: 100%;
+    align-content: stretch;
+  }
+
+  html body[data-route="referrals"] .feature-shell[data-page="referrals"] .referrals-secondary > :is(.my-referrals, .referral-leaderboard) {
+    margin: 0 !important;
+  }
+
+  body[data-route="referrals"] .referrals-primary > .referral-command {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    gap: 16px;
+    height: 100% !important;
+  }
+
+  body[data-route="referrals"] .referral-command > :is(.referral-link-block, .referral-performance, .referral-flex-actions) {
+    grid-column: 1 !important;
+    margin: 0 !important;
+  }
+}
+
 @media (max-width: 900px) {
   body[data-route="stake"] .staking-shell.page-view.active,
   body[data-route="referrals"] .feature-shell.page-view.active {

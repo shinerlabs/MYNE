@@ -37,6 +37,12 @@ test('claimable SOL actions stack below the primary balance without collisions',
   assert.match(styles, /#claim-stake-rewards \{[\s\S]*grid-column:\s*1 \/ -1 !important/);
 });
 
+test('staking overview and actions finish on the same desktop baseline', () => {
+  assert.match(styles, /@media \(min-width: 901px\)[\s\S]*\.staking-dashboard,[\s\S]*align-items:\s*stretch/);
+  assert.match(styles, /\.staking-overview \{[\s\S]*grid-template-rows:\s*auto minmax\(0, 1fr\)/);
+  assert.match(styles, /\.staking-overview > \.staking-position-strip \{[\s\S]*margin:\s*0 !important/);
+});
+
 test('referral cards retain a two-column dashboard without creating a third implicit column', () => {
   assert.match(styles, /\.referrals-primary,[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) !important/);
   assert.match(styles, /\.referrals-primary > \.referral-command,[\s\S]*grid-column:\s*1 !important;[\s\S]*grid-row:\s*auto !important/);
@@ -49,4 +55,10 @@ test('your referral network appears directly above top networks', () => {
   const leaderboardStart = source.indexOf('<section class="referral-leaderboard panel">', secondaryStart);
   assert.ok(secondaryStart >= 0 && networkStart > secondaryStart && networkStart < leaderboardStart);
   assert.match(styles, /\.referrals-secondary > \.my-referrals,[\s\S]*\.referrals-secondary > \.referral-leaderboard \{[\s\S]*grid-row:\s*auto !important/);
+});
+
+test('referral columns remove legacy double spacing and share a desktop baseline', () => {
+  assert.match(styles, /\.feature-shell\[data-page="referrals"\] \.referrals-secondary > :is\(\.my-referrals, \.referral-leaderboard\) \{[\s\S]*margin:\s*0 !important/);
+  assert.match(styles, /\.referrals-primary > \.referral-command \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) !important;[\s\S]*grid-template-rows:\s*minmax\(0, 1fr\) auto auto;[\s\S]*height:\s*100% !important/);
+  assert.match(styles, /\.referral-command > :is\(\.referral-link-block, \.referral-performance, \.referral-flex-actions\) \{[\s\S]*grid-column:\s*1 !important/);
 });
