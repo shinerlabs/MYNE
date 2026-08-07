@@ -29,6 +29,7 @@ import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/confi
 import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, invalidateReceiptCache } from './chain/lottery.js';
 import { randomnessHex } from './chain/randomness-proof.js';
 import { isServerRandomnessProgram } from './chain/randomness-mode.js';
+import { formatApyPercent, positionApyPercent } from './chain/staking-apy.js';
 import {
   confirmedMinerRoundKey, previousConfirmedRoundId, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
@@ -1091,8 +1092,8 @@ document.body.insertAdjacentHTML('beforeend', `
       <article class="stake-flex-preview" id="stake-flex-preview">
         <div class="stake-flex-assay" aria-hidden="true"><i class="stake-flex-ring outer"></i><i class="stake-flex-ring inner"></i><div class="stake-flex-mining-grid">${Array.from({ length: 25 }, (_, index) => `<i${[2, 5, 9, 12].includes(index) ? ' class="selected"' : ''}></i>`).join('')}</div></div>
         <header><img src="/myne-wordmark-ui.png" alt="MYNE"/></header>
-        <div class="stake-flex-hero"><div><span>SOL REWARDS / DAY</span><strong><img src="/solana-mark.svg" alt=""/><b data-flex-day>0.00</b></strong><small data-flex-day-usd>≈ $—</small></div><aside><span>APY</span><strong data-flex-apy>—</strong></aside></div>
-        <div class="stake-flex-stats"><span><small>STAKED MYNE</small><strong><img src="/myne-token-icon.svg" alt=""/><b data-flex-standard>0.00</b></strong></span><span><small>BURNED MYNE</small><strong><img src="/myne-token-icon.svg" alt=""/><b data-flex-burned>0.00</b></strong></span><span><small>CLAIMABLE SOL</small><strong><img src="/solana-mark.svg" alt=""/><b data-flex-earned>0.00</b></strong></span></div>
+        <div class="stake-flex-hero"><div><span>SOL REWARDS / DAY</span><strong><img src="/solana-mark.svg" alt=""/><b data-flex-day>—</b></strong><small data-flex-day-usd>≈ $—</small></div><aside><span>POSITION APY</span><strong data-flex-apy>—</strong></aside></div>
+        <div class="stake-flex-stats"><span><small>STAKED MYNE</small><strong><img src="/myne-token-icon.svg" alt=""/><b data-flex-standard>—</b></strong></span><span><small>BURNED MYNE</small><strong><img src="/myne-token-icon.svg" alt=""/><b data-flex-burned>—</b></strong></span><span><small>CLAIMABLE SOL</small><strong><img src="/solana-mark.svg" alt=""/><b data-flex-earned>—</b></strong></span></div>
         <footer><code data-flex-link>—</code></footer>
       </article>
       <div class="stake-flex-actions"><button type="button" id="stake-flex-download">Download PNG</button><button type="button" id="stake-flex-copy">Copy image</button><a id="stake-flex-x" href="#" target="_blank" rel="noreferrer" aria-label="Share position on X">${icon('x')}</a><a id="stake-flex-tg" href="#" target="_blank" rel="noreferrer" aria-label="Share position on Telegram">${icon('telegram')}</a></div>
@@ -1883,22 +1884,18 @@ const refreshStakingMetrics = async () => {
     // WHICH input is missing, so show that instead — it is the difference between "this is down"
     // and "this needs another few hours of history".
     const APR_PENDING = { price: '—', stake: 'NO STAKE', window: '< 30M', math: '—' };
-    const formatApy = (value) => value >= 1000
-      ? `${Math.round(value).toLocaleString()}%`
-      : `${value.toFixed(1)}%`;
-    const formatHeaderApy = (value) => value >= 1000
-      ? `${(value / 1000).toFixed(1).replace(/\.0$/, '')}k%`
-      : formatApy(value);
-    const aprText = m.aprPct == null
+    const aprText = m.apyStandardPct == null
       ? (APR_PENDING[m.aprStatus] ?? '—')
-      : formatApy(m.aprPct);
-    // The header promotes the protocol's primary staking choice, not the 1× flexible baseline.
-    // Keep it pinned to Stake + Burn's 5× figure regardless of the tier selected in the composer.
-    const headerAprText = m.aprPct == null ? aprText : formatHeaderApy(m.aprPct * 5);
+      : formatApyPercent(m.apyStandardPct);
+    // Generic APY surfaces always mean the standard 1× rate. The 5× variant appears only on
+    // controls explicitly labelled Stake + Burn, so two unlabeled APY figures never disagree.
+    const headerAprText = m.apyStandardPct == null
+      ? aprText
+      : formatApyPercent(m.apyStandardPct, { compact: true });
     setMetric('#metric-apr', aprText);
     setMetric('#header-staking-apr', headerAprText);
-    setMetric('#stake-flex-apy', m.aprPct == null ? '—' : formatApy(m.aprPct));
-    setMetric('#stake-burn-apy', m.aprPct == null ? '—' : formatApy(m.aprPct * 5));
+    setMetric('#stake-flex-apy', formatApyPercent(m.apyStandardPct));
+    setMetric('#stake-burn-apy', formatApyPercent(m.apyBurnPct));
     setMetric('#metric-staked', m.totalStakedPrincipal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
     const poolText = m.rewardMode === 'eth'
       ? `${m.rewardsPoolEth < 0.001 && m.rewardsPoolEth > 0
@@ -1918,8 +1915,8 @@ const refreshStakingMetrics = async () => {
     const apr = document.querySelector('#metric-apr')?.closest('article');
     const headerApr = document.querySelector('.header-apr');
     if (headerApr) {
-      headerApr.setAttribute('aria-label', `Open Stake + Burn, estimated APY ${headerAprText}`);
-      headerApr.title = headerAprText === '—' ? 'Open Stake + Burn' : `Estimated Stake + Burn APY ${headerAprText}`;
+      headerApr.setAttribute('aria-label', `Open staking, estimated standard APY ${headerAprText}`);
+      headerApr.title = headerAprText === '—' ? 'Open staking' : `Estimated standard staking APY ${headerAprText}`;
     }
     if (apr) {
       // Every null case used to show the "pool could not be read" message, including the two cases
@@ -2028,37 +2025,37 @@ const referralLinkFor = (account) => buildReferralLink(REF_BASE, account);
 const referralShortLink = (account) => compactReferralLink(REF_BASE, account);
 // ── FLEX · live, shareable staking position card -------------------------------------------
 const stakeFlexDialog = document.querySelector('#stake-flex-dialog');
-const stakeFlexNumber = (value, digits = 3) => Number(value || 0).toLocaleString(undefined, {
+const stakeFlexNumber = (value, digits = 3) => value == null ? '—' : Number(value).toLocaleString(undefined, {
   minimumFractionDigits: digits,
   maximumFractionDigits: digits,
 });
-const stakeFlexApy = (value) => value == null
-  ? '—'
-  : value >= 1000 ? `${Math.round(value).toLocaleString()}%` : `${value.toFixed(1)}%`;
+const stakeFlexApy = (value) => formatApyPercent(value);
 
 const stakeFlexValues = () => {
   const state = stakingState;
   const metrics = stakingMetricsState;
-  const standard = statsTokenAmount(state?.flexStaked ?? 0n);
-  const burned = statsTokenAmount(state?.burnStaked ?? 0n);
-  const principal = standard + burned;
-  const weight = statsTokenAmount(state?.weight ?? 0n);
-  const multiplier = principal > 0 ? weight / principal : 5;
+  const positionAvailable = Boolean(chain.state.account && state);
+  const standard = positionAvailable ? statsTokenAmount(state.flexStaked) : null;
+  const burned = positionAvailable ? statsTokenAmount(state.burnStaked) : null;
+  const weight = positionAvailable ? statsTokenAmount(state.weight) : null;
+  const principal = positionAvailable ? standard + burned : null;
   // readStakingMetrics already annualises the indexed window into a per-day
   // pool reward rate. Dividing by the window fraction again would multiply a
   // 30-minute sample by another 48× and materially overstate the share card.
-  const dailyPool = metrics?.aprWindowDays > 0 ? metrics.rewardsToStakersEth : 0;
+  const dailyPool = metrics?.aprWindowDays > 0 ? metrics.rewardsToStakersEth : null;
   // Use the position and pool weights directly. `state.share` is deliberately
   // rounded for display, which can collapse a valid small position to 0.0000%.
-  const daily = metrics?.totalWeight > 0 ? dailyPool * (weight / metrics.totalWeight) : 0;
-  const dailyUsdRaw = daily === 0 ? '$0.00' : usdFor(daily);
+  const daily = positionAvailable && dailyPool != null && metrics?.totalWeight > 0
+    ? dailyPool * (weight / metrics.totalWeight)
+    : null;
+  const dailyUsdRaw = daily == null ? null : daily === 0 ? '$0.00' : usdFor(daily);
   return {
     standard,
     burned,
     // Claim history is not stored in StakePosition. FLEX therefore reports the
     // exact current claimable balance instead of fabricating a received total.
-    earned: chain.format.ethSmart(state?.pendingEth ?? 0n),
-    apy: metrics?.aprPct == null ? null : metrics.aprPct * multiplier,
+    earned: positionAvailable ? chain.format.ethSmart(state.pendingEth) : '—',
+    apy: positionApyPercent(metrics?.apyStandardPct, principal, weight),
     daily,
     dailyUsd: dailyUsdRaw?.startsWith('<') ? dailyUsdRaw : dailyUsdRaw ? `≈ ${dailyUsdRaw}` : '≈ $—',
     referral: referralLinkFor(chain.state.account),
@@ -2080,7 +2077,7 @@ const updateStakeFlexCard = () => {
   set('[data-flex-burned]', stakeFlexNumber(data.burned, 2));
   set('[data-flex-earned]', data.earned);
   set('[data-flex-link]', data.shortReferral);
-  const text = `My MYNE stake has ${data.earned} SOL claimable and an estimated ${stakeFlexApy(data.apy)} APY based on the latest 30-minute reward window.`;
+  const text = `My MYNE stake has ${data.earned} SOL claimable and an estimated ${stakeFlexApy(data.apy)} position APY based on the latest indexed 30-minute reward window.`;
   stakeFlexDialog.querySelector('#stake-flex-x').href = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(data.referral)}`;
   stakeFlexDialog.querySelector('#stake-flex-tg').href = `https://t.me/share/url?url=${encodeURIComponent(data.referral)}&text=${encodeURIComponent(text)}`;
 };

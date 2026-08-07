@@ -316,9 +316,8 @@ let stakingWindowCache = null;
 export async function loadStakingRewardWindow(windowMinutes = 30, nowSeconds = Number(chainNowSeconds())) {
   if (!Number.isFinite(windowMinutes) || !(windowMinutes > 0)
     || !Number.isFinite(nowSeconds) || !(await indexAvailable())) return null;
-  const end = Math.floor(nowSeconds);
-  const start = end - Math.round(windowMinutes * 60);
-  const key = `${windowMinutes}:${Math.floor(end / (STAKING_WINDOW_CACHE_MS / 1000))}`;
+  const observedAt = Math.floor(nowSeconds);
+  const key = `${windowMinutes}:${Math.floor(observedAt / (STAKING_WINDOW_CACHE_MS / 1000))}`;
   if (stakingWindowCache?.key === key) {
     if ('value' in stakingWindowCache) return stakingWindowCache.value;
     return stakingWindowCache.promise;
@@ -327,6 +326,21 @@ export async function loadStakingRewardWindow(windowMinutes = 30, nowSeconds = N
   // Cache the in-flight read as well as its result. Stake and About can request
   // this metric in the same render tick; they should share one indexed query.
   const promise = (async () => {
+    // Anchor the 30-minute sample to the newest COMPLETE fee row. Querying through chain-now
+    // included the just-ended unresolved row for a few seconds and made APY disappear on every
+    // settlement. A fresh resolved watermark is stable, while an indexer outage still fails shut.
+    const { data: latestRows, error: latestError } = await supabase
+      .from('mine_rounds')
+      .select('round_id,resolved,settles_at,staking_net_lamports::text')
+      .eq('resolved', true)
+      .not('staking_net_lamports', 'is', null)
+      .lte('settles_at', observedAt)
+      .order('settles_at', { ascending: false })
+      .limit(1);
+    if (latestError || !latestRows?.length) return null;
+    const end = Number(latestRows[0].settles_at);
+    if (!Number.isSafeInteger(end)) return null;
+    const start = end - Math.round(windowMinutes * 60);
     const { data, error } = await supabase
       .from('mine_rounds')
       .select('round_id,resolved,settles_at,staking_net_lamports::text')
@@ -341,6 +355,9 @@ export async function loadStakingRewardWindow(windowMinutes = 30, nowSeconds = N
       windowMinutes,
       roundCadenceSeconds: ROUND_CADENCE_SECONDS,
       maxRows: 1000,
+      observedAt,
+      watermarkSettlesAt: end,
+      maxStalenessSeconds: ROUND_CADENCE_SECONDS * 3,
     });
   })().catch(() => null);
   stakingWindowCache = { key, promise };

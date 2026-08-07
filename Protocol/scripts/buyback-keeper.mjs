@@ -150,15 +150,13 @@ async function indexedBuybackBacklog(cursorRound, currentRound) {
     resolved: 'eq.true',
     buyback_completed: 'eq.false',
     total_wager_wei: 'gt.0',
-    round_id: `gte.${cursorRound}`,
+    and: `(round_id.gte.${cursorRound},round_id.lte.${currentRound})`,
     order: 'round_id.asc',
     limit: '100',
     select: 'round_id,resolved,buyback_completed,total_wager_wei',
   });
-  // PostgREST cannot express two operators for one key through URLSearchParams;
-  // append the finalized upper bound explicitly.
   const response = await fetch(
-    `${supabaseUrl}/rest/v1/mine_rounds?${query}&round_id=lte.${currentRound}`,
+    `${supabaseUrl}/rest/v1/mine_rounds?${query}`,
     {
       headers: {
         apikey: serviceRole,

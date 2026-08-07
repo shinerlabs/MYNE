@@ -2,7 +2,7 @@ import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.j
 
 import { connection, getAccount } from './client.js';
 import { parseEther } from './units.js';
-import { apyPercent } from './staking-apy.js';
+import { apyPercent, stakingApyVariants } from './staking-apy.js';
 import { totalStakedBaseUnits, totalStakedMyne } from './staking-totals.js';
 import { loadStakingRewardWindow } from './rounds-index.js';
 import { getLiveMynePerSol } from '../sol-price.js';
@@ -213,16 +213,20 @@ export async function readStakingMetrics() {
     ? apyPercent(rewardPerMinuteSol, totalWeight, mynePerSol)
     : null;
   if (aprStatus === 'live' && aprPct === null) aprStatus = 'math';
+  const apy = stakingApyVariants(aprPct);
   const stakers = Number(toBig(pool?.activeStakers));
   const rewardPoolLamports = toBig(pool?.totalFundedLamports) - toBig(pool?.totalClaimedLamports);
   return {
     totalStakedPrincipal, flexStaked: standard, burnStaked: burn,
     totalWeight,
     rewardsPoolEth: baseUnitsToTokens(rewardPoolLamports),
-    queuedLegacyStockEth: 0, rewardMode: 'eth', stakers, aprPct,
+    queuedLegacyStockEth: 0, rewardMode: 'eth', stakers,
+    // `aprPct` remains as a compatibility alias for the standard 1× value.
+    aprPct: apy.standard, apyStandardPct: apy.standard, apyBurnPct: apy.burn,
     aprStatus, aprWindowDays: windowMinutes / 1440,
     rewardsToStakersEth: rewardPerMinuteSol * 1440,
     aprWindowRounds: rewardWindow?.rounds ?? 0,
+    aprAsOf: rewardWindow?.complete ? rewardWindow.lastSettlesAt : null,
   };
 }
 export async function readStakingHistory() {

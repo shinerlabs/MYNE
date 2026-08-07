@@ -4,15 +4,21 @@ import test from 'node:test';
 
 import {
   apyPercent,
+  formatApyPercent,
+  positionApyPercent,
+  stakingApyVariants,
   summariseStakingRewardWindow,
 } from '../src/chain/staking-apy.js';
 
 const context = {
-  start: 1_000,
-  end: 1_300,
+  start: 965,
+  end: 1_265,
   windowMinutes: 5,
   roundCadenceSeconds: 65,
   maxRows: 1000,
+  observedAt: 1_300,
+  watermarkSettlesAt: 1_265,
+  maxStalenessSeconds: 195,
 };
 
 const completeRows = () => [
@@ -34,6 +40,17 @@ test('annualised staking yield is unit-correct and rejects unsafe inputs', () =>
   assert.equal(apyPercent(-1, 100, 10), null);
 });
 
+test('all APY surfaces share one formatter and explicit tier/position variants', () => {
+  assert.equal(formatApyPercent(12.34), '12.3%');
+  assert.equal(formatApyPercent(1_234), '1,234%');
+  assert.equal(formatApyPercent(1_234, { compact: true }), '1.2k%');
+  assert.equal(formatApyPercent(null), '—');
+  assert.deepEqual(stakingApyVariants(12), { standard: 12, burn: 60 });
+  assert.deepEqual(stakingApyVariants(null), { standard: null, burn: null });
+  assert.equal(positionApyPercent(12, 10, 30), 36);
+  assert.equal(positionApyPercent(12, 0, 0), null);
+});
+
 test('staking reward window sums exact indexed lamports only when coverage is complete', () => {
   assert.deepEqual(summariseStakingRewardWindow(completeRows(), context), {
     complete: true,
@@ -45,12 +62,21 @@ test('staking reward window sums exact indexed lamports only when coverage is co
   });
 });
 
-test('staking reward window fails closed for a skipped indexed round', () => {
+test('staking reward window accepts unopened round-id gaps as zero-volume intervals', () => {
   const rows = completeRows();
   rows.splice(2, 1);
   const result = summariseStakingRewardWindow(rows, context);
-  assert.equal(result.complete, false);
-  assert.equal(result.rewardLamports, 0n);
+  assert.equal(result.complete, true);
+  assert.equal(result.rewardLamports, 1_000n);
+});
+
+test('staking reward window rejects duplicate/out-of-order ids and a stale watermark', () => {
+  const duplicate = completeRows();
+  duplicate[2] = { ...duplicate[2], round_id: duplicate[1].round_id };
+  assert.equal(summariseStakingRewardWindow(duplicate, context).complete, false);
+
+  const stale = { ...context, observedAt: 1_500 };
+  assert.equal(summariseStakingRewardWindow(completeRows(), stale).complete, false);
 });
 
 test('staking reward window fails closed for unresolved or missing fee events', () => {
@@ -63,9 +89,9 @@ test('staking reward window fails closed for unresolved or missing fee events', 
   assert.equal(summariseStakingRewardWindow(missingFee, context).complete, false);
 });
 
-test('staking reward window rejects stale edge coverage and malformed amounts', () => {
-  const stale = completeRows().slice(1);
-  assert.equal(summariseStakingRewardWindow(stale, context).complete, false);
+test('staking reward window rejects a missing watermark row and malformed amounts', () => {
+  const missingWatermark = completeRows().slice(0, -1);
+  assert.equal(summariseStakingRewardWindow(missingWatermark, context).complete, false);
 
   const malformed = completeRows();
   malformed[1] = { ...malformed[1], staking_net_lamports: '-1' };
