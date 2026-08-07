@@ -49,7 +49,7 @@
     "@metaplex-foundation/umi-bundle-defaults": "1.5.1",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "1.98.4",
-    "@switchboard-xyz/on-demand": "3.10.3",
+    "@switchboard-xyz/on-demand": "3.10.6",
     "bigint-buffer": "link:vendor/bigint-buffer"
   },
   "pnpm": {

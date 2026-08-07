@@ -31,8 +31,8 @@ importers:
         specifier: 1.98.4
         version: 1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
       '@switchboard-xyz/on-demand':
-        specifier: 3.10.3
-        version: 3.10.3(bufferutil@4.1.0)(debug@4.4.3)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)
+        specifier: 3.10.6
+        version: 3.10.6(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)
       bigint-buffer:
         specifier: link:vendor/bigint-buffer
         version: link:vendor/bigint-buffer
@@ -294,8 +294,8 @@ packages:
     resolution: {integrity: sha512-FAbrTCdhQrOSMzxbpFIoJejeP95MJgXtgezzl+Hwms7wqSw9WTx52aHPLp/EUeGEj21rn9MuNlV0uvKNFxk5DA==}
     engines: {node: '>=20'}
 
-  '@switchboard-xyz/on-demand@3.10.3':
-    resolution: {integrity: sha512-lXv1G8yUmujy3uuTgXkdEvh7y/IVhOTx5OZOGAJDerw4x98+MtkZTtaKfnK6IltVhwIAI4TDWiKnGetKhk2lVQ==}
+  '@switchboard-xyz/on-demand@3.10.6':
+    resolution: {integrity: sha512-5tP7eEQkJr5aK+5JOZ09Vbsx0jT9jQNRpDTJHLKMc1Ro5jSUfm/9Q5e6voau/U9rPVgFU5S/lUa5/MUfWozURQ==}
     engines: {node: '>= 18'}
 
   '@types/connect@3.4.38':
@@ -1127,18 +1127,18 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@switchboard-xyz/common-legacy@1.1.1(@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6))(debug@4.4.3)':
+  '@switchboard-xyz/common-legacy@1.1.1(@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6))':
     dependencies:
-      '@switchboard-xyz/common': 5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6)
-      axios: 1.19.0(debug@4.4.3)
+      '@switchboard-xyz/common': 5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
+      axios: 1.19.0
     transitivePeerDependencies:
       - debug
       - supports-color
 
-  '@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6)':
+  '@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)':
     dependencies:
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
-      axios: 1.19.0(debug@4.4.3)
+      axios: 1.19.0
       big.js: 6.2.2
       bn.js: 5.2.5
       bs58: 6.0.0
@@ -1155,16 +1155,16 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@switchboard-xyz/on-demand@3.10.3(bufferutil@4.1.0)(debug@4.4.3)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)':
+  '@switchboard-xyz/on-demand@3.10.6(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)':
     dependencies:
       '@coral-xyz/anchor-31': '@coral-xyz/anchor@0.31.1(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)'
       '@isaacs/ttlcache': 1.4.1
       '@noble/hashes': 1.8.0
       '@solana/spl-token': 0.4.14(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
-      '@switchboard-xyz/common': 5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6)
-      '@switchboard-xyz/common-legacy': 1.1.1(@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6))(debug@4.4.3)
-      axios: 1.19.0(debug@4.4.3)
+      '@switchboard-xyz/common': 5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
+      '@switchboard-xyz/common-legacy': 1.1.1(@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6))
+      axios: 1.19.0
       bs58: 6.0.0
       buffer: 6.0.3
       events: 3.3.0
@@ -1275,9 +1275,9 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@1.19.0(debug@4.4.3):
+  axios@1.19.0:
     dependencies:
-      follow-redirects: 1.16.0(debug@4.4.3)
+      follow-redirects: 1.16.0
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -1399,9 +1399,7 @@ snapshots:
 
   fastestsmallesttextencoderdecoder@1.0.22: {}
 
-  follow-redirects@1.16.0(debug@4.4.3):
-    optionalDependencies:
-      debug: 4.4.3
+  follow-redirects@1.16.0: {}
 
   form-data@4.0.6:
     dependencies:
