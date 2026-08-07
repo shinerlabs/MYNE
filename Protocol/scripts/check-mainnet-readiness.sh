@@ -192,7 +192,8 @@ if [[ -z "${MAINNET_RELEASE_MANIFEST:-}" ]]; then
 fi
 node scripts/release-artifact-manifest.mjs --verify "$MAINNET_RELEASE_MANIFEST"
 
-if git grep -nE '(BEGIN (OPENSSH|RSA|EC) PRIVATE KEY|PRIVATE_KEY=|SERVICE_ROLE_KEY=|api-key=[A-Za-z0-9_-]{20,})' -- \
+SECRET_REGEX="(BEGIN (OPENSSH|RSA|EC|DSA) PRIVATE KEY|api-key=[A-Za-z0-9_-]{20,}|((SUPABASE_)?SERVICE_ROLE_KEY|PRIVATE_KEY|SECRET_ACCESS_KEY|HELIUS_API_KEY)[A-Z0-9_]*['\"]?[[:space:]]*[:=][[:space:]]*['\"]?[A-Za-z0-9+/_=-]{20,})"
+if git grep -nE "$SECRET_REGEX" -- \
   ':!*.lock' ':(top,exclude)Protocol/scripts/check-mainnet-readiness.sh' \
   ':(top,exclude).github/workflows/protocol-safety.yml'; then
   echo "Potential secret material found in tracked files" >&2

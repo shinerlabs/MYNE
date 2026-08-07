@@ -123,6 +123,7 @@ test('Mainnet artifact provenance requires the production feature in the binary'
   assert.match(preflight, /grep -aFq 'MYNE_PRODUCTION_ARTIFACT_V1' target\/deploy\/myne_protocol\.so/);
   assert.match(preflight, /rotate_operational_wallets/);
   assert.match(preflight, /ClaimFeeRoutedV2/);
+  assert.match(preflight, /SERVICE_ROLE_KEY[\s\S]*\{20,/);
   assert.match(workflow, /cargo check --workspace --all-targets --locked --features production/);
   assert.match(workflow, /cargo test --workspace --locked --features production/);
 });
