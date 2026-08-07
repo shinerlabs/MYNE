@@ -43,3 +43,10 @@ test('staking actions guard disconnected and empty states before invoking transa
   assert.match(source, /claimStakingRewards/);
   assert.match(source, /withdrawUnstaked/);
 });
+
+test('staking claim state is bound to the currently connected wallet', () => {
+  assert.match(source, /const requestedAccount = chain\.state\.account/);
+  assert.match(source, /requestId !== stakingRefreshId \|\| chain\.state\.account !== requestedAccount/);
+  assert.match(source, /stakingState\?\.account === chain\.state\.account && stakingState\.hasPosition/);
+  assert.match(source, /stakingRefreshId \+= 1;[\s\S]*stakingState = null;[\s\S]*refreshStaking\(\)/);
+});

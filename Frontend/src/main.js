@@ -212,7 +212,7 @@ const claimPanel = `<section class="claim-panel panel rewards-panel collapsed" a
   </div>
   <div class="claimable-rounds" id="claimable-rounds" hidden></div>
   <div class="rewards-actions">
-    <button class="claim-eth-only reward-action" id="claim-eth-only" type="button" data-reward-action="sol"><span>Claim SOL</span><small>Keep MYNE accruing</small></button>
+    <button class="claim-eth-only reward-action" id="claim-eth-only" type="button" data-reward-action="sol"><span>SOL auto-paid</span><small>Sent when each round settles</small></button>
     <button class="claim-all reward-action" id="claim-all" type="button" data-reward-action="all"${isPremine ? ' disabled' : ''}><span data-reward-action-label>${isPremine ? 'MYNE locked' : 'Claim all'}</span><small>${isPremine ? 'Available after launch' : 'SOL + MYNE · 10% fee'}</small></button>
   </div>
 
@@ -1863,15 +1863,23 @@ const refreshStakingMetrics = async () => {
 };
 
 const refreshStaking = async () => {
+  const requestedAccount = chain.state.account;
+  const requestId = ++stakingRefreshId;
   void refreshStakingMetrics();
   try {
-    stakingState = await readStaking(chain.state.account);
+    const next = await readStaking(requestedAccount);
+    // Wallet changes can race an in-flight RPC read. Never publish wallet A's
+    // StakePosition after wallet B is already connected.
+    if (requestId !== stakingRefreshId || chain.state.account !== requestedAccount) return;
+    stakingState = next;
     updateStake();
     renderStakingRewards();
   } catch (error) {
     console.warn('staking refresh failed', error);
   }
 };
+
+let stakingRefreshId = 0;
 
 let stakeMode = 'deposit';
 let stakeTier = TIER_BURN; // Burn (5×) is the encouraged default; standard remains reversible.
@@ -3162,7 +3170,8 @@ document.querySelector('#claim-stake-rewards').addEventListener('click', async (
   if (!chain.state.account) return notify('Connect wallet to claim staking rewards');
   // SOL is the live reward. The stock check remains solely so balances credited before migration
   // can still exit through the contract's combined claim function.
-  if (!(stakingState && (stakingState.pendingEth > 0n
+  if (!(stakingState?.account === chain.state.account && stakingState.hasPosition
+        && (stakingState.pendingEth > 0n
         || stakingState.hasClaimableStocks))) return notify('Nothing to claim');
   await runStakeTx('Claiming rewards…', claimStakingRewards);
 });
@@ -3902,7 +3911,16 @@ const renderChain = (state) => {
   const ethBtn = document.querySelector('#claim-eth-only');
   const allBtn = document.querySelector('#claim-all');
   const burnBtn = document.querySelector('#rewards-stake');
-  if (ethBtn) ethBtn.disabled = claimableTotals.count === 0;
+  if (ethBtn) {
+    const pendingReceipt = claimableTotals.count > 0;
+    ethBtn.disabled = !pendingReceipt;
+    const label = ethBtn.querySelector('span');
+    const detail = ethBtn.querySelector('small');
+    if (label) label.textContent = pendingReceipt ? 'Settle pending SOL' : 'SOL auto-paid';
+    if (detail) detail.textContent = pendingReceipt
+      ? 'Receive now · keep MYNE accruing'
+      : 'Sent when each round settles';
+  }
   // "Claim All" covers BOTH exits, because from the user's side they are one intent: take what
   // I have earned. There are two on-chain paths and which applies is an implementation detail:
   //   - unclaimed ROUNDS      -> claimMany()               (pays SOL + MYNE)
@@ -3920,9 +3938,13 @@ const renderChain = (state) => {
     // controls, with no button next to the bigger one, reads as "the passive part is not included" —
     // it is, in the same single transfer.
     const label = allBtn.querySelector('[data-reward-action-label]');
+    const detail = allBtn.querySelector('small');
     if (label) label.textContent = hasRounds
       ? 'Claim All'
       : (refinable > 0n ? 'Claim MYNE' : 'Claim All');
+    if (detail) detail.textContent = hasRounds
+      ? 'Pending SOL + MYNE · 10% fee'
+      : 'MYNE · 10% fee';
   }
   if (burnBtn) burnBtn.disabled = claimableTotals.count === 0 && refinable === 0n;
   const headStrong = document.querySelector('.claim-heading > strong');
@@ -3987,7 +4009,17 @@ const renderChain = (state) => {
       referralStats = null;
       renderReferral();
     }
-    if (accountChanged) { refreshStaking(); refreshSwap(); }
+    if (accountChanged) {
+      // Clear the previous wallet synchronously. The replacement RPC read can
+      // take seconds; leaving the old balance actionable during that window
+      // submitted claims against a missing StakePosition PDA.
+      stakingRefreshId += 1;
+      stakingState = null;
+      updateStake();
+      renderStakingRewards();
+      refreshStaking();
+      refreshSwap();
+    }
   }
 
   updateMine();
@@ -4524,13 +4556,24 @@ document.querySelector('.claim-panel').addEventListener('click', async (event) =
   const action = event.target.closest('[data-reward-action]');
   if (!action || action.disabled) return;
 
-  const ids = claimableRounds.map((r) => r.roundId);
   const buttons = [...document.querySelectorAll('.claim-panel [data-reward-action]')];
   buttons.forEach((button) => { button.disabled = true; });
   action.classList.add('is-busy');
   action.setAttribute('aria-busy', 'true');
   try {
+    // The permissionless lifecycle worker may have paid SOL and credited MYNE
+    // since the panel's last render. Re-read both sources before deciding which
+    // instruction remains necessary.
+    await Promise.all([
+      refreshRoundHistory({ force: true }),
+      chain.refreshMiner(),
+    ]);
+    const ids = claimableRounds.map((r) => r.roundId);
     if (action.dataset.rewardAction === 'sol') {
+      if (!ids.length) {
+        notify('SOL from settled rounds has already been paid to your wallet');
+        return;
+      }
       await chain.claimEthOnly(ids);
     } else if (action.dataset.rewardAction === 'all') {
       await chain.claimAll(ids);

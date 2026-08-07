@@ -17,6 +17,7 @@ import {
   verifyFeeEconomics, verifyPremine, verifyRoundTiming, waitForTx, withdrawUnrefined,
   burnUnclaimedMyne, claimManyEthOnly, syncRoundGenesis,
 } from './lottery.js';
+import { loadSettledRounds } from './rounds-index.js';
 import { ROUND_DURATION, BETTING_DURATION, isPremine } from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
 
@@ -141,7 +142,7 @@ async function refreshPlan() {
   }
 }
 
-async function refreshMiner() {
+export async function refreshMiner() {
   if (!state.account) {
     // Clear refinedAccrued / totalUnclaimed / hasReferrer too: they are per-ACCOUNT, and leaving
     // them behind on disconnect showed the previous wallet's passive balance to whoever connected
@@ -220,11 +221,21 @@ async function loadResolved(roundId, attempt = 0) {
   // late responses/retries for older ids instead of letting the panel drift out of sync.
   if (state.roundId !== BigInt(roundId) + 1n) return;
   try {
-    const round = await readRound(roundId);
+    // Empty numeric rounds are intentionally not created on chain. Use the
+    // production index to locate the newest resolved, played round at or before
+    // the elapsed id instead of replacing a correct result with an empty PDA.
+    const indexed = await loadSettledRounds();
+    const indexedRound = indexed?.find(({ roundId: candidate }) => BigInt(candidate) <= BigInt(roundId));
+    const resolvedRoundId = indexedRound?.roundId ?? roundId;
+    const round = await readRound(resolvedRoundId);
     if (round.resolved && state.roundId === BigInt(roundId) + 1n) {
-      state.lastResolved = { roundId, ...round };
+      state.lastResolved = { roundId: BigInt(resolvedRoundId), ...round };
       emit();
-      return;
+      // Receipt settlement is permissionless and may land just after the round
+      // result. Pull the miner ledger alongside the result so newly credited
+      // MYNE is immediately available to Claim All / Stake + Burn.
+      if (state.account) void refreshMiner();
+      if (BigInt(resolvedRoundId) === BigInt(roundId)) return;
     }
   } catch (error) {
     console.warn('resolved round read failed', error);
@@ -587,7 +598,14 @@ export function start() {
   }
 
   window.setInterval(tick, 1000);
-  window.setInterval(() => { if (live && !document.hidden) void refreshRound(); }, 5000);
+  window.setInterval(() => {
+    if (!live || document.hidden) return;
+    void refreshRound();
+    // The lifecycle keeper can settle a receipt between round-boundary reads.
+    // Keep the account-specific reward ledger current on the same bounded poll
+    // so an auto-paid SOL receipt cannot leave the MYNE claim panel stale.
+    if (state.account) void refreshMiner();
+  }, 5000);
   window.setInterval(() => { if (live && !document.hidden) void refreshJackpot(); }, 30000);
   // Re-anchor periodically: device clocks drift, and NTP corrections land as step changes.
   window.setInterval(() => { void syncChainClock(); }, 60000);

@@ -39,7 +39,8 @@ const invalidateStakePoolCache = () => {
   stakePoolRequest = null;
 };
 
-async function readStakePool() {
+async function readStakePool({ force = false } = {}) {
+  if (force) invalidateStakePoolCache();
   if (stakePoolCache && Date.now() - stakePoolCacheAt < STAKE_POOL_CACHE_MS) return stakePoolCache;
   if (stakePoolRequest) return stakePoolRequest;
   const generation = stakePoolCacheGeneration;
@@ -105,6 +106,8 @@ export async function readStaking(account = getAccount()) {
   const totalWeight = toBig(pool?.totalWeight);
   const pendingSol = await livePending(position, pool);
   return {
+    account: account || null,
+    hasPosition: Boolean(position),
     stocks: [], hasClaimableStocks: false,
     totalStaked: totalStakedBaseUnits(pool?.totalStandard, pool?.totalBurn), totalWeight,
     walletBullion, flexStaked, burnStaked, weight,
@@ -167,7 +170,20 @@ export async function withdrawUnstaked() {
   }).instruction()]);
 }
 export async function claimStakingRewards() {
-  const account = getAccount(); const authority = new PublicKey(account); const { program } = await getWritableProgram();
+  const account = getAccount();
+  if (!account) throw new Error('Connect a Solana wallet first');
+  const authority = new PublicKey(account);
+  // A stale staking render from a previously connected wallet used to leave the
+  // claim button active and submit this instruction with a StakePosition PDA
+  // that did not exist for the current signer. Revalidate the exact canonical
+  // position and its live accumulator before asking the wallet to sign.
+  const [position, pool] = await Promise.all([
+    fetchProtocolAccount('StakePosition', positionPda(account)),
+    readStakePool({ force: true }),
+  ]);
+  if (!position) throw new Error('This wallet has no staking position');
+  if (await livePending(position, pool) <= 0n) throw new Error('Nothing to claim');
+  const { program } = await getWritableProgram();
   const signature = await sendInstructions([await program.methods.claimStakingRewards().accounts({ stakePool: protocolPdas.stakePool, stakePosition: positionPda(account), authority }).instruction()]);
   invalidateStakePoolCache();
   return signature;

@@ -12,9 +12,22 @@ test('reward controls expose three explicit, accessible protocol intents', () =>
   assert.match(main, /data-reward-action="sol"/);
   assert.match(main, /data-reward-action="all"/);
   assert.match(main, /data-reward-action="burn"/);
-  assert.match(main, /Keep MYNE accruing/);
+  assert.match(main, /SOL auto-paid/);
+  assert.match(main, /Sent when each round settles/);
   assert.match(main, /SOL \+ MYNE · 10% fee/);
   assert.match(main, /Permanent 5× weight · 0% fee/);
+});
+
+test('keeper-paid receipts refresh both the claim index and miner ledger before an action', () => {
+  assert.match(main, /Promise\.all\(\[[\s\S]*refreshRoundHistory\(\{ force: true \}\)[\s\S]*chain\.refreshMiner\(\)/);
+  assert.match(main, /SOL from settled rounds has already been paid to your wallet/);
+  assert.match(mine, /if \(state\.account\) void refreshMiner\(\);[\s\S]*\}, 5000\);/);
+});
+
+test('previous-round result resolves through the latest indexed played round', () => {
+  assert.match(mine, /const indexed = await loadSettledRounds\(\)/);
+  assert.match(mine, /candidate.*<= BigInt\(roundId\)/);
+  assert.match(mine, /state\.lastResolved = \{ roundId: BigInt\(resolvedRoundId\), \.\.\.round \}/);
 });
 
 test('Claim All settles receipts before withdrawing MYNE and never aliases SOL-only', () => {
