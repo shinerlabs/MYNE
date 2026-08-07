@@ -92,7 +92,7 @@ export function mountSocial(host) {
     // and block the sender. Once the production mining gate is enabled, five mined rounds are
     // required in addition to the wallet connection.
     let chatAllowed = Boolean(account);
-    let chatGate = account ? '' : 'Connect your wallet to chat.';
+    let chatGate = '';
     if (account && host.chatRequiresMinedRounds) {
       const mined = await host.getMinedRoundCount?.(account);
       chatAllowed = Number.isFinite(mined) && mined >= 5;
@@ -100,7 +100,7 @@ export function mountSocial(host) {
         ? 'Your mined-round history could not be verified yet.'
         : `Mine ${Math.max(0, 5 - mined)} more round${5 - mined === 1 ? '' : 's'} to unlock chat.`;
     }
-    setChatComposeEnabled(chatAllowed, chatAllowed ? undefined : 'Connect to chat', chatGate);
+    setChatComposeEnabled(chatAllowed, undefined, chatGate);
 
     if (!account) {
       // Only a REAL disconnect drops the session (previous held an address).

@@ -58,7 +58,7 @@ const syncChatCharCount = () => {
   chatInputEl.style.height = `${Math.min(chatInputEl.scrollHeight, 120)}px`;
 };
 
-export const setChatComposeEnabled = (enabled, placeholder, gateMessage = 'Connect your wallet to chat.') => {
+export const setChatComposeEnabled = (enabled, placeholder, gateMessage = '') => {
   if (!chatInputEl) return;
   chatCanSend = Boolean(enabled);
   // Never actually disabled — a dead input can't explain why it's dead.
@@ -68,37 +68,18 @@ export const setChatComposeEnabled = (enabled, placeholder, gateMessage = 'Conne
   // desktop sidebar at 1280px, where the field is only ~121px wide — the longer wording wrapped
   // and was clipped mid-word. The banner directly above already spells out what connecting does,
   // so this only has to label the field.
-  chatInputEl.placeholder = placeholder
-    || (enabled ? 'Send a message…' : 'Connect to chat');
+  chatInputEl.placeholder = placeholder || 'Send a message…';
   chatInputEl.classList.toggle('chat-ready', enabled);
   chatSendButtonEl?.classList.toggle('chat-ready', enabled);
   if (chatHintEl) {
     chatHintEl.textContent = enabled
       ? 'Wallet chat · Enter send · Shift+Enter newline'
-      : 'Chat unavailable';
+      : (host.getAccount() && gateMessage ? gateMessage : 'Chat unavailable');
   }
   const emptyCopy = document.querySelector('#chat-empty p');
   if (emptyCopy) emptyCopy.textContent = enabled
     ? 'Say hello to the miners.'
-    : 'Connect your wallet and say hello to the miners.';
-  document.querySelector('.chat-gate')?.remove();
-
-  if (!enabled && chatComposeEl?.parentElement) {
-    const gate = document.createElement('div');
-    gate.className = 'chat-gate';
-    const text = document.createElement('span');
-    text.textContent = gateMessage;
-    if (!host.getAccount()) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.textContent = 'Connect wallet';
-      btn.addEventListener('click', () => host.connectWallet?.());
-      gate.append(text, btn);
-    } else {
-      gate.append(text);
-    }
-    chatComposeEl.parentElement.insertBefore(gate, chatComposeEl);
-  }
+    : 'Messages from miners will appear here.';
 };
 
 // ------------------------------------------------------- body encode/decode
@@ -454,14 +435,6 @@ const renderChatMessage = (row) => {
   return el;
 };
 
-const markHistoryStart = () => {
-  if (!chatMessagesEl || chatMessagesEl.querySelector('.chat-history-status.start')) return;
-  const start = document.createElement('div');
-  start.className = 'chat-history-status start';
-  start.textContent = `Showing last ${HISTORY_LIMIT} messages`;
-  chatMessagesEl.insertBefore(start, chatMessagesEl.firstChild);
-};
-
 /** Drop the oldest rows so the pane never holds more than HISTORY_LIMIT. */
 const trimChatToLimit = () => {
   if (!chatMessagesEl) return;
@@ -480,7 +453,6 @@ const trimChatToLimit = () => {
     }
     el.remove();
   }
-  markHistoryStart();
 };
 
 /**
@@ -606,13 +578,12 @@ export async function loadChatHistory() {
     const p = document.createElement('p');
     p.textContent = chatCanSend
       ? 'Say hello to the miners.'
-      : 'Connect your wallet and say hello to the miners.';
+      : 'Messages from miners will appear here.';
     empty.append(strong, p);
     if (rows.length) empty.hidden = true;
     chatMessagesEl.appendChild(empty);
 
     [...rows].reverse().forEach(appendChatMessage);
-    if (rows.length) markHistoryStart();
     pinChatToLatest();
     await hydrateReactions(rows.map((r) => r.id));
     // Reactions land after the await and add a row of chips to any message carrying one, so the

@@ -1,0 +1,95 @@
+/* Canonical neutral surface system.
+   The page, cards, tiles and controls each occupy one deliberate elevation. Keep this file last
+   in the stylesheet cascade so route-specific legacy greys cannot create a second palette. */
+:root {
+  --surface-page: #090909;
+  --surface-panel: linear-gradient(180deg, rgba(255,255,255,.027), rgba(255,255,255,.01));
+  --surface-inset: rgba(255,255,255,.035);
+  --surface-control: #1b1b1d;
+  --surface-control-hover: #252527;
+  --surface-control-raised: #2c2c2e;
+  --surface-tile: linear-gradient(145deg, #151517 0%, #0f0f11 100%);
+  --surface-rule: rgba(255,255,255,.065);
+  --surface-rule-strong: rgba(255,255,255,.18);
+  --surface-icon: #292a2e;
+
+  /* Neutralise the original slightly warm greys retained by older components. */
+  --black: var(--surface-page);
+  --surface: #111113;
+  --surface-soft: #171719;
+  --raised: #1e1e20;
+  --hover: #27272a;
+  --muted: #b8bac0;
+  --dim: #85888e;
+  --hairline: var(--surface-rule);
+  --control-bg: var(--surface-control);
+  --control-bg-hover: var(--surface-control-hover);
+  --control-border: var(--surface-rule);
+  --gld-panel: var(--surface-panel);
+  --gld-rule: var(--surface-rule);
+}
+
+html,
+body,
+#app,
+.brand-atmosphere {
+  background-color: var(--surface-page) !important;
+}
+
+/* The main data cards use one elevation across routes. Mining's board, chat and dotted deploy
+   panel intentionally stay transparent and are therefore not included here. */
+body[data-route="stake"] :is(.staking-history, .stake-rewards, .stake-composer),
+body[data-route="referrals"] :is(.referral-metrics, .referral-link-block, .referral-performance, .my-referrals, .referral-leaderboard),
+body[data-route="rounds"] :is(.feature-metrics, .ledger-panel),
+body[data-route="about"] :is(.about-nav, .about-content) {
+  background: var(--surface-panel) !important;
+  border-color: transparent !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.02) !important;
+}
+
+/* Secondary fields and grouped controls are darker than cards, but lighter than the page. */
+body[data-route="mine"] .amount-display,
+body[data-route="stake"] :is(.stake-amount, .stake-quick-actions),
+body[data-route="referrals"] .referral-link {
+  background: var(--surface-inset) !important;
+}
+
+body[data-route="mine"] :is(.quick-amounts button, .configuration #all, .deploy),
+body[data-route="rounds"] .round-filters,
+body[data-route="referrals"] :is(.referral-link button, .referral-claim-action),
+body[data-route="stake"] :is(.stake-flex-trigger, .stake-quick-actions button) {
+  background-color: var(--surface-control) !important;
+}
+
+body[data-route="mine"] :is(.quick-amounts button, .configuration #all, .deploy):hover,
+body[data-route="referrals"] :is(.referral-link button, .referral-claim-action):not(:disabled):hover,
+body[data-route="stake"] :is(.stake-flex-trigger, .stake-quick-actions button):hover {
+  background-color: var(--surface-control-hover) !important;
+}
+
+body[data-route="stake"] .stake-amount button {
+  background-color: var(--surface-control-raised) !important;
+}
+
+/* Empty mining tiles sit visibly above the page without reading as bright outlined cards.
+   Selected, committed and winner states retain the existing brand-gradient edge and overlay. */
+body[data-route="mine"] .slot:not(.selected):not(.has-position):not(.round-winner) {
+  border-color: var(--surface-rule-strong) !important;
+  background: var(--surface-tile) !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.04) !important;
+}
+
+body[data-route="mine"] .slot:not(.selected):not(.has-position):not(.round-winner):hover {
+  border-color: rgba(255,255,255,.30) !important;
+}
+
+/* Small neutral identity surfaces use the same dark grey everywhere. */
+img[src="/gld-icon-transparent.png"],
+body[data-route="mine"] .round-miner-avatar,
+.chat-avatar {
+  background-color: var(--surface-icon) !important;
+}
+
+body[data-route="mine"] .chat-reopen {
+  background: var(--surface-control) !important;
+}

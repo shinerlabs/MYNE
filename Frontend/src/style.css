@@ -22,12 +22,12 @@
   --black: #090909;
   --surface: #111111;
   --surface-soft: #161616;
-  --raised: #1e1e1c;
-  --hover: #262624;
+  --raised: #1e1e20;
+  --hover: #27272a;
   --text: #ffffff;
   --soft-text: #ececec;
-  --muted: #bab9b7;
-  --dim: #8a8781;
+  --muted: #b8bac0;
+  --dim: #85888e;
   --hairline: rgba(255,255,255,0.1105);
   /* Legacy variable names are retained for compatibility, but the palette is fully neutral. */
   --gold: #dedede;
@@ -628,7 +628,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: transparent;
   color: #888888;
 }
-.chat-heading-actions > button:hover { background: #262624; color: #f4f4f4; }
+.chat-heading-actions > button:hover { background: #252527; color: #f4f4f4; }
 .chat-heading-actions svg { width: 14px; height: 14px; fill: currentColor; }
 .chat-reopen {
   position: fixed;
@@ -697,7 +697,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .chat-panel .chat-messages {
   padding-top: 48px;
 }
-.chat-close-only:hover { background: #262624; color: #f4f4f4; }
+.chat-close-only:hover { background: #252527; color: #f4f4f4; }
 .chat-close-only svg { width: 14px; height: 14px; fill: currentColor; }
 .chat-panel > .social-content { min-height: 0; }
 /* Hidden in every state. "Live" and "Connecting" spend the whole session telling you nothing
@@ -871,7 +871,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border: 0;
   border-radius: 12px;
   background: transparent;
-  color: #c3c1be;
+  color: #c4c6ca;
   font: inherit;
   font-size: 12.5px;
   line-height: 1.35;
@@ -1108,7 +1108,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border: 0;
   border-radius: 999px;
   background: rgba(255,255,255,0.0425);
-  color: #b0aea9;
+  color: #b1b3b8;
   font-size: 9px;
   font-weight: 560;
 }
@@ -1130,7 +1130,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border: 0;
   border-radius: 11px;
   background: linear-gradient(145deg, #161616, #0e0e0e);
-  color: #a8a6a1;
+  color: #a8abb1;
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1054), inset 0 1px 0 rgba(255,255,255,0.034);
   text-align: left;
   transition: background .2s, transform .2s, box-shadow .2s;
@@ -1719,7 +1719,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .config-row > div:first-child small {
   display: block;
   margin-top: 3px;
-  color: #8f8b85;
+  color: #8d9096;
   font-size: 8.5px;
 }
 .auto-toggle {
@@ -1733,14 +1733,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: #b0aea9;
+  color: #b1b3b8;
 }
 .auto-toggle span {
   position: relative;
   width: 38px;
   height: 22px;
   border-radius: 999px;
-  background: #343431;
+  background: #343438;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, .65), inset 0 0 0 1px rgba(255,255,255,0.0935);
   transition: background .22s, box-shadow .22s;
 }
@@ -1777,7 +1777,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   place-items: center;
   border: 0;
   border-radius: 9px;
-  background: #262624;
+  background: #252527;
   color: #d5d5d5;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.068);
   font-size: 8.5px;
@@ -2281,7 +2281,7 @@ body[data-route="mine"] .deployed-stat:focus-visible .deployed-usd-value {
 .round-mode.motherlode { color: #151515; background: linear-gradient(110deg,#d3d3d3,#f6f6f6); }
 /* Rounds nobody bet on, and rounds still awaiting the keeper: present but visually recessive
    so the eye skips them while the round numbering stays continuous. */
-.round-mode.no-bets { color: #a3a3a3; background: #262624; }
+.round-mode.no-bets { color: #a3a3a3; background: #252527; }
 .round-mode.resolving { color: #bfbfbf; background: rgba(224, 224, 224, 0.072); }
 .round-entry.no-bets .round-record { opacity: .5; }
 .round-entry.resolving .round-record { opacity: .72; }
@@ -3002,8 +3002,8 @@ body[data-route="mine"] .deployed-stat:focus-visible .deployed-usd-value {
 .stepper button:disabled,
 button:disabled { opacity: .48; }
 .rounds-config { grid-template-columns: minmax(0,1fr) auto auto; gap: 8px; }
-.until-balance-toggle { min-width: 94px; height: 32px; display: grid; grid-template-columns: 30px auto; align-items: center; gap: 6px; padding: 3px 8px 3px 4px; border: 0; border-radius: 999px; background: transparent; color: #b0aea9; }
-.until-balance-toggle span { position: relative; width: 30px; height: 18px; border-radius: 999px; background: #343431; box-shadow: inset 0 1px 3px rgba(0,0,0,.65),inset 0 0 0 1px rgba(255,255,255,0.0935); transition: background .22s,box-shadow .22s; }
+.until-balance-toggle { min-width: 94px; height: 32px; display: grid; grid-template-columns: 30px auto; align-items: center; gap: 6px; padding: 3px 8px 3px 4px; border: 0; border-radius: 999px; background: transparent; color: #b1b3b8; }
+.until-balance-toggle span { position: relative; width: 30px; height: 18px; border-radius: 999px; background: #343438; box-shadow: inset 0 1px 3px rgba(0,0,0,.65),inset 0 0 0 1px rgba(255,255,255,0.0935); transition: background .22s,box-shadow .22s; }
 .until-balance-toggle span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: #858585; box-shadow: 0 2px 6px rgba(0,0,0,.55),inset 0 1px rgba(255,255,255,0.204); transition: transform .24s cubic-bezier(.2,.8,.2,1),background .22s,box-shadow .22s; }
 .until-balance-toggle b { font-size: 9.5px; font-weight: 650; white-space: nowrap; }
 .until-balance-toggle.active { color: #f2f2f2; }
@@ -6306,7 +6306,6 @@ img.icon-hammer { width: 16px; height: 16px; object-fit: contain; vertical-align
 .chat-message p { font-size: 15px; line-height: 1.55; }
 .chat-message b { font-size: 13.5px; }
 .chat-message time { font-size: 10px; }
-.chat-history-status { font-size: 12px; }
 .chat-compose textarea { font-size: 13.5px; }
 .chat-compose-meta { font-size: 11px; }
 /* Widened with the type: the buttons are fixed-width with 24px of left padding reserved for the
@@ -6330,7 +6329,6 @@ img.icon-hammer { width: 16px; height: 16px; object-fit: contain; vertical-align
   #chat-drawer .chat-message p { font-size: 16px; }
   #chat-drawer .chat-message b { font-size: 14.5px; }
   #chat-drawer .chat-message time { font-size: 10.5px; }
-  #chat-drawer .chat-history-status { font-size: 12.5px; }
   /* The phone's chat is full-width, so it gets the roomier track; the desktop sidebar is only
      247px at 1280 and overflowed its LIVE pill and close button at the phone size. */
   #chat-drawer .social-tabs { --tab-w: 74px; }

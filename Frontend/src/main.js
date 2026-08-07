@@ -4,13 +4,15 @@ import './stake-compact.css';
 import './about-compact.css';
 import './brand-uniform.css';
 import './wide-dashboards.css';
+import './about-stats.css';
+import './surface-system.css';
 import { LINKS, NETWORK, PRODUCT, PROGRAMS } from './app-config.js';
 import {
   fetchProtocolAccount, getProtocolConfig, protocolPdas, protocolProgramId,
 } from './chain/anchor-client.js';
 import * as chain from './chain/mine-page.js';
 import { WALLET_LOGOS } from './wallet-logos.js';
-import { loadRoundBets, loadDrandLink, countMyBetRounds } from './chain/rounds-index.js';
+import { loadRoundBets, loadDrandLink, countMyBetRounds, loadIndexedRounds } from './chain/rounds-index.js';
 import { loadRoundHistory } from './chain/rounds-page.js';
 import { readReferralStats, readReferrerOf, setReferrer, claimReferral, readLeaderboard, readMyReferrals } from './chain/referral.js';
 import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/config.js';
@@ -20,6 +22,7 @@ import {
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol, settledSolReward } from './chain/round-rewards.js';
 import { readSupplyStats } from './chain/supply.js';
+import { renderProtocolStats } from './about-stats.js';
 import { mountSolPrice, usdFor, getSolUsd, getMyneUsd, setMynePerSol, showPremineMynePrice } from './sol-price.js';
 import { readSwapState, quote, approveGld, swapSolForGld, swapGldForSol, spotMynePerSol, poolAvailable, withSlippage } from './chain/swap.js';
 
@@ -311,9 +314,9 @@ document.querySelector('#app').innerHTML = `
     <div class="referrals-dashboard">
       <div class="referrals-column referrals-primary">
         <section class="referral-command panel"><div class="referral-link-block"><span class="eyebrow">YOUR LINK</span><div class="referral-link"><code>Connect wallet for your link</code><button data-copy-ref>Copy</button></div><div class="share-actions"><a id="share-ref-x" href="#" target="_blank" rel="noreferrer" aria-label="Share referral on X" title="Share on X">${icon('x')}</a><a id="share-ref-tg" href="#" target="_blank" rel="noreferrer" aria-label="Share referral on Telegram" title="Share on Telegram">${icon('telegram')}</a></div></div><div class="referral-performance"><span class="eyebrow">30 DAYS</span><strong>1,284 <small>visits</small></strong><strong>94 <small>miners</small></strong><strong class="referral-earned">12.840 <small>earned</small></strong></div></section>
-        <section class="my-referrals panel"><div class="ledger-head"><div><span class="eyebrow">YOUR NETWORK</span><h2>People you referred</h2></div></div><div class="my-referrals-head"><span>WALLET</span><span>STATUS</span><span>EARNED FOR YOU</span><span></span></div><div class="my-referrals-list"></div></section>
       </div>
       <div class="referrals-column referrals-secondary">
+        <section class="my-referrals panel"><div class="ledger-head"><div><span class="eyebrow">YOUR NETWORK</span><h2>People you referred</h2></div></div><div class="my-referrals-head"><span>WALLET</span><span>STATUS</span><span>EARNED FOR YOU</span><span></span></div><div class="my-referrals-list"></div></section>
         <section class="referral-leaderboard panel"><div class="ledger-head"><div><span class="eyebrow">TOP NETWORKS</span><h2>Leaderboard</h2></div></div><div class="referral-table-head"><span>RANK</span><span>CREATOR</span><span>REFERRALS</span><span>ACTIVE</span><span>NETWORK</span><span>EARNED</span><span></span></div><div class="referral-list">${referralRows}</div></section>
       </div>
     </div>
@@ -323,6 +326,11 @@ document.querySelector('#app').innerHTML = `
     <header class="feature-hero route-header staking-hero"><div><span class="eyebrow">SOL REWARDS</span><h1>Stake.</h1><p class="staking-hero-subtitle">8% of mining deployment.</p></div></header>
     <section class="feature-metrics staking-metrics"><article><span>STAKING APY</span><strong id="metric-apr">—</strong></article><article><span>TOTAL STAKED</span><strong><img src="/gld-icon-transparent.png" alt=""/> <b id="metric-staked">—</b></strong></article><article><span>SOL REWARDS POOL</span><strong class="staking-sol-pool">${solIcon()} <b id="metric-pool">—</b></strong></article><article><span>STAKERS</span><strong id="metric-stakers">—</strong></article></section>
     <div class="staking-dashboard">
+      <section class="staking-history panel" data-staking-chart aria-label="Total MYNE staked over time">
+    <header><div><span>STAKED MYNE · 30 DAYS</span><strong data-staking-chart-total>—</strong></div><small>PAST 30 DAYS · ON-CHAIN</small></header>
+    <div class="staking-history-plot" data-staking-chart-plot><span>Loading staking history…</span></div>
+    <footer><span data-staking-chart-start>—</span><span>NOW</span></footer>
+      </section>
       <div class="staking-dashboard-column staking-overview">
         <section class="stake-rewards eth-claim-hero" aria-labelledby="eth-claim-title">
       <div class="eth-claim-main">
@@ -342,11 +350,6 @@ document.querySelector('#app').innerHTML = `
       <article><span>BURN STAKE</span><strong id="stake-burn">0.00</strong><small>5× permanent</small></article>
       <article><span>TOTAL WEIGHT</span><strong id="stake-weight">0.00</strong><small>MYNE weight</small></article>
       <article><span>POOL SHARE</span><strong id="stake-share">0.0000%</strong><small>Your SOL share</small></article>
-        </section>
-        <section class="staking-history panel" data-staking-chart aria-label="Total MYNE staked over time">
-      <header><div><span>STAKED MYNE · 30 DAYS</span><strong data-staking-chart-total>—</strong></div><small>PAST 30 DAYS · ON-CHAIN</small></header>
-      <div class="staking-history-plot" data-staking-chart-plot><span>Loading staking history…</span></div>
-      <footer><span data-staking-chart-start>—</span><span>NOW</span></footer>
         </section>
       </div>
       <div class="staking-dashboard-column staking-actions">
@@ -383,7 +386,7 @@ document.querySelector('#app').innerHTML = `
     </details>
   </main>
 
-  <main class="feature-shell about-shell page-view" data-page="about"><header class="feature-hero route-header"><div><span class="eyebrow">PROTOCOL</span><h1>About MYNE.</h1></div></header><div class="about-layout"><aside class="about-nav panel"><span>CONTENTS</span><button class="active" data-about-section="intro">Protocol</button><button data-about-section="mining">Mine</button><button data-about-section="token-flow">Supply</button><button data-about-section="fees">Fees</button><button data-about-section="motherlode">Motherlode</button><button data-about-section="referral-model">Referrals</button><button data-about-section="staking-model">Staking</button><button data-about-section="addresses">Addresses</button></aside><section class="about-content panel">
+  <main class="feature-shell about-shell page-view" data-page="about"><header class="feature-hero route-header"><div><span class="eyebrow">PROTOCOL</span><h1>About MYNE.</h1></div></header><div class="about-layout"><aside class="about-nav panel"><span>CONTENTS</span><button class="active" data-about-section="intro">Protocol</button><button data-about-section="mining">Mine</button><button data-about-section="token-flow">Supply</button><button data-about-section="fees">Fees</button><button data-about-section="motherlode">Motherlode</button><button data-about-section="referral-model">Referrals</button><button data-about-section="staking-model">Staking</button><button data-about-section="stats">Stats</button><button data-about-section="addresses">Addresses</button></aside><section class="about-content panel">
     <article class="about-section active" data-about-panel="intro"><span class="eyebrow">01 · PROTOCOL</span><h2>Stake MYNE. Earn SOL every round.</h2><p class="about-lead protocol-lead">8% of all SOL deployed across every mining round is paid directly to MYNE stakers. Rewards accrue in SOL according to each staker’s share of total staking weight.</p><div class="protocol-yield-banner"><span>ALL MINING VOLUME · EVERY ROUND</span><strong>8% <small>PAID TO STAKERS IN SOL</small></strong><p>Standard staking earns 1× pool weight. Permanently burn your MYNE to earn 5× staking weight and increase your proportional share of SOL rewards.</p></div><div class="about-statline protocol-staking-stats"><span><small>STAKING REVENUE</small><strong>8% SOL</strong></span><span><small>STANDARD STAKE</small><strong>1×</strong></span><span><small>STAKE + BURN</small><strong>5×</strong></span><span><small>ADMIN SHARE</small><strong>0%</strong></span></div><div class="principle-grid protocol-principles"><div><b>All mining volume</b><p>The staking allocation is calculated from every SOL deployment, including bids placed on losing tiles.</p></div><div><b>Native SOL rewards</b><p>Staking revenue stays in SOL from collection through claim—no reward-token conversion is required.</p></div><div><b>Five-times weight</b><p>Burn-staked MYNE is permanent and receives 5× the pool weight of the same amount in standard staking.</p></div><div><b>Proportional distribution</b><p>Your staking weight relative to the total pool determines your share of each round’s SOL allocation.</p></div></div><div class="protocol-callout protocol-staking-callout"><b>Built around staking</b><p>Every completed mining round adds 8% of its total deployed SOL to staking rewards. More mining activity means more SOL distributed to MYNE stakers.</p></div></article>
     <article class="about-section" data-about-panel="mining"><span class="eyebrow">02 · MINING ROUNDS</span><h2>+${isPremine ? '0.3' : '1'} / minute.</h2><p class="about-lead">Miners deploy SOL across a 5×5 grid. Each 60-second round selects one winning tile, followed immediately by a 5-second result window.</p><div class="about-statline"><span><small>TILES</small><strong>25</strong></span><span><small>MINING</small><strong>60 SEC</strong></span><span><small>RESULT</small><strong>5 SEC</strong></span><span><small>REWARD</small><strong>+${isPremine ? '0.3' : '1'}</strong></span></div><div class="steps-list compact-steps"><div><i>1</i><span><b>Select</b><p>Choose tiles manually or set a random tile count.</p></span></div><div><i>2</i><span><b>Deploy</b><p>One SOL amount is applied to every selected tile.</p></span></div><div><i>3</i><span><b>Reveal</b><p>One of the 25 tiles wins at round close.</p></span></div><div><i>4</i><span><b>Settle</b><p>The +${isPremine ? '0.3' : '1'} MYNE reward resolves as Split or Solo.</p></span></div></div><div class="about-split"><div><span>SPLIT · 50%</span><strong>Every miner on the tile</strong><p>The reward is shared in proportion to each miner’s SOL on the winning tile.</p></div><div><span>SOLO · 50%</span><strong>One weighted winner</strong><p>Each miner’s chance equals their share of SOL on the winning tile.</p></div></div><div class="worked-example"><span>EXAMPLE</span><p>A miner supplied <b>0.60 SOL</b> of the tile’s <b>1.00 SOL</b>. They receive 60% in Split mode or have a 60% chance in Solo mode.</p></div><details class="about-disclosure"><summary>Automation rules <i>+</i></summary><p>Auto-round repeats manually selected tiles every round. When Random is active, the chosen number of tiles is randomly reassigned at the start of each automated round.</p></details></article>
     
@@ -393,7 +396,8 @@ document.querySelector('#app').innerHTML = `
     <article class="about-section" data-about-panel="motherlode"><span class="eyebrow">06 · MOTHERLODE</span><h2>Two assets. Two destinations.</h2><p class="about-lead">The Motherlode grows in SOL from mining deployments, while MYNE accrues every round. On a hit, both assets are shared by every miner in that round in proportion to total deployment.</p><div class="motherlode-grid"><div><strong>+0.2</strong><span>MYNE / round · burn stake</span></div><div><strong>2%</strong><span>Mining SOL</span></div><div><strong>1 / 650</strong><span>Round odds</span></div></div><div class="motherlode-formula"><div><span>BURNT-STAKED MYNE</span><strong>0.2 × rounds since last hit</strong></div><i>+</i><div><span>CLAIMABLE SOL</span><strong>2% deployed SOL</strong></div></div><div class="worked-example"><span>100 ROUNDS WITHOUT A HIT</span><p>Every miner shares the accumulated Motherlode in proportion to total round deployment, including miners who were not on the winning tile.</p></div><div class="protocol-callout"><b>When it hits</b><p>The MYNE is placed directly into each miner’s permanent 5× burn-stake share. The SOL share remains claimable by each miner.</p></div></article>
     <article class="about-section" data-about-panel="referral-model"><span class="eyebrow">07 · REFERRALS</span><h2>Invite. Earn MYNE.</h2><p class="about-lead">A permanent referrer receives 1% whenever a referred miner claims MYNE. It comes from the existing 10% claim fee.</p><div class="about-statline"><span><small>REFERRER</small><strong>1%</strong></span><span><small>UNCLAIMED POOL</small><strong>9%</strong></span><span><small>EXTRA FEE</small><strong>0%</strong></span><span><small>ATTRIBUTION</small><strong>FIRST</strong></span></div><div class="principle-grid"><div><b>Permanent attribution</b><p>The first valid referral attached to a wallet cannot be replaced.</p></div><div><b>Paid at claim</b><p>The referral reward settles only when the referred miner claims MYNE.</p></div><div><b>No additional charge</b><p>The 1% referral payment is carved from the standard 10% claim fee.</p></div><div><b>Public performance</b><p>The leaderboard tracks referrals, active miners and MYNE earned.</p></div></div><div class="worked-example"><span>100 MYNE CLAIMED</span><p>The miner receives <b>90 MYNE</b>, unclaimed miners share <b>9 MYNE</b>, and the permanent referrer receives <b>1 MYNE</b>.</p></div><button class="primary-feature-action" data-route="referrals">Open referral dashboard</button></article>
     <article class="about-section" data-about-panel="staking-model"><span class="eyebrow">08 · STAKING</span><h2>Stake. Earn SOL.</h2><p class="about-lead">Choose standard staking at 1× weight or permanently burn the principal for 5× weight. Motherlode MYNE is awarded directly into the same permanent burn-stake tier.</p><div class="about-statline"><span><small>UNSTAKE QUEUE</small><strong>30 DAYS</strong></span><span><small>MINING SHARE</small><strong>8% SOL</strong></span><span><small>TRADE SOURCE</small><strong>DEFERRED</strong></span><span><small>WEIGHTS</small><strong>1× / 5×</strong></span></div><section class="staking-history about-staking-history" data-staking-chart aria-label="Total MYNE staked over the past 30 days"><header><div><span>STAKED MYNE · 30 DAYS</span><strong data-staking-chart-total>—</strong></div><small>PAST 30 DAYS · ON-CHAIN</small></header><div class="staking-history-plot" data-staking-chart-plot><span>Loading staking history…</span></div><footer><span data-staking-chart-start>—</span><span>NOW</span></footer></section><div class="about-rule-table"><div><span>Standard stake</span><strong>1× pool weight</strong><p>Unstake at any time. The withdrawal request starts a 30-day queue before principal can be claimed.</p></div><div><span>Stake + burn</span><strong>5× pool weight</strong><p>The deposited MYNE is permanently burned and cannot be withdrawn.</p></div><div><span>Motherlode position</span><strong>Automatic 5× burn stake</strong><p>Motherlode MYNE is never liquid: it enters every miner’s permanent burn-staked position automatically when the Motherlode is hit.</p></div><div><span>SOL rewards</span><strong>8% mining allocation</strong><p>Staker SOL rewards accrue by weight and remain claimable.</p></div></div><div class="protocol-callout"><b>SOL stays liquid</b><p>Burn-staked MYNE provides permanent reward weight. SOL earned through staking or a Motherlode remains claimable.</p></div><button class="primary-feature-action" data-route="stake">Open staking</button></article>
-    <article class="about-section" data-about-panel="addresses"><span class="eyebrow">09 · ADDRESSES</span><h2>Addresses</h2><p class="about-lead">Canonical protocol accounts and integrations for the active Solana deployment. Values are read from the configured program and its on-chain state.</p><div class="address-status" data-address-status>Loading deployment addresses…</div><div class="address-ledger" data-address-ledger aria-live="polite"></div><div class="protocol-callout address-disclosure"><b>Verify before interacting</b><p>Always compare the mint and program addresses shown here with Solana Explorer. Operational signer wallets are intentionally omitted from this interface; their permissions remain verifiable in the on-chain protocol state.</p></div></article>
+    <article class="about-section" data-about-panel="stats"><span class="eyebrow">09 · STATS</span><h2>Protocol stats</h2><p class="about-lead">Loading live protocol statistics…</p></article>
+    <article class="about-section" data-about-panel="addresses"><span class="eyebrow">10 · ADDRESSES</span><h2>Addresses</h2><p class="about-lead">Canonical protocol accounts and integrations for the active Solana deployment. Values are read from the configured program and its on-chain state.</p><div class="address-status" data-address-status>Loading deployment addresses…</div><div class="address-ledger" data-address-ledger aria-live="polite"></div><div class="protocol-callout address-disclosure"><b>Verify before interacting</b><p>Always compare the mint and program addresses shown here with Solana Explorer. Operational signer wallets are intentionally omitted from this interface; their permissions remain verifiable in the on-chain protocol state.</p></div></article>
   </section></div></main>
   <footer class="network-footer">
     <a href="https://solana.com" target="_blank" rel="noopener noreferrer" aria-label="Powered by Solana">
@@ -1181,6 +1185,17 @@ const renderTransparencyAddresses = async () => {
 if (aboutContent && aboutNav) {
   aboutContent.classList.add('about-factual');
 
+  const statsMark = (asset) => asset === 'sol'
+    ? '<img src="/solana-mark.svg" alt="" aria-hidden="true"/>'
+    : asset === 'myne' ? '<img src="/gld-icon-transparent.png" alt="" aria-hidden="true"/>' : '';
+  const statsRow = (key, label, note, asset = '') => `
+    <div class="protocol-stat-row unavailable" data-protocol-stat="${key}">
+      <span><b>${label}</b><small>${note}</small></span>
+      <svg class="protocol-stat-chart" viewBox="0 0 112 38" preserveAspectRatio="none" aria-hidden="true"><path class="stat-baseline" d="M3 35H109"/><path data-stat-line/><circle data-stat-last r="2.2" hidden/></svg>
+      <span class="protocol-stat-value">${statsMark(asset)}<strong data-stat-value>—</strong></span>
+    </div>`;
+  const statsGroup = (name, source, rows) => `<section class="protocol-stat-group"><header><h3>${name}</h3><small>${source}</small></header><div class="protocol-stat-list">${rows.join('')}</div></section>`;
+
   const facts = {
     intro: `
       <span class="eyebrow">01 · PROTOCOL</span><h2>Stake MYNE. Earn SOL every round.</h2>
@@ -1217,6 +1232,37 @@ if (aboutContent && aboutNav) {
       <div class="about-statline"><span><small>STANDARD</small><strong>1×</strong></span><span><small>WITHDRAWAL QUEUE</small><strong>30 DAYS</strong></span><span><small>STAKE + BURN</small><strong>5×</strong></span><span><small>REWARD ASSET</small><strong>SOL</strong></span></div>
       <section class="staking-history about-staking-history" data-staking-chart aria-label="Total MYNE staked over the past 30 days"><header><div><span>STAKED MYNE · 30 DAYS</span><strong data-staking-chart-total>—</strong></div><small>PAST 30 DAYS · ON-CHAIN</small></header><div class="staking-history-plot" data-staking-chart-plot><span>Loading staking history…</span></div><footer><span data-staking-chart-start>—</span><span>NOW</span></footer></section>
       <div class="about-rule-table"><div><span>Standard stake</span><strong>1× reward weight</strong><p>An unstake request starts a 30-day withdrawal queue.</p></div><div><span>Stake + burn</span><strong>5× reward weight</strong><p>The deposited MYNE is permanently burned and cannot be recovered.</p></div><div><span>Staking bonus</span><strong>Automatic 5× burn stake</strong><p>The bonus is always paired with a Motherlode hit and is never issued as liquid MYNE.</p></div><div><span>Rewards</span><strong>SOL from 8% mining fee</strong><p>Rewards accrue by staking weight and remain claimable.</p></div></div>`,
+    stats: `
+      <span class="eyebrow">09 · STATS</span><h2>Protocol stats</h2>
+      <p class="about-lead">Live protocol activity from indexed Solana rounds, staking state, token supply and the configured MYNE/SOL market.</p>
+      <div class="protocol-stats-meta"><span>ON-CHAIN + INDEXED</span><time data-stats-updated>AWAITING FIRST SNAPSHOT</time></div>
+      <svg class="protocol-stats-defs" aria-hidden="true" width="0" height="0"><defs><linearGradient id="protocol-stat-spectrum" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff08a"/><stop offset=".38" stop-color="#55e2ff"/><stop offset=".7" stop-color="#8e7cff"/><stop offset="1" stop-color="#ef5bd7"/></linearGradient></defs></svg>
+      <div class="protocol-stats-grid">
+        ${statsGroup('Market', 'LIVE QUOTES', [
+          statsRow('market.mynePrice', 'MYNE price', isPremine ? 'pre-launch reference' : 'MYNE / SOL pool spot'),
+          statsRow('market.solPrice', 'SOL price', 'live USD quote', 'sol'),
+          statsRow('market.marketCap', 'Market cap', 'current supply × spot'),
+        ])}
+        ${statsGroup('Mining', 'ALL ROUNDS', [
+          statsRow('mining.deployed', 'SOL deployed', 'all-time mining volume', 'sol'),
+          statsRow('mining.rounds', 'Mined rounds', 'settled rounds'),
+          statsRow('mining.emitted', 'MYNE mined', 'mining emissions', 'myne'),
+          statsRow('mining.motherlodes', 'Motherlodes', 'confirmed hits'),
+        ])}
+        ${statsGroup('Staking', 'POOL STATE', [
+          statsRow('staking.apy', 'Standard APY', 'latest 30-minute window'),
+          statsRow('staking.total', 'Total staked', 'standard + burn stake', 'myne'),
+          statsRow('staking.weight', 'Reward weight', '1× standard · 5× burn', 'myne'),
+          statsRow('staking.rewards', 'SOL rewards pool', 'funded minus claimed', 'sol'),
+          statsRow('staking.stakers', 'Stakers', 'active positions'),
+        ])}
+        ${statsGroup('Supply', 'SPL MINT', [
+          statsRow('supply.current', 'Current supply', 'mint supply now', 'myne'),
+          statsRow('supply.burned', 'MYNE burned', 'permanent supply reduction', 'myne'),
+          statsRow('supply.remaining', 'Remaining', 'until hard cap', 'myne'),
+          statsRow('supply.max', 'Maximum supply', 'protocol hard cap', 'myne'),
+        ])}
+      </div>`,
   };
 
   Object.entries(facts).forEach(([name, markup]) => {
@@ -1243,13 +1289,115 @@ if (aboutContent && aboutNav) {
   const navLabels = {
     intro: 'Protocol', mining: 'Mine',
     'token-flow': 'Supply', fees: 'Fees',
-    motherlode: 'Motherlode', 'referral-model': 'Referrals', 'staking-model': 'Staking', addresses: 'Addresses',
+    motherlode: 'Motherlode', 'referral-model': 'Referrals', 'staking-model': 'Staking', stats: 'Stats', addresses: 'Addresses',
   };
   Object.entries(navLabels).forEach(([name, label]) => {
     const button = aboutNav.querySelector(`[data-about-section="${name}"]`);
     if (button) button.textContent = label;
   });
 }
+
+const statsTokenAmount = (baseUnits) => Number(BigInt(baseUnits ?? 0)) / 1e9;
+const statsNumber = (value, maximumFractionDigits = 2) => Number(value).toLocaleString(undefined, {
+  minimumFractionDigits: 0,
+  maximumFractionDigits,
+});
+const statsUsd = (value) => {
+  if (!Number.isFinite(value)) return '—';
+  const digits = value > 0 && value < 0.01 ? 4 : 2;
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+};
+const cumulativeRecent = (total, newestFirst, deltaFor) => {
+  const chronological = [...(newestFirst || [])].reverse();
+  const deltas = chronological.map((row) => Math.max(0, Number(deltaFor(row)) || 0));
+  let running = Math.max(0, Number(total) - deltas.reduce((sum, value) => sum + value, 0));
+  return [running, ...deltas.map((delta) => (running += delta))];
+};
+
+let protocolStatsFetchedAt = 0;
+let protocolStatsRequest = null;
+const PROTOCOL_STATS_STALE_MS = 10_000;
+
+/**
+ * About → Stats uses the round index for aggregate mining reads whenever it is available. The
+ * chain fallback is authoritative but more expensive, so it is used only when the production
+ * index cannot answer. Staking and supply are each one cached account read.
+ */
+const refreshProtocolStats = async (force = false) => {
+  const root = document.querySelector('[data-about-panel="stats"]');
+  if (!root || (!force && Date.now() - protocolStatsFetchedAt < PROTOCOL_STATS_STALE_MS)) return;
+  if (protocolStatsRequest) return protocolStatsRequest;
+
+  protocolStatsRequest = (async () => {
+    const currentRoundId = (() => {
+      try { return BigInt(chain.state.roundId ?? 0); } catch { return 0n; }
+    })();
+    const roundsRead = (async () => {
+      const indexed = await loadIndexedRounds({ page: 0, pageSize: 24, filter: 'all', currentRoundId });
+      if (indexed) return { rows: indexed.rows, summary: indexed.summary };
+      const fallback = await loadRoundHistory({ page: 0, pageSize: 24, account: null, filter: 'all' });
+      return { rows: fallback.rows, summary: fallback.summary };
+    })();
+
+    const [roundResult, stakingResult, supplyResult] = await Promise.allSettled([
+      roundsRead,
+      readStakingMetrics(),
+      readSupplyStats(),
+    ]);
+    const metrics = {};
+    const add = (key, value, label, history) => {
+      if (!Number.isFinite(Number(value))) return;
+      metrics[key] = { value: Number(value), label, history };
+    };
+
+    const solUsd = getSolUsd();
+    const displayedMyneUsd = getMyneUsd();
+    const marketMyneUsd = poolAvailable ? displayedMyneUsd : null;
+    if (displayedMyneUsd != null) add('market.mynePrice', displayedMyneUsd, `${statsUsd(displayedMyneUsd)}${poolAvailable ? '' : ' REF'}`);
+    if (solUsd != null) add('market.solPrice', solUsd, statsUsd(solUsd));
+
+    const supply = supplyResult.status === 'fulfilled' ? supplyResult.value : null;
+    if (supply) {
+      const current = statsTokenAmount(supply.current);
+      const burned = statsTokenAmount(supply.burned);
+      const max = statsTokenAmount(supply.max);
+      const remaining = Math.max(0, max - current);
+      add('supply.current', current, statsNumber(current));
+      add('supply.burned', burned, statsNumber(burned));
+      add('supply.remaining', remaining, statsNumber(remaining));
+      add('supply.max', max, statsNumber(max, 0));
+      if (marketMyneUsd != null) add('market.marketCap', current * marketMyneUsd, statsUsd(current * marketMyneUsd));
+    }
+
+    const rounds = roundResult.status === 'fulfilled' ? roundResult.value : null;
+    if (rounds?.summary) {
+      const summary = rounds.summary;
+      const recent = rounds.rows || [];
+      const deployed = statsTokenAmount(summary.deployed);
+      const emitted = statsTokenAmount(summary.minted);
+      add('mining.deployed', deployed, statsNumber(deployed, 4), cumulativeRecent(deployed, recent, (row) => statsTokenAmount(row.totalWager)));
+      add('mining.rounds', summary.mined, statsNumber(summary.mined, 0), cumulativeRecent(summary.mined, recent, (row) => row.resolved && BigInt(row.totalWager ?? 0) > 0n ? 1 : 0));
+      add('mining.emitted', emitted, statsNumber(emitted), cumulativeRecent(emitted, recent, (row) => statsTokenAmount(row.bullionForWinners)));
+      add('mining.motherlodes', summary.jackpots, statsNumber(summary.jackpots, 0), cumulativeRecent(summary.jackpots, recent, (row) => row.jackpotHit ? 1 : 0));
+    }
+
+    const staking = stakingResult.status === 'fulfilled' ? stakingResult.value : null;
+    if (staking) {
+      if (staking.aprPct != null) add('staking.apy', staking.aprPct, `${statsNumber(staking.aprPct, 1)}%`);
+      add('staking.total', staking.totalStakedPrincipal, statsNumber(staking.totalStakedPrincipal));
+      add('staking.weight', staking.totalWeight, statsNumber(staking.totalWeight));
+      add('staking.rewards', staking.rewardsPoolEth, statsNumber(staking.rewardsPoolEth, 4));
+      add('staking.stakers', staking.stakers, statsNumber(staking.stakers, 0));
+    }
+
+    renderProtocolStats(root, metrics);
+    protocolStatsFetchedAt = Date.now();
+  })().catch((error) => {
+    console.warn('protocol stats failed', error);
+  }).finally(() => { protocolStatsRequest = null; });
+
+  return protocolStatsRequest;
+};
 
 /**
  * About contents: a sidebar on desktop, a dropdown on phones.
@@ -2258,7 +2406,7 @@ const setAboutSection = (name) => {
   const sectionTitles = {
     intro: 'Protocol', mining: 'Mine', 'token-flow': 'Supply', fees: 'Fees',
     motherlode: 'Motherlode', 'referral-model': 'Referrals',
-    'staking-model': 'Staking', addresses: 'Addresses',
+    'staking-model': 'Staking', stats: 'Stats', addresses: 'Addresses',
   };
   const title = sectionTitles[target];
   const panel = document.querySelector(`[data-about-panel="${target}"]`);
@@ -2268,6 +2416,7 @@ const setAboutSection = (name) => {
   const label = aboutNavToggle.querySelector('b');
   const active = document.querySelector(`[data-about-section="${target}"]`);
   if (label && active) label.textContent = active.textContent;
+  if (target === 'stats') void refreshProtocolStats();
   if (target === 'addresses') void renderTransparencyAddresses();
 };
 
@@ -3679,6 +3828,9 @@ window.setInterval(() => {
       // hook missed stayed invisible. Unforced, so the 3s cache absorbs the cost.
       if (chain.state.account) refreshRoundHistory();
       break;
+    case 'about':
+      if (document.querySelector('[data-about-panel="stats"].active')) void refreshProtocolStats();
+      break;
     default:
       // Static/content routes do not need mining-history traffic.
       break;
@@ -3703,6 +3855,7 @@ document.addEventListener('visibilitychange', () => {
   if (route === 'referrals') { refreshReferral(true); renderLeaderboard(true); }
   else if (route === 'stake') refreshStaking();
   else if (route === 'rounds') refreshRoundHistory({ force: true });
+  else if (route === 'about' && document.querySelector('[data-about-panel="stats"].active')) void refreshProtocolStats(true);
 });
 
 /**

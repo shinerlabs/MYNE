@@ -24,6 +24,23 @@ body[data-route="referrals"] .feature-shell.page-view.active {
 .staking-dashboard-column,
 .referrals-column { min-width: 0; }
 
+/* The staking history is the shared context for both the rewards summary and the position
+   controls, so it owns the first full-width row instead of competing with the composer. */
+body[data-route="stake"] .staking-dashboard > .staking-history {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+body[data-route="stake"] .staking-dashboard > .staking-overview,
+body[data-route="stake"] .staking-dashboard > .staking-actions {
+  grid-row: 2;
+}
+
 .staking-overview,
 .staking-actions,
 .referrals-primary,
@@ -33,11 +50,74 @@ body[data-route="referrals"] .feature-shell.page-view.active {
   align-content: start;
 }
 
+/* The retired referral layout positioned these cards into separate implicit grid columns. Reset
+   those coordinates inside the new dashboard so the link owns the left rail and the user's
+   network stacks directly above the public leaderboard on the right. */
+.referrals-primary,
+.referrals-secondary {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-auto-flow: row !important;
+}
+
+body[data-route="referrals"] .referrals-primary > .referral-command,
+body[data-route="referrals"] .referrals-secondary > .my-referrals,
+body[data-route="referrals"] .referrals-secondary > .referral-leaderboard {
+  grid-column: 1 !important;
+  grid-row: auto !important;
+  height: auto !important;
+}
+
+body[data-route="referrals"] .referrals-secondary > .referral-leaderboard {
+  display: block !important;
+}
+
+/* Legacy single-column route styles gave several cards their own fixed reading widths. Those
+   widths must not escape a dashboard track when the viewport is only just wide enough for two
+   columns. */
+.staking-overview > *,
+.staking-actions > *,
+.referrals-primary > *,
+.referrals-secondary > * {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box;
+}
+
 body[data-route="stake"] .staking-dashboard .eth-claim-hero {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr) !important;
   gap: 22px;
   margin: 0;
   padding: 28px 30px;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-main,
+body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+  width: 100%;
+  min-width: 0;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-template-rows: auto 44px !important;
+  gap: 10px !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .eth-lifetime {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  min-width: 0;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .staking-share-group {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  width: 100%;
 }
 
 body[data-route="stake"] .staking-dashboard .eth-claim-logo {
@@ -90,6 +170,13 @@ body[data-route="referrals"] .referral-row {
 
   .staking-dashboard,
   .referrals-dashboard { grid-template-columns: 1fr; }
+
+  body[data-route="stake"] .staking-dashboard > .staking-history,
+  body[data-route="stake"] .staking-dashboard > .staking-overview,
+  body[data-route="stake"] .staking-dashboard > .staking-actions {
+    grid-column: 1;
+    grid-row: auto;
+  }
 
   body[data-route="referrals"] .referral-table-head,
   body[data-route="referrals"] .referral-list { min-width: 700px; }

@@ -7476,6 +7476,46 @@ html #app > .topbar .connect-header:not(.connected) {
   font-weight: 800 !important;
   letter-spacing: -.02em;
 }
+
+/* Primary navigation must remain legible beside the market controls. Earlier responsive layers
+   reduced these labels to 12px on desktop and 7.5px on small tablets even though the nav already
+   supports horizontal overflow. Give the links a clear editorial scale and a steadier rhythm. */
+@media (min-width: 1181px) {
+  html #app > .topbar .main-nav {
+    gap: clamp(26px, 2.15vw, 36px) !important;
+  }
+
+  html #app > .topbar .nav-item {
+    padding-inline: 2px !important;
+    font-size: clamp(13px, .95vw, 14px) !important;
+    font-weight: 650 !important;
+    letter-spacing: .065em !important;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1180px) {
+  html #app > .topbar .main-nav {
+    gap: clamp(12px, 1.45vw, 17px) !important;
+  }
+
+  html #app > .topbar .nav-item {
+    font-size: clamp(11px, 1.1vw, 12.5px) !important;
+    font-weight: 640 !important;
+    letter-spacing: .05em !important;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 900px) {
+  html #app > .topbar .main-nav {
+    gap: 8px !important;
+  }
+
+  html #app > .topbar .nav-item {
+    font-size: clamp(10px, 1.35vw, 11.5px) !important;
+    font-weight: 640 !important;
+    letter-spacing: .04em !important;
+  }
+}
 @media (max-width: 720px) {
   html #app > .topbar .connect-header:not(.connected) {
     width: 112px !important;
