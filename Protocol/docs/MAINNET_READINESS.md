@@ -37,6 +37,9 @@ evidence only after the final clean artifact is built, hashed and exercised by t
 - The buyback keeper is dry-run by default, accepts only a direct Jupiter route through the registered Meteora DLMM pool, simulates swaps/burns, persists crash-recovery state and indexes each swap/burn signature before round archival.
 - The web client, round keeper and lifecycle keeper no longer use production-wide program account scans. Indexed addresses are fetched in bounded batches and all identities are revalidated on-chain.
 - A guarded script creates the one canonical fallback token account for the admin role after the Mainnet mint exists.
+- Canonical Metaplex fungible-token metadata is prepared by a simulation-first guarded script. It
+  requires the exact 9-decimal/100-MYNE/no-freeze mint state, publishes name and symbol `MYNE`, and
+  verifies byte-for-byte hosted artwork plus `myne.supply` and `@myne_solana` links before submission.
 - The Mainnet artifact embeds `MYNE_PRODUCTION_ARTIFACT_V1`; its compile-time policy rejects
   default/Devnet randomness and makes every settlement liquidity-gated. The manifest and preflight
   inspect the compiled SBF marker rather than trusting a source grep.
@@ -84,6 +87,10 @@ keeper-policy and frontend test after the final source/dependency freeze.
    configuration.
 5. **Independent review.** An unaffiliated Solana/Anchor security reviewer must assess the exact artifact and the scope in `INDEPENDENT_SECURITY_REVIEW_SCOPE.md`. The project team’s own review cannot satisfy this gate.
 6. **Legal review.** Paid chance-based mining and token rewards require jurisdiction-specific advice before public funds are accepted.
+7. **Canonical mint identity.** Deploy the checked-in token metadata JSON, SVG master and 1024px PNG
+   render, run the metadata script in simulation-only mode, then submit with the exact mint-address
+   confirmation before transferring SPL mint authority to the config PDA. Read back and record the
+   metadata PDA, name, symbol, URI, token standard, update authority and transaction signature.
 
 Switchboard randomness accounts are closed by the implemented lifecycle keeper after the
 verification window. Its auxiliary lookup-table rent is a separate residual operational item:

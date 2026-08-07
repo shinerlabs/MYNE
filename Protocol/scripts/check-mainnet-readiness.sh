@@ -107,7 +107,39 @@ test -f scripts/round-indexer.mjs
 test -f scripts/round-lifecycle-keeper.mjs
 test -f scripts/round-archive-policy.mjs
 test -f scripts/prepare-admin-fallback-ata.mjs
+test -f scripts/create-mainnet-token-metadata.mjs
 test -f scripts/migrate-fee-schedule-v6.mjs
+grep -q 'CONFIRM_MAINNET_TOKEN_METADATA' scripts/create-mainnet-token-metadata.mjs
+grep -q 'SUBMIT_MAINNET_TOKEN_METADATA' scripts/create-mainnet-token-metadata.mjs
+grep -q 'simulateTransaction' scripts/create-mainnet-token-metadata.mjs
+test -f ../Frontend/public/token-metadata.json
+test -f ../Frontend/public/myne-token-icon.svg
+test -f ../Frontend/public/myne-token-icon-1024.png
+python3 - ../Frontend/public/token-metadata.json ../Frontend/public/myne-token-icon-1024.png <<'PY'
+import json
+import struct
+import sys
+
+metadata_path, image_path = sys.argv[1:]
+with open(metadata_path, encoding='utf-8') as source:
+    metadata = json.load(source)
+assert metadata['name'] == 'MYNE'
+assert metadata['symbol'] == 'MYNE'
+assert metadata['image'] == 'https://www.myne.supply/myne-token-icon-1024.png'
+assert metadata['external_url'] == 'https://www.myne.supply'
+assert metadata['properties']['links'] == {
+    'website': 'https://www.myne.supply',
+    'x': 'https://x.com/myne_solana',
+}
+assert metadata['extensions'] == {
+    'website': 'https://www.myne.supply',
+    'twitter': 'https://x.com/myne_solana',
+}
+with open(image_path, 'rb') as source:
+    header = source.read(24)
+assert header[:8] == b'\x89PNG\r\n\x1a\n'
+assert struct.unpack('>II', header[16:24]) == (1024, 1024)
+PY
 grep -q 'fee schedule v6' scripts/switchboard-round-keeper.mjs
 grep -q 'fee schedule v6' scripts/buyback-keeper.mjs
 grep -q 'fee schedule v6' scripts/round-indexer.mjs

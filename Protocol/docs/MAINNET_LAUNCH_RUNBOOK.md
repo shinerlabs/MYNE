@@ -88,11 +88,46 @@ CLI version and command syntax before funding a Mainnet deployment.
 ## 3. Deploy while inactive
 
 Deploy the recorded Docker-verified version-6 `.so` to the fixed program ID. Verify ProgramData,
-upgrade authority and deployed bytecode hash. Create a 9-decimal mint with exactly 100 MYNE, no
-freeze authority and the config PDA as mint authority. Initialize paused with Switchboard Mainnet
-and the three reviewed role addresses. Fetch the config back and verify version 6 plus every address
-before proceeding. This read-back is a hard stop: the production-feature binary rejects every
-randomness mode except Switchboard Mainnet and always enforces the production liquidity gate.
+upgrade authority and deployed bytecode hash. Create the canonical legacy SPL mint with 9 decimals,
+the deployer temporarily acting as mint authority and no freeze authority. Mint exactly 100 MYNE to
+the reviewed launch account. Do not transfer mint authority yet: the Metaplex metadata instruction
+must be signed by the current mint authority.
+
+Publish and independently fetch these exact release assets before creating metadata:
+
+```text
+https://www.myne.supply/token-metadata.json
+https://www.myne.supply/myne-token-icon-1024.png
+https://www.myne.supply/myne-token-icon.svg
+```
+
+The SVG is the authoritative artwork; the 1024×1024 PNG is its exact wallet-compatible render. The
+JSON fixes the on-chain identity to name `MYNE`, symbol `MYNE`, zero seller fee, website
+`https://www.myne.supply` and X account `https://x.com/myne_solana`. Run the guarded metadata
+preparation from `Protocol/` first without the submit variable; it verifies Mainnet genesis, the
+mint's 9 decimals/100 MYNE supply/no-freeze state, byte-for-byte hosted artwork, and simulates the
+locally constructed Metaplex transaction:
+
+```bash
+MAINNET_RPC_URL=<reviewed Mainnet RPC> \
+ANCHOR_WALLET=<reviewed file-backed admin keypair path> \
+MYNE_MINT_ADDRESS=<reviewed mint> \
+CONFIRM_SOLANA_GENESIS_HASH=5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2Nbd \
+CONFIRM_MAINNET_TOKEN_METADATA=<reviewed mint> \
+pnpm prepare:mainnet-metadata
+```
+
+Review the simulation and derived metadata PDA. Only then repeat with
+`SUBMIT_MAINNET_TOKEN_METADATA=<reviewed mint>`. Read the metadata account back and verify name,
+symbol, URI, update authority and `TokenStandard::Fungible`. Metadata update authority is distinct
+from SPL mint authority; retain it only until all permanent URLs are independently verified, then
+make a separate documented immutability decision.
+
+After metadata exists, transfer SPL mint authority to the config PDA and initialize paused with
+Switchboard Mainnet and the three reviewed role addresses. Fetch the mint and config back: verify
+exactly 100 MYNE supply, 9 decimals, no freeze authority, config PDA mint authority, version 6 and
+every configured address before proceeding. This read-back is a hard stop: the production-feature
+binary rejects every randomness mode except Switchboard Mainnet and always enforces the production liquidity gate.
 Production keepers independently refuse a cluster/provider mismatch, and the administrator must
 still refuse to proceed on any disagreement.
 

@@ -2391,7 +2391,7 @@ const createStakingStatementPdf = async () => {
     ctx.fillStyle = '#f5f5f5'; ctx.font = '700 40px "DM Sans", sans-serif'; ctx.textAlign = 'right'; ctx.fillText(value, 1150, y + 4); ctx.textAlign = 'left';
     ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.beginPath(); ctx.moveTo(86, y + 55); ctx.lineTo(1154, y + 55); ctx.stroke();
   });
-  ctx.fillStyle = '#f0f0f0'; ctx.font = '700 28px "DM Sans", sans-serif'; ctx.fillText('7.2% net · 8% gross staking', 86, 1390);
+  ctx.fillStyle = '#f0f0f0'; ctx.font = '700 28px "DM Sans", sans-serif'; ctx.fillText('8% of mining volume funds staking', 86, 1390);
   ctx.fillStyle = '#989ba1'; ctx.font = '500 21px "DM Sans", sans-serif'; ctx.fillText('Protocol revenue is distributed in SOL by staking weight.', 86, 1434);
   const wallet = chain.state.account ? chain.format.short(chain.state.account) : 'Wallet not connected';
   ctx.fillText(`Wallet  ${wallet}`, 86, 1554);

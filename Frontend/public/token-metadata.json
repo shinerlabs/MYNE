@@ -1,0 +1,34 @@
+{
+  "name": "MYNE",
+  "symbol": "MYNE",
+  "description": "MYNE is the protocol token for transparent on-chain mining and SOL staking rewards on Solana.",
+  "image": "https://www.myne.supply/myne-token-icon-1024.png",
+  "external_url": "https://www.myne.supply",
+  "attributes": [
+    {
+      "trait_type": "Network",
+      "value": "Solana"
+    }
+  ],
+  "properties": {
+    "category": "image",
+    "files": [
+      {
+        "uri": "https://www.myne.supply/myne-token-icon-1024.png",
+        "type": "image/png"
+      },
+      {
+        "uri": "https://www.myne.supply/myne-token-icon.svg",
+        "type": "image/svg+xml"
+      }
+    ],
+    "links": {
+      "website": "https://www.myne.supply",
+      "x": "https://x.com/myne_solana"
+    }
+  },
+  "extensions": {
+    "website": "https://www.myne.supply",
+    "twitter": "https://x.com/myne_solana"
+  }
+}

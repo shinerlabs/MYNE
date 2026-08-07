@@ -5,10 +5,10 @@ import test from 'node:test';
 const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 
 test('Protocol tab leads with the staking revenue premise', () => {
-  assert.match(source, /8% of every mining round is allocated to staking/);
-  assert.match(source, /leaving 7\.2% of all mining volume distributed to MYNE stakers in SOL/);
+  assert.equal([...source.matchAll(/8% of all mining volume funds staking rewards in SOL/g)].length, 5, 'Protocol and SOL rewards copy must stay aligned across both renderers and the runtime refresh');
   assert.match(source, /ALL MINING VOLUME · EVERY ROUND/);
-  assert.match(source, /7\.2% <small>NET TO STAKERS IN SOL<\/small>/);
+  assert.match(source, /8% <small>STAKING REWARDS IN SOL<\/small>/);
+  assert.doesNotMatch(source, /NET TO STAKERS IN SOL/);
   assert.equal([...source.matchAll(/class="protocol-yield-banner"/g)].length, 2, 'initial and canonical About renderers must stay aligned');
 });
 

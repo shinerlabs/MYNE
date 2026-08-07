@@ -12,6 +12,7 @@
     "local:keeper": "node scripts/local-keeper.mjs",
     "round:indexer": "node scripts/round-indexer.mjs",
     "round:lifecycle": "node scripts/round-lifecycle-keeper.mjs",
+    "prepare:mainnet-metadata": "node scripts/create-mainnet-token-metadata.mjs",
     "prepare:admin-ata": "node scripts/prepare-admin-fallback-ata.mjs",
     "migrate:fee-v6": "node scripts/migrate-fee-schedule-v6.mjs",
     "repair:sbf-syscalls": "./scripts/repair-agave-syscalls.sh",
@@ -32,6 +33,9 @@
   },
   "dependencies": {
     "@anchor-lang/core": "1.0.2",
+    "@metaplex-foundation/mpl-token-metadata": "3.4.0",
+    "@metaplex-foundation/umi": "1.5.1",
+    "@metaplex-foundation/umi-bundle-defaults": "1.5.1",
     "@solana/spl-token": "0.4.14",
     "@solana/web3.js": "1.98.4",
     "@switchboard-xyz/on-demand": "3.10.3"

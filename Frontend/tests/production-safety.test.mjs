@@ -105,7 +105,7 @@ test('public repository includes baseline disclosure, pinned tooling, and deploy
 });
 
 test('public bundle uses MYNE-named brand assets and omits legacy prototype files', async () => {
-  const [sourceFiles, index, manifest, tokenIcon] = await Promise.all([
+  const [sourceFiles, index, localViewer, manifest, tokenIcon, brandImages, favicon] = await Promise.all([
     Promise.all([
     '../src/main.js',
     '../src/style.css',
@@ -113,8 +113,19 @@ test('public bundle uses MYNE-named brand assets and omits legacy prototype file
     '../src/surface-system.css',
     ].map((path) => readFile(new URL(path, import.meta.url), 'utf8'))),
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../local.html', import.meta.url), 'utf8'),
     readFile(new URL('../public/site.webmanifest', import.meta.url), 'utf8').then(JSON.parse),
     readFile(new URL('../public/myne-token-icon.svg', import.meta.url), 'utf8'),
+    Promise.all([
+      '../public/favicon-16x16.png',
+      '../public/favicon-32x32.png',
+      '../public/apple-touch-icon.png',
+      '../public/icon-192.png',
+      '../public/icon-512.png',
+      '../public/myne-x-banner.png',
+      '../public/myne-social-card.png',
+    ].map((path) => readFile(new URL(path, import.meta.url)))),
+    readFile(new URL('../public/favicon.ico', import.meta.url)),
   ]);
   for (const source of sourceFiles) {
     assert.doesNotMatch(source, /\/(?:gld-(?:icon|wordmark)|bullion-logo|token-mark)(?:[^"')\s]*)/i);
@@ -125,13 +136,30 @@ test('public bundle uses MYNE-named brand assets and omits legacy prototype file
   assert.match(tokenIcon, /<circle\b[^>]*fill="url\(#myne-coin\)"/);
   assert.match(tokenIcon, /<path\b[^>]*fill="#f7f7f8"/);
   assert.doesNotMatch(tokenIcon, /<image\b|data:image\//);
-  assert.doesNotMatch(index, /(?:og:image|twitter:image|rel="icon"|rel="apple-touch-icon")[^>]*myne-(?:mark-ui|token)\.png/);
-  assert.match(index, /rel="icon"[^>]*\/favicon\.ico\?v=myne-2/);
-  assert.match(index, /rel="apple-touch-icon"[^>]*\/apple-touch-icon\.png\?v=myne-2/);
+  assert.doesNotMatch(`${index}\n${localViewer}`, /\/myne-mark-ui\.png/);
+  assert.match(index, /property="og:image" content="https:\/\/www\.myne\.supply\/myne-social-card\.png\?v=myne-3"/);
+  assert.match(index, /name="twitter:card" content="summary_large_image"/);
+  assert.match(index, /name="twitter:image" content="https:\/\/www\.myne\.supply\/myne-social-card\.png\?v=myne-3"/);
+  assert.match(index, /rel="icon"[^>]*\/myne-token-icon\.svg\?v=myne-3/);
+  assert.match(index, /rel="alternate icon"[^>]*\/favicon\.ico\?v=myne-3/);
+  assert.match(index, /rel="apple-touch-icon"[^>]*\/apple-touch-icon\.png\?v=myne-3/);
+  assert.match(localViewer, /rel="icon"[^>]*\/myne-token-icon\.svg\?v=myne-3/);
   assert.deepEqual(manifest.icons.map(({ src }) => src), [
-    '/favicon.ico?v=myne-2',
-    '/apple-touch-icon.png?v=myne-2',
+    '/favicon-16x16.png?v=myne-3',
+    '/favicon-32x32.png?v=myne-3',
+    '/icon-192.png?v=myne-3',
+    '/icon-512.png?v=myne-3',
   ]);
+  assert.deepEqual(brandImages.map((image) => [image.readUInt32BE(16), image.readUInt32BE(20)]), [
+    [16, 16],
+    [32, 32],
+    [180, 180],
+    [192, 192],
+    [512, 512],
+    [1500, 500],
+    [1200, 630],
+  ]);
+  assert.equal(favicon.readUInt16LE(4), 6);
 
   for (const path of [
     '../public/.DS_Store',

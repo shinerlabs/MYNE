@@ -59,11 +59,27 @@ test('administrative transaction scripts require an exact RPC genesis acknowledg
   for (const relative of [
     '../scripts/prepare-admin-fallback-ata.mjs',
     '../scripts/migrate-fee-schedule-v6.mjs',
+    '../scripts/create-mainnet-token-metadata.mjs',
   ]) {
     const source = await readFile(new URL(relative, import.meta.url), 'utf8');
     assert.match(source, /CONFIRM_SOLANA_GENESIS_HASH/);
     assert.match(source, /getGenesisHash\(\)/);
   }
+});
+
+test('MYNE metadata creation is fixed, hosted, simulated, and explicitly submitted', async () => {
+  const source = await readFile(
+    new URL('../scripts/create-mainnet-token-metadata.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /const TOKEN_NAME = 'MYNE'/);
+  assert.match(source, /const TOKEN_SYMBOL = 'MYNE'/);
+  assert.match(source, /https:\/\/www\.myne\.supply\/token-metadata\.json/);
+  assert.match(source, /https:\/\/x\.com\/myne_solana/);
+  assert.match(source, /TokenStandard\.Fungible/);
+  assert.match(source, /sellerFeeBasisPoints: percentAmount\(0\)/);
+  assert.match(source, /simulateTransaction/);
+  assert.match(source, /SUBMIT_MAINNET_TOKEN_METADATA !== mintAddress/);
 });
 
 test('Mainnet artifact provenance requires the production feature in the binary', async () => {
