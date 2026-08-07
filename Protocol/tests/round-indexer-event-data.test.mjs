@@ -54,6 +54,16 @@ test('observing RoundArchived never downgrades canonical archive verification', 
   assert.doesNotMatch(archivedCase, /archive_verified:\s*false/);
 });
 
+test('DeploymentCreated indexes its immutable receipt beneficiary as rent payer', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const deploymentCase = source.slice(
+    source.indexOf("case 'DeploymentCreated'"),
+    source.indexOf("case 'AutoPlanConfigured'"),
+  );
+  assert.match(deploymentCase, /rent_payer:\s*authority/);
+  assert.doesNotMatch(deploymentCase, /data\.rentPayer/);
+});
+
 test('refund-only archival follows finalized Solana time rather than the host clock', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   const archiveBody = source.slice(
