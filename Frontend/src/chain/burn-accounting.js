@@ -13,7 +13,7 @@ const asBaseUnits = (value) => {
  */
 export function completedBuybackBurnFromStatsRow(row) {
   if (!row || typeof row !== 'object') return null;
-  const burned = asBaseUnits(row.completed_buyback_burn_base_units);
+  const burned = asBaseUnits(row.completed_buyback_burn_base_units_text);
   const executions = asBaseUnits(row.completed_buyback_executions);
   const latest = row.latest_completed_buyback_round === null
     ? null

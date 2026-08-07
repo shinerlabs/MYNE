@@ -203,7 +203,14 @@ supabase/migrations/20260807140000_wallet_chat_hardening.sql
 supabase/migrations/20260807141000_wallet_validator_lint_cleanup.sql
 supabase/migrations/20260807142000_chat_admin_provisioning.sql
 supabase/migrations/20260808090000_server_randomness_proofs.sql
+supabase/migrations/20260808113000_burn_stats.sql
 ```
+
+Before deploying the frontend, query `public.mine_burn_stats` as the anonymous
+role and require exactly one row with an integer
+`completed_buyback_burn_base_units_text`. A missing view, denied read, multiple
+rows, or malformed value is a release blocker; the browser deliberately leaves
+the burned totals unavailable in all of those cases.
 
 The wallet-chat cut-over invalidates old sessions and removes guest/null rows. After the final
 migration, run `pnpm chat:admin` in dry-run mode with `CHAT_ADMIN_WALLET` set from the ignored

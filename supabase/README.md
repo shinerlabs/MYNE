@@ -10,6 +10,13 @@ the server commit-reveal worker. It preserves existing Switchboard columns and
 v2 archive hashes; server commitments are hex evidence, never account links,
 and server target/entropy slots use unsigned-safe `numeric(20,0)` columns.
 
+Migration `20260808113000_burn_stats.sql` adds the constant-size public read
+model used by the Rounds and About UIs for completed buyback burns. Apply it
+before deploying a frontend that imports `chain/burn-index.js`; that frontend
+fails closed and leaves burn totals unavailable when the view is absent. The
+UI adds this indexed total to the on-chain `StakePool.total_burn`, which covers
+manual Stake + Burn, Auto-burn, and Motherlode burn-stake principal.
+
 ## Wallet-only chat
 
 Migration `20260807140000_wallet_chat_hardening.sql` is the wallet-only chat

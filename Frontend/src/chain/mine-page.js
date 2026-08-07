@@ -20,6 +20,7 @@ import {
 import { loadLatestSettledRoundId } from './rounds-index.js';
 import { ROUND_DURATION, BETTING_DURATION, isPremine } from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
+import { claimStakingRewards as withdrawClaimableSol } from './staking.js';
 
 const short = (address) => `${address.slice(0, 6)}...${address.slice(-4)}`;
 const eth = (value, digits = 3) => Number(formatEther(value)).toFixed(digits);
@@ -49,6 +50,7 @@ export const state = {
   balance: 0n,
   bullionBalance: 0n,
   unclaimed: 0n,
+  claimableSol: 0n,
   refinedAccrued: 0n,
   // Global redistribution accumulator. Needed to value the passive share of rounds that were won
   // but never claimed — those are not in `unclaimed`/`refinedAccrued` yet. See passiveOnRounds().
@@ -157,7 +159,7 @@ export async function refreshMiner() {
     // next. Harmless while the figure was folded into a net total; now that it has its own row it
     // would be read as the new wallet's earnings.
     Object.assign(state, {
-      balance: 0n, bullionBalance: 0n, unclaimed: 0n, hasAccount: false,
+      balance: 0n, bullionBalance: 0n, unclaimed: 0n, claimableSol: 0n, hasAccount: false,
       refinedAccrued: 0n, minerIndex: 0n, totalUnclaimed: 0n, hasReferrer: false,
       myBets: Array(25).fill(0n),
     });
@@ -168,6 +170,7 @@ export async function refreshMiner() {
     state.balance = miner.balance;
     state.bullionBalance = miner.bullionBalance;
     state.unclaimed = miner.rewardsBullion;
+    state.claimableSol = miner.claimableSol ?? 0n;
     state.refinedAccrued = miner.refinedAccrued; // dividends from other miners' refining fees
     state.minerIndex = miner.minerIndex ?? 0n;
     state.totalUnclaimed = miner.totalUnclaimed ?? 0n;
@@ -452,7 +455,9 @@ export async function cancelAutoPlan() {
 
 export async function claim(roundId) {
   if (!getAccount()) return connectWallet();
-  await runTx('Claiming…', () => claimRound(roundId), refreshMiner);
+  const processed = await runTx('Processing round rewards…', () => claimRound(roundId), refreshMiner);
+  if (!processed || state.claimableSol <= 0n) return processed;
+  return runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
 }
 
 /**
@@ -521,13 +526,23 @@ export async function claimMany(roundIds) {
  */
 export async function claimEthOnly(roundIds) {
   if (!getAccount()) return connectWallet();
-  if (!roundIds.length) return 0;
-  const claimed = await claimBatched(roundIds, claimManyEthOnly, 'Claiming SOL from');
-  if (!claimed) return 0;
-  notify(claimed < roundIds.length
-    ? `Claimed SOL from ${claimed} of ${roundIds.length} rounds — press Claim again for the rest`
-    : `Claimed — ${claimed} round${claimed === 1 ? '' : 's'}, MYNE left unrefined`);
-  return claimed;
+  const processed = roundIds.length
+    ? await claimBatched(roundIds, claimManyEthOnly, 'Processing')
+    : 0;
+  // A keeper may process a receipt between the pre-click refresh and this
+  // transaction. Re-read the durable ledger even when no receipt instruction
+  // landed locally, then withdraw only through the owner-signed claim path.
+  await refreshMiner();
+  if (state.claimableSol <= 0n) {
+    if (roundIds.length && processed !== roundIds.length) return false;
+    notify('No SOL available to claim');
+    return false;
+  }
+  const withdrawn = await runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
+  if (withdrawn && processed < roundIds.length) {
+    notify(`Claimed accrued SOL · ${roundIds.length - processed} round${roundIds.length - processed === 1 ? '' : 's'} still processing`);
+  }
+  return withdrawn;
 }
 
 export async function refine() {
@@ -539,14 +554,24 @@ export async function refine() {
 /** Settle every selected receipt, then complete the liquid MYNE claim with its 10% fee. */
 export async function claimAll(roundIds) {
   if (!getAccount()) return connectWallet();
+  let handled = false;
   if (roundIds.length > 0) {
     const claimed = await claimMany(roundIds);
     // Do not present a partial receipt settlement as "Claim All". Already-confirmed batches remain
     // safe and claimable MYNE stays in the miner account; the user can retry the remaining batch.
     if (claimed !== roundIds.length) return false;
+    handled = true;
   }
-  if (state.unclaimed === 0n) return notify('No MYNE available to claim');
-  return refine();
+  await refreshMiner();
+  if (state.claimableSol > 0n) {
+    const withdrawn = await runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
+    if (!withdrawn) return false;
+    handled = true;
+  }
+  if (state.unclaimed > 0n) return refine();
+  if (handled) return true;
+  notify('Nothing available to claim');
+  return false;
 }
 
 /** Settle every selected receipt, then convert all accumulated MYNE into permanent 5x weight. */
@@ -555,6 +580,14 @@ export async function stakeAndBurnRewards(roundIds) {
   if (roundIds.length > 0) {
     const claimed = await claimMany(roundIds);
     if (claimed !== roundIds.length) return false;
+  }
+  await refreshMiner();
+  // Before receipt accrual, this action implicitly received SOL because the
+  // receipt processor paid it directly. Preserve that product behavior while
+  // requiring the owner signature explicitly under the claim-vault model.
+  if (state.claimableSol > 0n) {
+    const withdrawn = await runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
+    if (!withdrawn) return false;
   }
   if (state.unclaimed === 0n) return notify('No MYNE available to stake and burn');
   return runTx('Staking + burning MYNE…', burnUnclaimedMyne, refreshMiner);
@@ -617,7 +650,7 @@ export function start() {
     void refreshRound();
     // The lifecycle keeper can settle a receipt between round-boundary reads.
     // Keep the account-specific reward ledger current on the same bounded poll
-    // so an auto-paid SOL receipt cannot leave the MYNE claim panel stale.
+    // so an accrued receipt cannot leave either claimable balance stale.
     if (state.account) void refreshMiner();
   }, 5000);
   window.setInterval(() => { if (live && !document.hidden) void refreshJackpot(); }, 30000);

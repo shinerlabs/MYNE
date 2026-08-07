@@ -21,7 +21,7 @@ export async function loadCompletedBuybackBurnBaseUnits({ force = false } = {}) 
     if (!(await indexAvailable()) || !supabase) return null;
     const { data, error } = await supabase
       .from('mine_burn_stats')
-      .select('completed_buyback_burn_base_units::text,completed_buyback_executions,latest_completed_buyback_round')
+      .select('completed_buyback_burn_base_units_text,completed_buyback_executions,latest_completed_buyback_round')
       .single();
     if (error) return null;
     return completedBuybackBurnFromStatsRow(data);

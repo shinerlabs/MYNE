@@ -188,17 +188,29 @@ async function tokenBalance(owner, mint) {
 }
 
 export async function readMiner(address) {
-  const [config, miner, balance, miningPool] = await Promise.all([
+  const [config, miner, balance, miningPool, stakePosition, stakePool] = await Promise.all([
     getProtocolConfig(),
     fetchProtocolAccount('Miner', minerPda(address)),
     connection.getBalance(new PublicKey(address), 'confirmed'),
     fetchProtocolAccount('MiningPool', protocolPdas.miningPool),
+    fetchProtocolAccount('StakePosition', stakePositionPda(address)),
+    fetchProtocolAccount('StakePool', protocolPdas.stakePool),
   ]);
   const effectiveRewards = effectiveUnclaimedMyne(miner, miningPool);
+  const rewardIndex = toBig(stakePool?.rewardPerWeight);
+  const rewardDebt = toBig(stakePosition?.rewardDebt);
+  const rewardWeight = toBig(stakePosition?.rewardWeight);
+  if (rewardIndex < rewardDebt) throw new Error('Stake reward index is behind the position checkpoint');
+  // `pendingSol` is the durable claim ledger for both staking distributions
+  // and processed mining receipts. Include the not-yet-checkpointed staking
+  // index delta so every Claim SOL surface reads the exact live liability.
+  const claimableSol = toBig(stakePosition?.pendingSol)
+    + (rewardWeight * (rewardIndex - rewardDebt)) / 1_000_000_000_000_000_000n;
   return {
     balance: BigInt(balance),
     bullionBalance: await tokenBalance(address, config.mint),
     rewardsBullion: effectiveRewards,
+    claimableSol,
     refinedAccrued: 0n,
     hasAccount: Boolean(miner),
     totalUnclaimed: toBig(miningPool?.totalUnclaimed),

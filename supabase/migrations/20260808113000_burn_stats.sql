@@ -7,8 +7,8 @@ create or replace view public.mine_burn_stats
 with (security_invoker = true)
 as
 select
-  coalesce(sum(execution.burned_base_units), 0)::numeric(78,0)
-    as completed_buyback_burn_base_units,
+  coalesce(sum(execution.burned_base_units), 0)::numeric(78,0)::text
+    as completed_buyback_burn_base_units_text,
   count(*)::bigint as completed_buyback_executions,
   max(execution.round_id)::bigint as latest_completed_buyback_round
 from public.mine_buyback_executions execution

@@ -492,6 +492,7 @@ async function processEvent(event, signature, slot) {
       break;
     }
     case 'ReceiptClaimed':
+    case 'ReceiptRewardAccruedV1':
     case 'ReceiptRefunded':
     case 'ReceiptClosed': {
       const roundId = asString(data.roundId);
@@ -502,7 +503,15 @@ async function processEvent(event, signature, slot) {
         receipt: receiptPda(roundId, authority, nonce).toBase58(),
         authority,
         nonce,
-        status: eventName === 'ReceiptClaimed' ? 'claimed' : eventName === 'ReceiptRefunded' ? 'refunded' : 'closed',
+        // `claimed` is retained for historical transactions whose receipt
+        // processor also transferred SOL directly to the wallet. New program
+        // releases emit `accrued`: receipt rewards are safely in the claim
+        // vault, but still require the owner-signed SOL claim instruction.
+        status: eventName === 'ReceiptRewardAccruedV1'
+          ? 'accrued'
+          : eventName === 'ReceiptClaimed'
+            ? 'claimed'
+            : eventName === 'ReceiptRefunded' ? 'refunded' : 'closed',
         sol_lamports: asString(data.solLamports || data.lamports || 0),
         myne_base_units: asString(data.myneBaseUnits || 0),
         motherlode_base_units: asString(data.motherlodeBaseUnits || 0),
@@ -510,7 +519,7 @@ async function processEvent(event, signature, slot) {
         slot,
         updated_at: new Date().toISOString(),
       }, 'round_id,receipt,status');
-      const statusFilter = eventName === 'ReceiptClosed' ? 'closed' : 'claimed,refunded';
+      const statusFilter = eventName === 'ReceiptClosed' ? 'closed' : 'claimed,accrued,refunded';
       const rows = await rest(`mine_receipt_settlements?round_id=eq.${roundId}&status=in.(${statusFilter})&select=receipt`);
       await rest(`mine_rounds?round_id=eq.${roundId}`, {
         method: 'PATCH',
@@ -731,7 +740,7 @@ async function archiveReadyRounds() {
     const receiptCount = new Set((bets || []).map((bet) => bet.receipt)).size;
     const chainReceiptCount = Number(state.totalReceipts.toString());
     if (receiptCount !== chainReceiptCount) continue;
-    const settlements = await rest(`mine_receipt_settlements?round_id=eq.${round.round_id}&status=in.(claimed,refunded)&select=*&order=receipt.asc`);
+    const settlements = await rest(`mine_receipt_settlements?round_id=eq.${round.round_id}&status=in.(claimed,accrued,refunded)&select=*&order=receipt.asc`);
     const settlementCount = new Set((settlements || []).map((entry) => entry.receipt)).size;
     if (settlementCount !== chainReceiptCount) continue;
     if (state.settled && !state.buybackCompleted) continue;

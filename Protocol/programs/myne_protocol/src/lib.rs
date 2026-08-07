@@ -7,8 +7,10 @@ use anchor_spl::token_interface::{
 use solana_sha256_hasher::hashv;
 
 mod economics;
+mod round_schedule;
 mod state;
 use economics::*;
+use round_schedule::*;
 use state::*;
 
 declare_id!("D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e");
@@ -29,6 +31,10 @@ pub const MAX_TOKENS: u64 = 2_000_000;
 pub const MINIMUM_ROUND_LAMPORTS: u64 = 50_000_000;
 pub const ROUND_DURATION_SECONDS: u64 = 65;
 pub const BETTING_DURATION_SECONDS: u64 = 60;
+/// Maximum lead granted only to the configured randomness provider to create
+/// and bind the next scheduled round. This changes preparation time, not the
+/// user betting interval, which remains exactly 60 seconds from `opened_at`.
+pub const PROVIDER_PREPARATION_LEAD_SECONDS: i64 = BETTING_DURATION_SECONDS as i64;
 pub const RESOLUTION_COUNTDOWN_SECONDS: u64 = 0;
 pub const WINNER_DISPLAY_SECONDS: u64 = 5;
 pub const MOTHERLODE_ODDS: u64 = 650;
@@ -787,10 +793,12 @@ pub mod myne_protocol {
         let round_ends_at = opened_at
             .checked_add(ROUND_DURATION_SECONDS as i64)
             .ok_or(MyneError::ArithmeticOverflow)?;
-        require!(
-            now >= opened_at && now < betting_ends_at,
-            MyneError::InvalidRoundSchedule
-        );
+        assert_round_can_open_at(
+            now,
+            opened_at,
+            betting_ends_at,
+            ctx.accounts.config.randomness_program != Pubkey::default(),
+        )?;
         let round = &mut ctx.accounts.round;
         round.bump = ctx.bumps.round;
         round.id = round_id;
@@ -1060,11 +1068,12 @@ pub mod myne_protocol {
         );
         assert_randomness_program_allowed_for_build(ctx.accounts.config.randomness_program)?;
         require!(ctx.accounts.round.id == round_id, MyneError::InvalidRound);
-        require!(
-            !ctx.accounts.round.settled
-                && Clock::get()?.unix_timestamp < ctx.accounts.round.betting_ends_at,
-            MyneError::BettingClosed
-        );
+        assert_round_accepting_deployments_at(
+            ctx.accounts.round.settled,
+            Clock::get()?.unix_timestamp,
+            ctx.accounts.round.opened_at,
+            ctx.accounts.round.betting_ends_at,
+        )?;
         assert_bound_randomness_accepting_bets(
             &ctx.accounts.config,
             &ctx.accounts.round,
@@ -1264,16 +1273,17 @@ pub mod myne_protocol {
             MyneError::InvalidRound
         );
         require!(ctx.accounts.round.id == round_id, MyneError::InvalidRound);
+        assert_round_accepting_deployments_at(
+            ctx.accounts.round.settled,
+            Clock::get()?.unix_timestamp,
+            ctx.accounts.round.opened_at,
+            ctx.accounts.round.betting_ends_at,
+        )?;
         assert_bound_randomness_accepting_bets(
             &ctx.accounts.config,
             &ctx.accounts.round,
             ctx.accounts.randomness_account.as_ref(),
         )?;
-        require!(
-            !ctx.accounts.round.settled
-                && Clock::get()?.unix_timestamp < ctx.accounts.round.betting_ends_at,
-            MyneError::BettingClosed
-        );
         let amounts = ctx.accounts.auto_plan.amounts;
         let total = checked_sum(&amounts)?;
         let receipt_rent = Rent::get()?.minimum_balance(8 + BetReceipt::INIT_SPACE);
@@ -1596,17 +1606,13 @@ pub mod myne_protocol {
         let sol_reward = rewards.sol_lamports;
         let myne_reward = rewards.myne_base_units;
         let motherlode_reward = rewards.motherlode_base_units;
-        if sol_reward > 0 {
-            move_lamports(
-                &ctx.accounts.round.to_account_info(),
-                &ctx.accounts.authority.to_account_info(),
-                sol_reward,
-            )?;
-            ctx.accounts.round.claimed_lamports =
-                checked_add(ctx.accounts.round.claimed_lamports, sol_reward)?;
-            ctx.accounts.miner.lifetime_sol_claimed =
-                checked_add(ctx.accounts.miner.lifetime_sol_claimed, sol_reward)?;
-        }
+        accrue_receipt_sol(
+            &mut ctx.accounts.round,
+            &mut ctx.accounts.stake_pool,
+            &mut ctx.accounts.stake_position,
+            &mut ctx.accounts.miner,
+            sol_reward,
+        )?;
         if myne_reward > 0 && ctx.accounts.receipt.reward_mode == AUTO_REWARD_ACCUMULATE {
             credit_mining_rewards(
                 &mut ctx.accounts.miner,
@@ -1632,22 +1638,24 @@ pub mod myne_protocol {
         ctx.accounts.receipt.claimed = true;
         ctx.accounts.round.processed_receipts =
             checked_add(ctx.accounts.round.processed_receipts, 1)?;
-        emit!(ReceiptClaimed {
+        emit!(ReceiptRewardAccruedV1 {
             round_id: ctx.accounts.round.id,
             authority: ctx.accounts.authority.key(),
             nonce: ctx.accounts.receipt.nonce,
             sol_lamports: sol_reward,
             myne_base_units: myne_reward,
-            motherlode_base_units: motherlode_reward
+            motherlode_base_units: motherlode_reward,
+            claim_vault: ctx.accounts.stake_pool.key(),
+            pending_sol_after: ctx.accounts.stake_position.pending_sol,
         });
         Ok(())
     }
 
     /// Permissionless completion for receipts created by an Auto-burn plan.
     /// The reward mode is committed into the receipt before the outcome is
-    /// known. Any keeper may execute this instruction, but SOL can only go to
-    /// the receipt owner and MYNE can only become that owner's non-withdrawable
-    /// 5x virtual burn stake.
+    /// known. Any keeper may execute this instruction, but SOL can only accrue
+    /// in the receipt owner's canonical claim balance and MYNE can only become
+    /// that owner's non-withdrawable 5x virtual burn stake.
     pub fn claim_auto_burn_receipt(ctx: Context<ClaimAutoBurnReceipt>) -> Result<()> {
         require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         require_eq!(
@@ -1676,19 +1684,13 @@ pub mod myne_protocol {
         checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
         let rewards = receipt_rewards(&ctx.accounts.round, &ctx.accounts.receipt)?;
-        if rewards.sol_lamports > 0 {
-            move_lamports(
-                &ctx.accounts.round.to_account_info(),
-                &ctx.accounts.beneficiary.to_account_info(),
-                rewards.sol_lamports,
-            )?;
-            ctx.accounts.round.claimed_lamports =
-                checked_add(ctx.accounts.round.claimed_lamports, rewards.sol_lamports)?;
-            ctx.accounts.miner.lifetime_sol_claimed = checked_add(
-                ctx.accounts.miner.lifetime_sol_claimed,
-                rewards.sol_lamports,
-            )?;
-        }
+        accrue_receipt_sol(
+            &mut ctx.accounts.round,
+            &mut ctx.accounts.stake_pool,
+            &mut ctx.accounts.stake_position,
+            &mut ctx.accounts.miner,
+            rewards.sol_lamports,
+        )?;
         let burned = checked_add(rewards.myne_base_units, rewards.motherlode_base_units)?;
         add_virtual_burn(
             &mut ctx.accounts.config,
@@ -1703,20 +1705,24 @@ pub mod myne_protocol {
         ctx.accounts.receipt.claimed = true;
         ctx.accounts.round.processed_receipts =
             checked_add(ctx.accounts.round.processed_receipts, 1)?;
-        emit!(ReceiptClaimed {
+        emit!(ReceiptRewardAccruedV1 {
             round_id: ctx.accounts.round.id,
             authority: ctx.accounts.beneficiary.key(),
             nonce: ctx.accounts.receipt.nonce,
             sol_lamports: rewards.sol_lamports,
             myne_base_units: rewards.myne_base_units,
             motherlode_base_units: rewards.motherlode_base_units,
+            claim_vault: ctx.accounts.stake_pool.key(),
+            pending_sol_after: ctx.accounts.stake_position.pending_sol,
         });
         Ok(())
     }
 
     /// Permissionless settlement for either reward mode. The beneficiary,
     /// miner and staking position are all constrained to the immutable receipt
-    /// authority, so the executor can neither redirect SOL nor take MYNE.
+    /// authority, so the executor can neither redirect the claim balance nor
+    /// take MYNE. No reward SOL reaches a wallet until its owner later signs a
+    /// claim-staking-rewards instruction.
     pub fn settle_receipt(ctx: Context<SettleReceipt>) -> Result<()> {
         require_eq!(
             ctx.accounts.config.version,
@@ -1735,19 +1741,13 @@ pub mod myne_protocol {
         checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
         let rewards = receipt_rewards(&ctx.accounts.round, &ctx.accounts.receipt)?;
-        if rewards.sol_lamports > 0 {
-            move_lamports(
-                &ctx.accounts.round.to_account_info(),
-                &ctx.accounts.beneficiary.to_account_info(),
-                rewards.sol_lamports,
-            )?;
-            ctx.accounts.round.claimed_lamports =
-                checked_add(ctx.accounts.round.claimed_lamports, rewards.sol_lamports)?;
-            ctx.accounts.miner.lifetime_sol_claimed = checked_add(
-                ctx.accounts.miner.lifetime_sol_claimed,
-                rewards.sol_lamports,
-            )?;
-        }
+        accrue_receipt_sol(
+            &mut ctx.accounts.round,
+            &mut ctx.accounts.stake_pool,
+            &mut ctx.accounts.stake_position,
+            &mut ctx.accounts.miner,
+            rewards.sol_lamports,
+        )?;
         if ctx.accounts.receipt.reward_mode == AUTO_REWARD_ACCUMULATE {
             if rewards.myne_base_units > 0 {
                 credit_mining_rewards(
@@ -1782,13 +1782,15 @@ pub mod myne_protocol {
         ctx.accounts.receipt.claimed = true;
         ctx.accounts.round.processed_receipts =
             checked_add(ctx.accounts.round.processed_receipts, 1)?;
-        emit!(ReceiptClaimed {
+        emit!(ReceiptRewardAccruedV1 {
             round_id: ctx.accounts.round.id,
             authority: ctx.accounts.beneficiary.key(),
             nonce: ctx.accounts.receipt.nonce,
             sol_lamports: rewards.sol_lamports,
             myne_base_units: rewards.myne_base_units,
             motherlode_base_units: rewards.motherlode_base_units,
+            claim_vault: ctx.accounts.stake_pool.key(),
+            pending_sol_after: ctx.accounts.stake_position.pending_sol,
         });
         Ok(())
     }
@@ -3925,6 +3927,44 @@ fn move_lamports(from: &AccountInfo<'_>, to: &AccountInfo<'_>, amount: u64) -> R
     Ok(())
 }
 
+/// Moves a settled receipt's SOL reward out of the temporary Round PDA and
+/// records it in the owner's durable claim balance. The StakePool is already
+/// the canonical SOL claim vault for every registered miner, so this preserves
+/// the deployed account layout and lets the lifecycle keeper close receipts
+/// and rounds without paying a wallet behind its owner's back.
+///
+/// This deliberately does not call `fund_stake_rewards`: receipt SOL belongs
+/// only to this receipt owner and must never enter the pro-rata staking index.
+fn accrue_receipt_sol(
+    round: &mut Account<Round>,
+    stake_pool: &mut Account<StakePool>,
+    stake_position: &mut Account<StakePosition>,
+    miner: &mut Account<Miner>,
+    amount: u64,
+) -> Result<()> {
+    if amount == 0 {
+        return Ok(());
+    }
+
+    let next_pending = checked_add(stake_position.pending_sol, amount)?;
+    let next_funded = checked_add(stake_pool.total_funded_lamports, amount)?;
+    let next_round_claimed = checked_add(round.claimed_lamports, amount)?;
+    let next_lifetime_earned = checked_add(miner.lifetime_sol_claimed, amount)?;
+
+    move_lamports(
+        &round.to_account_info(),
+        &stake_pool.to_account_info(),
+        amount,
+    )?;
+    stake_position.pending_sol = next_pending;
+    stake_pool.total_funded_lamports = next_funded;
+    round.claimed_lamports = next_round_claimed;
+    // The stable-layout field name is historical; after receipt accrual it is
+    // the miner's lifetime SOL earned, regardless of withdrawal timing.
+    miner.lifetime_sol_claimed = next_lifetime_earned;
+    Ok(())
+}
+
 /// Value a miner's unclaimed-reward shares against the pool's exact MYNE
 /// liability. Removing every share in sequence conserves every base unit: any
 /// division remainder remains in the pool and is received by the final holder.
@@ -4944,6 +4984,9 @@ pub struct RoundFeesDistributed {
     pub admin_fee_wallet: Pubkey,
 }
 #[event]
+/// Historical v6 event emitted when receipt settlement also paid SOL directly
+/// to the wallet. It remains in the IDL so the production indexer can replay
+/// pre-upgrade transactions without losing their original meaning.
 pub struct ReceiptClaimed {
     pub round_id: u64,
     pub authority: Pubkey,
@@ -4951,6 +4994,17 @@ pub struct ReceiptClaimed {
     pub sol_lamports: u64,
     pub myne_base_units: u64,
     pub motherlode_base_units: u64,
+}
+#[event]
+pub struct ReceiptRewardAccruedV1 {
+    pub round_id: u64,
+    pub authority: Pubkey,
+    pub nonce: u64,
+    pub sol_lamports: u64,
+    pub myne_base_units: u64,
+    pub motherlode_base_units: u64,
+    pub claim_vault: Pubkey,
+    pub pending_sol_after: u64,
 }
 #[event]
 pub struct ReceiptRefunded {
