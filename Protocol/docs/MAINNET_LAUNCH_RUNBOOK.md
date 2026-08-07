@@ -24,6 +24,18 @@ fee receivers are System Program accounts and pre-create the admin fallback MYNE
 service credentials for Supabase/RPC. They are not funded Solana roles and must never enter the
 repository.
 
+Keep the operational mapping in an ignored local environment file. Set
+`MAINNET_ADMIN_FEE_WALLET` to the reviewed fee recipient; the protocol intentionally uses that
+same address as the no-referrer MYNE fallback owner. If
+`MAINNET_REFERRAL_FALLBACK_WALLET` is supplied, the derivation script requires the values to match.
+Run `pnpm addresses:mainnet` to derive the deterministic accounts before initialization.
+
+Never send SOL directly to a derived PDA before its initialization transaction. A PDA has no
+private key and cannot sign; pre-funding can create an account at the derived address and prevent
+Anchor's `init` constraint from creating the intended program-owned account. Fund only the
+reviewed transaction-payer signer, set it as `MAINNET_TRANSACTION_PAYER` for the derivation report,
+and let `initialize_protocol` pay the PDA rent atomically.
+
 ## 2. Freeze and independently review the artifact
 
 Start from a clean tree and run the complete default and `--features production` Rust/keeper suites.
@@ -145,7 +157,18 @@ supabase/migrations/20260807114500_round_fee_audit.sql
 supabase/migrations/20260807130000_round_archive_verification.sql
 supabase/migrations/20260807131500_keeper_leases.sql
 supabase/migrations/20260807133000_referral_read_model_v1.sql
+supabase/migrations/20260807140000_wallet_chat_hardening.sql
+supabase/migrations/20260807141000_wallet_validator_lint_cleanup.sql
+supabase/migrations/20260807142000_chat_admin_provisioning.sql
 ```
+
+The wallet-chat cut-over invalidates old sessions and removes guest/null rows. After the final
+migration, run `pnpm chat:admin` in dry-run mode with `CHAT_ADMIN_WALLET` set from the ignored
+operational file. Apply only with `APPLY_CHAT_ADMIN=1`, the exact
+`CONFIRM_CHAT_ADMIN_WALLET`, and server-only Supabase service-role credentials. The wallet address
+must not be hardcoded in a migration or browser bundle. Sign a fresh wallet session afterward and
+prove that the delete control appears only for the moderator while `chat-delete` still rejects a
+non-admin wallet server-side.
 
 Run the event indexer from a recorded start slot with finalized reads and service-role credentials.
 Before activation, prove that a synthetic `RoundFeesDistributed` event persists every allocation

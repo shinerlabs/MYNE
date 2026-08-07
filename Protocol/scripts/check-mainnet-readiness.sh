@@ -107,6 +107,8 @@ test -f scripts/round-indexer.mjs
 test -f scripts/round-lifecycle-keeper.mjs
 test -f scripts/round-archive-policy.mjs
 test -f scripts/prepare-admin-fallback-ata.mjs
+test -f scripts/derive-mainnet-addresses.mjs
+test -f scripts/provision-chat-admin.mjs
 test -f scripts/create-mainnet-token-metadata.mjs
 test -f scripts/migrate-fee-schedule-v6.mjs
 grep -q 'CONFIRM_MAINNET_TOKEN_METADATA' scripts/create-mainnet-token-metadata.mjs
@@ -170,6 +172,11 @@ grep -q 'mine_referral_stats_v1' ../supabase/migrations/20260807133000_referral_
 grep -q 'ClaimFeeRoutedV2' scripts/round-indexer.mjs
 grep -q 'ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1' docs/MAINNET_LAUNCH_RUNBOOK.md
 grep -q 'REFERRAL_INDEXER_START_SLOT' docs/MAINNET_LAUNCH_RUNBOOK.md
+test -f ../supabase/migrations/20260807140000_wallet_chat_hardening.sql
+test -f ../supabase/migrations/20260807141000_wallet_validator_lint_cleanup.sql
+test -f ../supabase/migrations/20260807142000_chat_admin_provisioning.sql
+grep -q 'set_chat_admin' ../supabase/migrations/20260807142000_chat_admin_provisioning.sql
+grep -q 'grant execute on function public.set_chat_admin' ../supabase/migrations/20260807142000_chat_admin_provisioning.sql
 
 if [[ -z "${MAINNET_RELEASE_MANIFEST:-}" ]]; then
   echo "Set MAINNET_RELEASE_MANIFEST to the frozen, external manifest for the candidate" >&2

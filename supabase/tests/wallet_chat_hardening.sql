@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(25);
+select plan(30);
 
 select ok(
   to_regclass('public.chat_security_state') is not null,
@@ -70,6 +70,10 @@ select ok(
   to_regprocedure('public.is_chat_session_current(uuid,text)') is not null,
   'session revocation RPC exists'
 );
+select ok(
+  to_regprocedure('public.set_chat_admin(text,boolean)') is not null,
+  'service-role moderator provisioning RPC exists'
+);
 
 select ok(
   not has_function_privilege(
@@ -96,6 +100,22 @@ select ok(
   'service-role Edge Functions can consume nonces'
 );
 select ok(
+  not has_function_privilege(
+    'anon',
+    'public.set_chat_admin(text,boolean)',
+    'EXECUTE'
+  ),
+  'anon cannot provision moderators'
+);
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.set_chat_admin(text,boolean)',
+    'EXECUTE'
+  ),
+  'service role can provision moderators'
+);
+select ok(
   not has_table_privilege('anon', 'public.chat_feed', 'INSERT'),
   'anon cannot insert chat rows directly'
 );
@@ -107,6 +127,23 @@ select ok(
 insert into public.profiles (wallet_address)
 values ('11111111111111111111111111111111')
 on conflict (wallet_address) do update set banned = false;
+
+select ok(
+  public.set_chat_admin('11111111111111111111111111111111', true)
+  and exists (
+    select 1 from public.chat_admins
+    where wallet_address = '11111111111111111111111111111111'
+  ),
+  'provisioning adds the exact wallet moderator'
+);
+select ok(
+  not public.set_chat_admin('11111111111111111111111111111111', false)
+  and not exists (
+    select 1 from public.chat_admins
+    where wallet_address = '11111111111111111111111111111111'
+  ),
+  'provisioning can remove the exact wallet moderator'
+);
 
 insert into public.auth_nonces (
   nonce, wallet_address, message, purpose, expires_at

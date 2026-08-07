@@ -55,8 +55,11 @@ fee-schedule migration.
    staking rewards, referral accounting, and chat/profile flows.
 
 Before Mainnet, apply all Supabase migrations (`20260807090000_round_index.sql`,
-`20260807114500_round_fee_audit.sql`, `20260807130000_round_archive_verification.sql` and
-`20260807131500_keeper_leases.sql`, then `20260807133000_referral_read_model_v1.sql`), rebuild and
+`20260807114500_round_fee_audit.sql`, `20260807130000_round_archive_verification.sql`,
+`20260807131500_keeper_leases.sql`, `20260807133000_referral_read_model_v1.sql`,
+`20260807140000_wallet_chat_hardening.sql`,
+`20260807141000_wallet_validator_lint_cleanup.sql`, and
+`20260807142000_chat_admin_provisioning.sql`), rebuild and
 synchronize both IDLs, record a fresh SBF hash,
 and repeat the full Rust, Anchor/local-validator, keeper-policy and frontend test suites. Prior
 version-5 hashes and test output are historical only.

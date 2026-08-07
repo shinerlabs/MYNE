@@ -8,6 +8,9 @@ mining, staking, balances, payouts, referral ownership, or protocol state.
 
 Migration `20260807140000_wallet_chat_hardening.sql` is the wallet-only chat
 cut-over. Apply it immediately before deploying the matching Edge Functions.
+Apply `20260807141000_wallet_validator_lint_cleanup.sql` immediately afterward,
+then `20260807142000_chat_admin_provisioning.sql` to install the service-role-only
+moderator provisioning function.
 The migration deliberately:
 
 - rotates the global chat session epoch, invalidating every existing session;
@@ -108,12 +111,26 @@ ban enforcement.
 
 1. Back up the social tables and record the current row counts.
 2. Put chat writes into maintenance mode.
-3. Apply all pending migrations, including the wallet-only cut-over.
+3. Apply all pending migrations, including the wallet-only cut-over, validator cleanup, and chat
+   administrator provisioning migration in timestamp order.
 4. Deploy all matching Edge Functions with the MYNE origin allowlist.
-5. Confirm an old token and old nonce are rejected.
-6. Sign a fresh wallet challenge, send/react/delete as the appropriate roles,
+5. Provision moderators with the guarded `Protocol` command. Keep wallet addresses in ignored
+   operational configuration, dry-run first, then require exact confirmation:
+
+   ```bash
+   CHAT_ADMIN_WALLET=<reviewed-wallet> pnpm --dir Protocol chat:admin
+   CHAT_ADMIN_WALLET=<reviewed-wallet> \
+   CONFIRM_CHAT_ADMIN_WALLET=<reviewed-wallet> \
+   APPLY_CHAT_ADMIN=1 \
+   SUPABASE_URL=<exact-project-url> \
+   SUPABASE_SERVICE_ROLE_KEY=<server-only-key> \
+   pnpm --dir Protocol chat:admin
+   ```
+
+6. Confirm an old token and old nonce are rejected.
+7. Sign a fresh wallet challenge, send/react/delete as the appropriate roles,
    and verify direct anonymous writes fail.
-7. Re-enable the chat UI only after the smoke test passes.
+8. Re-enable the chat UI only after the smoke test passes.
 
 Periodically delete expired `auth_nonces` and rate-limit buckets older than the
 largest configured window. That cleanup is operational housekeeping and must

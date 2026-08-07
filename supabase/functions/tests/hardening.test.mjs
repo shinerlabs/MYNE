@@ -53,6 +53,14 @@ test('nonce verification uses the signed stored message and an atomic one-time c
   assert.doesNotMatch(verify, /\.update\(\{\s*used_at/);
 });
 
+test('wallet verification returns only a moderator UI hint while deletion rechecks the role', () => {
+  assert.match(verify, /from\('chat_admins'\)/);
+  assert.match(verify, /isAdmin: Boolean\(admin\)/);
+  assert.match(remove, /from\('chat_admins'\)/);
+  assert.match(remove, /eq\('wallet_address', session\.walletAddress\)/);
+  assert.match(remove, /Admin access required/);
+});
+
 test('every public function is origin guarded and every mutation is wallet/rate guarded', () => {
   for (const source of [nonce, verify, send, react, reactions, remove, profile]) {
     assert.match(source, /guardCors\(req\)/);

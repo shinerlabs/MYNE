@@ -48,6 +48,12 @@ evidence only after the final clean artifact is built, hashed and exercised by t
   deployer/upgrade/admin/direct-fee/fallback, (2) Switchboard/round/indexer/lifecycle, and (3)
   buyback. Temporary-account closure and batching provide the savings; keys are not aliased or
   consolidated further.
+- Canonical PDAs are derived offline and created by their initialization instructions; they are
+  never pre-funded. The configured admin-fee wallet is also the no-referrer MYNE fallback owner,
+  is supplied through ignored launch configuration, and is intentionally omitted from the curated
+  website address list (while remaining publicly discoverable from on-chain state).
+- Chat moderation is wallet-scoped. A service-role-only provisioning RPC manages moderator rows,
+  but every deletion is authorized again by the Edge Function; the browser role is only a UI hint.
 
 ## Superseded verification evidence
 
@@ -76,9 +82,12 @@ keeper-policy and frontend test after the final source/dependency freeze.
 3. **Production services.** Apply and verify
    `20260807090000_round_index.sql`, `20260807114500_round_fee_audit.sql` and
    `20260807130000_round_archive_verification.sql`, plus
-   `20260807131500_keeper_leases.sql` and `20260807133000_referral_read_model_v1.sql`; deploy the indexer and
-   all three supervised keepers with durable storage, alerts and restricted service-role
-   credentials. Set `ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1` and set
+   `20260807131500_keeper_leases.sql`, `20260807133000_referral_read_model_v1.sql`,
+   `20260807140000_wallet_chat_hardening.sql`,
+   `20260807141000_wallet_validator_lint_cleanup.sql` and
+   `20260807142000_chat_admin_provisioning.sql`. Deploy the indexer and all three supervised
+   keepers with durable storage, alerts and restricted service-role credentials. Set
+   `ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1` and set
    `REFERRAL_INDEXER_START_SLOT` to the program deployment slot in production.
 4. **Switchboard/Meteora canary.** Exercise uncommitted create/open/bind, deployments carrying the
    bound account, post-close commit plus on-chain commit recording, seed-slot wait, atomic

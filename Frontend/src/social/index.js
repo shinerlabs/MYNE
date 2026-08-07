@@ -1,7 +1,7 @@
 import { isSocialConfigured } from './config.js';
 import { configureSession, getSession, clearSession } from './session.js';
 import {
-  mountChat, setChatComposeEnabled, getMessageIndex,
+  mountChat, setChatAdmin, setChatComposeEnabled, getMessageIndex,
   pinChatToLatest,
 } from './chat.js';
 import {
@@ -96,6 +96,7 @@ export function mountSocial(host) {
     setChatComposeEnabled(chatAllowed, undefined, chatGate);
 
     if (!account) {
+      setChatAdmin(false);
       // Only a REAL disconnect drops the session (previous held an address).
       // At page load the account is briefly null while the wallet connection is
       // being restored — clearing here would destroy a valid 24h session on
@@ -109,6 +110,9 @@ export function mountSocial(host) {
     const session = getSession();
     if (session && session.walletAddress !== account) {
       clearSession();
+      setChatAdmin(false);
+    } else {
+      setChatAdmin(session?.isAdmin === true);
     }
     await loadMyProfile(getMessageIndex());
   };

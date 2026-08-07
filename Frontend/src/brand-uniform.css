@@ -6640,8 +6640,13 @@ body[data-route="home"] .topbar .landing-nav button:focus-visible {
   letter-spacing: -.06em;
 }
 
-.landing-copy h1 span {
-  color: #a9abb0;
+.landing-copy h1 .landing-earned {
+  display: inline-block;
+  background: var(--gld-spectrum);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 .landing-copy > p {

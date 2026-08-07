@@ -72,7 +72,20 @@ Deno.serve(async (req) => {
   if (sessionError) return json(req, { error: 'Could not start wallet session' }, 500);
   if (sessionAllowed !== true) return json(req, { error: 'This wallet cannot use chat' }, 403);
 
+  // UI hint only: chat-delete repeats this exact server-side lookup for every
+  // moderation request. Never authorize deletion from the signed token claim.
+  const { data: admin, error: adminError } = await supabase
+    .from('chat_admins')
+    .select('wallet_address')
+    .eq('wallet_address', walletAddress)
+    .maybeSingle();
+  if (adminError) return json(req, { error: 'Could not verify chat role' }, 500);
+
   const expiresAt = Date.now() + SESSION_LIFETIME_MS;
   const token = await signSession(walletAddress, expiresAt, row.session_epoch);
-  return json(req, { token, expiresAt: new Date(expiresAt).toISOString() });
+  return json(req, {
+    token,
+    expiresAt: new Date(expiresAt).toISOString(),
+    isAdmin: Boolean(admin),
+  });
 });

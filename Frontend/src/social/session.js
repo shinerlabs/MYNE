@@ -1,8 +1,9 @@
 import { getProvider } from '../chain/client.js';
 import { FUNCTIONS_URL, fetchJson } from './config.js';
 
-const CHAT_SESSION_KEY = 'myne-solana-chat-session-v2';
+const CHAT_SESSION_KEY = 'myne-solana-chat-session-v3';
 const RETIRED_CHAT_SESSION_KEYS = [
+  'myne-solana-chat-session-v2',
   'myne-solana-chat-session-v1',
   'gld-solana-chat-session',
 ];
@@ -17,7 +18,9 @@ export const configureSession = (opts) => {
 function loadStoredSession() {
   try {
     const stored = JSON.parse(localStorage.getItem(CHAT_SESSION_KEY));
-    if (stored?.token && new Date(stored.expiresAt).getTime() >= Date.now()) return stored;
+    if (stored?.token && new Date(stored.expiresAt).getTime() >= Date.now()) {
+      return { ...stored, isAdmin: stored.isAdmin === true };
+    }
   } catch { /* ignore malformed or unavailable storage */ }
   return null;
 }
@@ -59,7 +62,15 @@ async function signIn(provider, walletAddress) {
   });
   if (!res.ok) throw new Error(data.error || 'Signature verification failed');
   if (!data.token) throw new Error('Session token missing from the server response');
-  const next = { token: data.token, walletAddress, expiresAt: data.expiresAt };
+  // This is a display hint only. The delete Edge Function independently checks
+  // chat_admins on every request, so a modified browser session cannot grant
+  // moderation authority.
+  const next = {
+    token: data.token,
+    walletAddress,
+    expiresAt: data.expiresAt,
+    isAdmin: data.isAdmin === true,
+  };
   saveSession(next);
   return next;
 }

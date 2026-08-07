@@ -11,6 +11,7 @@ const renderer = source.slice(
 test('transparency page omits externally controlled operational wallets', () => {
   for (const label of [
     'Buyback wallet',
+    'Admin fee wallet',
     'Referral fallback wallet',
     'Protocol administrator',
     'Upgrade authority',

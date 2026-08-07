@@ -282,7 +282,7 @@ document.querySelector('#app').innerHTML = `
   <main class="landing-page page-view active" data-page="home">
     <section class="landing-hero" aria-labelledby="landing-title">
       <div class="landing-copy">
-        <h1 id="landing-title">Value should<br/><span>be earned.</span></h1>
+        <h1 id="landing-title">Value should<br/>be <span class="landing-earned">earned.</span></h1>
         <p>MYNE is built on a simple belief: digital value should be open to earn, finite by design, and transparent to everyone.</p>
         <div class="landing-actions">
           <button class="landing-primary" data-route="mine">MINE</button>

@@ -36,7 +36,34 @@ let chatCharCountEl = null;
 let chatHintEl = null;
 let chatCanSend = true;
 
-export const setChatAdmin = (value) => { isChatAdmin = Boolean(value); };
+const syncAdminDeleteControl = (entry) => {
+  const actions = entry?.el?.querySelector('.chat-msg-actions');
+  if (!actions) return;
+  const existing = actions.querySelector('.chat-msg-delete');
+  if (!isChatAdmin || entry.id == null) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'chat-msg-delete';
+  delBtn.title = 'Delete message';
+  delBtn.setAttribute('aria-label', 'Delete message');
+  delBtn.textContent = '⌫';
+  delBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    deleteChatMessage(entry.id);
+  });
+  actions.append(delBtn);
+};
+
+export const setChatAdmin = (value) => {
+  const next = Boolean(value);
+  if (next === isChatAdmin) return;
+  isChatAdmin = next;
+  for (const entry of new Set(messageIndex.values())) syncAdminDeleteControl(entry);
+};
 export const getMessageIndex = () => messageIndex;
 
 // ------------------------------------------------------------------ status
@@ -199,11 +226,12 @@ async function toggleReaction(messageId, emoji) {
   }
 
   try {
-    const { res, data } = await authedFetchJson(`${FUNCTIONS_URL}/chat-react`, {
+    const { res, data, session } = await authedFetchJson(`${FUNCTIONS_URL}/chat-react`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messageId: mid, emoji }),
     });
+    setChatAdmin(session?.isAdmin === true);
     if (!res.ok) throw new Error(data.error || 'Reaction failed');
     if (entry) { entry.reactions.set(emoji, data.count); renderReactionBar(entry, entry.reactions); }
     if (data.reacted) myReactions.add(key); else myReactions.delete(key);
@@ -350,17 +378,6 @@ const renderChatMessage = (row) => {
   reactBtn.addEventListener('click', (e) => { e.stopPropagation(); openEmojiPicker(e.currentTarget, m.id); });
   actions.append(replyBtn, reactBtn);
 
-  if (isChatAdmin && m.id != null) {
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'chat-msg-delete';
-    delBtn.title = 'Delete message';
-    delBtn.setAttribute('aria-label', 'Delete message');
-    delBtn.textContent = '⌫';
-    delBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteChatMessage(m.id); });
-    actions.append(delBtn);
-  }
-
   const t = document.createElement('time');
   t.textContent = new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   header.append(b, actions, t);
@@ -415,6 +432,7 @@ const renderChatMessage = (row) => {
     messageIndex.set(Number(m.id), entry);
     messageIndex.set(String(m.id), entry);
   }
+  syncAdminDeleteControl(entry);
   renderReactionBar(entry, entry.reactions);
 
   bindProfileHover(b, m.wallet);
@@ -528,11 +546,12 @@ async function deleteChatMessage(messageId) {
   if (!isChatAdmin) return;
   if (!host.requireWallet('Delete messages')) return;
   try {
-    const { res, data } = await authedFetchJson(`${FUNCTIONS_URL}/chat-delete`, {
+    const { res, data, session } = await authedFetchJson(`${FUNCTIONS_URL}/chat-delete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messageId: Number(messageId) }),
     });
+    setChatAdmin(session?.isAdmin === true);
     if (!res.ok) throw new Error(data.error || 'Delete failed');
     removeChatMessageLocal(messageId);
     host.notify('Message deleted');
@@ -619,6 +638,7 @@ async function sendChatMessage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body: outboundBody }),
     });
+    setChatAdmin(session?.isAdmin === true);
     if (!res.ok) {
       host.notify(data.error || 'Message failed to send');
       restore();
