@@ -56,6 +56,18 @@ test('Switchboard keeper owns compute-budget construction without SDK duplicates
   assert.doesNotMatch(source, /sb\.asV0Tx/);
 });
 
+test('Switchboard keeper tolerates confirmed-state RPC propagation lag', async () => {
+  const source = await readFile(
+    new URL('../scripts/switchboard-round-keeper.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /const fetchRoundWithRetry = async \(predicate, label\)/);
+  assert.match(source, /Round creation and randomness binding/);
+  assert.match(source, /Randomness commitment recording/);
+  assert.match(source, /Verified round settlement/);
+  assert.match(source, /Math\.min\(4_000, 250 \* \(2 \*\* attempt\)\)/);
+});
+
 test('manual and demo clients supply the deploy randomness account explicitly', async () => {
   const [lottery, capabilities, localKeeper, localTest] = await Promise.all([
     readFile(new URL('../../Frontend/src/chain/lottery.js', import.meta.url), 'utf8'),

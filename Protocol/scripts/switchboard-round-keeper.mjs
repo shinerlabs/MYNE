@@ -96,13 +96,13 @@ const buildKeeperTransaction = async (ixs, extraSigners, units) => {
     recentBlockhash: blockhash,
     payerKey: keypair.publicKey,
     instructions: [
-    ComputeBudgetProgram.setComputeUnitLimit({ units }),
-    ...(Number(process.env.KEEPER_PRIORITY_MICROLAMPORTS || 0) > 0
-      ? [ComputeBudgetProgram.setComputeUnitPrice({
-        microLamports: Math.min(1_000_000, Number(process.env.KEEPER_PRIORITY_MICROLAMPORTS)),
-      })]
-      : []),
-    ...ixs,
+      ComputeBudgetProgram.setComputeUnitLimit({ units }),
+      ...(Number(process.env.KEEPER_PRIORITY_MICROLAMPORTS || 0) > 0
+        ? [ComputeBudgetProgram.setComputeUnitPrice({
+          microLamports: Math.min(1_000_000, Number(process.env.KEEPER_PRIORITY_MICROLAMPORTS)),
+        })]
+        : []),
+      ...ixs,
     ],
   }).compileToV0Message();
   const transaction = new VersionedTransaction(message);
@@ -144,6 +144,20 @@ const waitForChainTimestamp = async (target) => {
     await sleep(Math.min(5_000, Math.max(400, remaining * 1_000)));
   }
 };
+const fetchRoundWithRetry = async (predicate, label) => {
+  let lastError = null;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      const state = await myne.account.round.fetchNullable(round);
+      if (state && predicate(state)) return state;
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(Math.min(4_000, 250 * (2 ** attempt)));
+  }
+  const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
+  throw new Error(`${label} was confirmed but the expected round state did not become visible${detail}`);
+};
 
 let roundState = await myne.account.round.fetchNullable(round);
 let randomnessPubkey = roundState?.randomnessAccount ?? null;
@@ -174,7 +188,10 @@ if (!roundState) {
     [createIx, openIx, bindIx],
     [randomnessKeypair],
   )).signature;
-  roundState = await myne.account.round.fetch(round);
+  roundState = await fetchRoundWithRetry(
+    (state) => state.randomnessAccount.equals(randomnessPubkey),
+    'Round creation and randomness binding',
+  );
 } else {
   assert.ok(!randomnessPubkey.equals(PublicKey.default), 'Existing round has no bound randomness account');
 }
@@ -299,7 +316,10 @@ if (!roundState.settled && asBigInt(roundState.randomnessCommitSlot) === 0n) {
     .accounts({ config, round, randomnessAccount: randomnessPubkey, authority: keypair.publicKey })
     .instruction();
   commitSig = (await sendKeeperInstructions([commitIx, recordIx])).signature;
-  roundState = await myne.account.round.fetch(round);
+  roundState = await fetchRoundWithRetry(
+    (state) => asBigInt(state.randomnessCommitSlot) > 0n,
+    'Randomness commitment recording',
+  );
   assert.ok(asBigInt(roundState.randomnessCommitSlot) > 0n, 'MYNE did not record the Switchboard commitment');
   console.log(JSON.stringify({
     event: 'randomness-committed',
@@ -349,7 +369,10 @@ const settleIx = await myne.methods
   })
   .instruction();
 settleSig = (await sendKeeperInstructions([revealIx, settleIx])).signature;
-roundState = await myne.account.round.fetch(round);
+roundState = await fetchRoundWithRetry(
+  (state) => state.settled,
+  'Verified round settlement',
+);
 }
 console.log(JSON.stringify({
   ok: true,
