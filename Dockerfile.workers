@@ -1,0 +1,30 @@
+FROM node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8 AS dependencies
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
+
+WORKDIR /app/Protocol
+COPY Protocol/package.json Protocol/pnpm-lock.yaml Protocol/pnpm-workspace.yaml ./
+COPY Protocol/vendor ./vendor
+RUN pnpm install --prod --frozen-lockfile
+
+FROM node:24.14.0-bookworm-slim@sha256:d8e448a56fc63242f70026718378bd4b00f8c82e78d20eefb199224a4d8e33d8 AS runtime
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates dumb-init gosu \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app/Protocol
+COPY --from=dependencies --chown=node:node /app/Protocol/node_modules ./node_modules
+COPY --chown=node:node Protocol/package.json ./package.json
+COPY --chown=node:node Protocol/scripts ./scripts
+COPY --chown=node:node Frontend/src/generated/myne_protocol.json ./target/idl/myne_protocol.json
+COPY --chmod=755 docker/worker-entrypoint.sh /usr/local/bin/myne-worker-entrypoint
+
+ENV NODE_ENV=production
+ENV PORT=8080
+EXPOSE 8080
+
+ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/myne-worker-entrypoint"]
+CMD ["node", "scripts/production-worker-host.mjs"]

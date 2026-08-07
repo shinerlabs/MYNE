@@ -231,6 +231,9 @@ Supervise all indexer/keeper processes with durable logs, restart policy and ale
 The live buyback keeper also requires the service-role-only database lease from the final migration;
 its 10-minute default fence prevents overlapping replicas from spending the same allocation. Keep
 its journal on one durable, backed-up volume and never bypass the lease during an unresolved swap.
+The reviewed managed-host layout, standby checks, secret boundaries, one-replica rule and incident
+procedure are defined in `WORKER_HOSTING.md`. Deploy and prove that service in standby while the
+protocol is paused; do not use a laptop or browser tab as the production supervisor.
 
 Switchboard also creates an auxiliary lookup table for each randomness request. `closeIx()` closes
 the randomness account after the verification window, but later LUT rent recovery requires the

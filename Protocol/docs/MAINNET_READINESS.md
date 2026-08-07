@@ -98,6 +98,8 @@ keeper-policy and frontend test after the final source/dependency freeze.
    keepers with durable storage, alerts and restricted service-role credentials. Set
    `ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1` and set
    `REFERRAL_INDEXER_START_SLOT` to the program deployment slot in production.
+   Use the managed standby-to-live procedure in `WORKER_HOSTING.md`; a healthy standby deployment
+   is required evidence but is not permission to unpause.
 4. **Switchboard/Meteora canary.** Exercise uncommitted create/open/bind, deployments carrying the
    bound account, post-close commit plus on-chain commit recording, seed-slot wait, atomic
    reveal/settle, early-commit rejection, missed reveal/refunds, archive/cleanup, delayed

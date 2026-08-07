@@ -1,0 +1,25 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "Dockerfile.workers",
+    "watchPatterns": [
+      "/Protocol/package.json",
+      "/Protocol/pnpm-lock.yaml",
+      "/Protocol/pnpm-workspace.yaml",
+      "/Protocol/vendor/**",
+      "/Protocol/scripts/**",
+      "/Frontend/src/generated/myne_protocol.json",
+      "/Dockerfile.workers",
+      "/docker/worker-entrypoint.sh",
+      "/railway.json"
+    ]
+  },
+  "deploy": {
+    "healthcheckPath": "/healthz",
+    "healthcheckTimeout": 120,
+    "restartPolicyType": "ALWAYS",
+    "overlapSeconds": 0,
+    "drainingSeconds": 45
+  }
+}

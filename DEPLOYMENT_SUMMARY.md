@@ -3,10 +3,15 @@
 ## Current deployment
 
 - Live site: https://www.myne.supply
-- Current public network: Solana devnet (pre-launch; keep this unchanged until Mainnet state is deployed and verified)
+- Current public network: Solana Mainnet beta
+- Program: `D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e` (version 6, deployed and paused)
+- MYNE mint: `BcpJWJpL82D8qdcdb1RoP3TAfD3TKL9fJkpvHw1QWUWt`
+- Registered Meteora DAMM v2 pool: `7r1Y2qbKLbh1Tyopta86BYBe4aX5M1ucKN6n4G6ZqBZN`
 - Frontend: `Frontend/` (Vite)
 - Hosting: Vercel project `myne-upph`
 - Supabase project: `tfyvarplanptbknnqzwn`
+- Production workers: Railway project `MYNE-Production`, service `myne-protocol-workers`
+  (healthy standby; transaction-producing workers disabled)
 
 The production build is deployed directly from the repository workspace. GitHub Desktop can
 push this commit to `main`; the connected Vercel project will then build from GitHub as usual.
@@ -16,10 +21,10 @@ push this commit to `main`; the connected Vercel project will then build from Gi
 Set these Vercel variables for Preview and Production deployments:
 
 ```text
-VITE_SOLANA_CLUSTER=devnet
-VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
+VITE_SOLANA_CLUSTER=mainnet-beta
+VITE_SOLANA_RPC_URL=<restricted public Mainnet browser RPC>
 VITE_MYNE_PROGRAM_ID=D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e
-VITE_MYNE_MINT_ADDRESS=83LAMprbD2WJV6Yd4gDbxR1ex2dZchjEcPXjhNp9ntHb
+VITE_MYNE_MINT_ADDRESS=BcpJWJpL82D8qdcdb1RoP3TAfD3TKL9fJkpvHw1QWUWt
 VITE_SUPABASE_URL=https://tfyvarplanptbknnqzwn.supabase.co
 VITE_SUPABASE_ANON_KEY=<publishable Supabase key>
 ```
@@ -39,20 +44,20 @@ direct admin and 7.2% net staker rewards; 2% Motherlode; 1% buyback/burn; and 1%
 admin receives 1.8% directly before the documented integer-dust adjustment. The admin, randomness
 and buyback addresses must be three distinct controlled funded roles.
 
-## Verification before devnet testing
+## Verification before Mainnet activation
 
-The currently deployed Devnet state predates version 6. Do not treat the public UI or the old
-deployment as validation of the new receipt lifecycle; perform a controlled migration or fresh
-version-6 rehearsal first. Only a compatible paused version-5 config may use the reviewed one-way
-fee-schedule migration.
+The deployed Mainnet program is intentionally paused. A healthy website, pool and standby worker
+host are necessary launch evidence, but they are not authorization to unpause. Follow the exact
+artifact, independent-review, canary, service and legal gates in
+`Protocol/docs/MAINNET_LAUNCH_RUNBOOK.md`.
 
 1. In `Frontend/`, run `pnpm install --frozen-lockfile`, `pnpm test`, and `pnpm build`.
 2. In `Protocol/`, install with the frozen lockfile and run the local validator, Anchor and policy
    suites documented in `Protocol/README.md`.
-3. Confirm the official Meteora pool registration and minimum reserves.
+3. Confirm the exact registered Meteora pool, decoded vaults and minimum reserves.
 4. Confirm the deployed program and mint addresses match the Vercel variables.
-5. Connect a devnet wallet, place a test bid, and verify round history, previous-round miners,
-   staking rewards, referral accounting, and chat/profile flows.
+5. Keep Railway in standby until the independent review and controlled canary are signed off.
+   The hosting and incident procedure is in `Protocol/docs/WORKER_HOSTING.md`.
 
 Before Mainnet, apply all Supabase migrations (`20260807090000_round_index.sql`,
 `20260807114500_round_fee_audit.sql`, `20260807130000_round_archive_verification.sql`,

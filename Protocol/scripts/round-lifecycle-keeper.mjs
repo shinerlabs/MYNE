@@ -285,7 +285,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-tick', results: await lifecycleTick() }));
     } catch (error) {
       console.error(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-error', message: String(error) }));
-      if (process.env.FAIL_FAST === '1') process.exitCode = 1;
+      if (process.env.FAIL_FAST === '1') {
+        process.exitCode = 1;
+        break;
+      }
     }
     if (!once) await sleep(intervalMs);
   } while (!once);

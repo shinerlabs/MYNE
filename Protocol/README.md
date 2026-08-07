@@ -86,10 +86,14 @@ transaction:
   deterministic archive proofs;
 - `round:lifecycle` batches permissionless settlements/refunds and closes archived PDAs;
 - `buyback:keeper` performs and indexes direct Meteora swap/burn evidence;
+- `workers:production` supervises all four services on the managed host, defaulting to a
+  transaction-free standby health check;
 - `prepare:admin-ata` creates the one canonical fallback fee token account after mint creation.
 
 These services use indexed addresses and exact on-chain revalidation; they do not scan every
-program-owned account in production.
+program-owned account in production. The Railway container, secret boundaries, persistent volume,
+standby-to-live controls and incident procedure are documented in
+[`docs/WORKER_HOSTING.md`](docs/WORKER_HOSTING.md).
 
 ## Mainnet-candidate boundary
 
