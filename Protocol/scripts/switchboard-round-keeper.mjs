@@ -234,6 +234,13 @@ const waitForChainTimestamp = async (target) => {
     await sleep(Math.min(5_000, Math.max(400, remaining * 1_000)));
   }
 };
+const waitForScheduledTimestamp = async (target) => {
+  for (;;) {
+    const remainingMs = target * 1_000 - Date.now();
+    if (remainingMs <= 0) return;
+    await sleep(Math.min(2_000, Math.max(100, remainingMs)));
+  }
+};
 const fetchRoundWithRetry = async (predicate, label) => {
   let lastError = null;
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -296,6 +303,7 @@ if (!roundState) {
 
 const randomnessClient = new sb.Randomness(switchboardProgram, randomnessPubkey);
 const asBigInt = (value) => BigInt(value?.toString?.() ?? value ?? 0);
+const openedAt = Number(roundState.openedAt.toString());
 const bettingEndsAt = Number(roundState.bettingEndsAt.toString());
 const refundAt = Number(roundState.refundAt.toString());
 if (!roundState.settled && (await chainTimeSeconds()) >= refundAt) {
@@ -337,6 +345,9 @@ console.log(JSON.stringify({
 // Execute every funded active Auto-round plan during the betting window. The
 // plan PDA, miner PDA and receipt PDA are all bound to the plan authority, so
 // the keeper cannot change tile amounts or redirect funds.
+// A provider-backed round may be created and bound during its preparation
+// lead, but the program deliberately rejects every wager before `opened_at`.
+await waitForScheduledTimestamp(openedAt);
 const autoExecutions = [];
 const receiptRent = BigInt(await connection.getMinimumBalanceForRentExemption(468));
 let activePlanIndex = [];

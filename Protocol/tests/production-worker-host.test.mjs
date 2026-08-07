@@ -53,9 +53,46 @@ test('live supervisor defines every required worker with separated wallets', () 
   assert.equal(specs.find((spec) => spec.name === 'buyback-keeper').env.DRY_RUN, '0');
   assert.equal(specs.find((spec) => spec.name === 'buyback-keeper').env.BUYBACK_STATE_PATH, '/data/buyback-state.json');
   assert.equal(specs.find((spec) => spec.name === 'round-indexer').env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE, '1');
+  const roundKeeper = specs.find((spec) => spec.name === 'round-keeper');
+  assert.equal(roundKeeper.script, 'switchboard-round-keeper.mjs');
+  assert.equal(roundKeeper.perRound, true);
   for (const spec of specs.filter((entry) => entry.name !== 'buyback-keeper')) {
     assert.equal(spec.walletPath, '/tmp/randomness.json');
   }
+});
+
+test('server mode selects the durable commit-reveal keeper without removing Switchboard support', () => {
+  const specs = liveWorkerSpecs({
+    programId: DEFAULT_PROGRAM_ID,
+    randomnessWalletPath: '/tmp/randomness.json',
+    buybackWalletPath: '/tmp/buyback.json',
+    dataDir: '/data',
+    randomnessMode: 'server',
+  });
+  const keeper = specs.find((spec) => spec.name === 'round-keeper');
+  assert.equal(keeper.script, 'server-round-keeper.mjs');
+  assert.equal(keeper.env.SERVER_RANDOMNESS_KEEPER_LIVE, DEFAULT_PROGRAM_ID);
+  assert.equal(keeper.env.SERVER_RANDOMNESS_STATE_DIR, '/data/server-randomness');
+  assert.equal(keeper.perRound, true);
+  assert.throws(() => liveWorkerSpecs({
+    programId: DEFAULT_PROGRAM_ID,
+    randomnessWalletPath: '/tmp/randomness.json',
+    buybackWalletPath: '/tmp/buyback.json',
+    dataDir: '/data',
+    randomnessMode: 'unknown',
+  }), /switchboard or server/);
+});
+
+test('round workers overlap by explicit id instead of waiting for the prior reveal process', async () => {
+  const source = await readFile(
+    new URL('../scripts/production-worker-host.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /roundIdsToPrepare\(\{/);
+  assert.match(source, /MYNE_ROUND_ID: id/);
+  assert.match(source, /const instance = roundInstance\(id\)/);
+  assert.match(source, /schedule\(scheduleRoundWorkers, 500\)/);
+  assert.doesNotMatch(source, /spec\.oneShot && code === 0[\s\S]*5_000/);
 });
 
 test('production Switchboard workers never depend on a host Solana CLI config', async () => {

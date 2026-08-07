@@ -603,6 +603,7 @@ assert.equal(feeEvent.motherlodeLamports.toString(), '13000000');
 assert.equal(feeEvent.miningAdminLamports.toString(), '6500000');
 assert.equal(feeEvent.adminTotalLamports.toString(), '11700000');
 assert.ok(feeEvent.adminFeeWallet.equals(fallbackOwner.publicKey));
+const claimVaultLamportsBeforeReceipts = await provider.connection.getBalance(stakePool, 'confirmed');
 for (const nonce of [new BN(10), new BN(11)]) {
   await program.methods
     .claimReceipt()
@@ -611,14 +612,34 @@ for (const nonce of [new BN(10), new BN(11)]) {
 }
 const stakePoolBeforeAutoBurn = await program.account.stakePool.fetch(stakePool);
 const positionBeforeAutoBurn = await program.account.stakePosition.fetch(stakePosition);
-await program.methods
+const autoBurnBeneficiaryBefore = await provider.connection.getBalance(payer.publicKey, 'confirmed');
+const autoBurnSignature = await program.methods
   .claimAutoBurnReceipt()
   .accounts({
     config, miningPool, stakePool, miner, stakePosition, round,
     receipt: receiptFor(payer.publicKey, new BN(0)), beneficiary: payer.publicKey,
-    executor: payer.publicKey,
+    executor: rogue.publicKey,
   })
+  .signers([rogue])
   .rpc();
+const autoBurnTransaction = await provider.connection.getTransaction(autoBurnSignature, {
+  commitment: 'confirmed', maxSupportedTransactionVersion: 0,
+});
+assert.ok(autoBurnTransaction?.meta, 'Auto-burn receipt transaction is unavailable');
+const autoBurnBeneficiaryAfter = await provider.connection.getBalance(payer.publicKey, 'confirmed');
+assert.equal(
+  autoBurnBeneficiaryAfter - autoBurnBeneficiaryBefore,
+  -autoBurnTransaction.meta.fee,
+  'Permissionless Auto-burn accrual must not transfer reward SOL to its beneficiary',
+);
+const autoBurnEvents = [...new EventParser(PROGRAM_ID, program.coder)
+  .parseLogs(autoBurnTransaction.meta.logMessages ?? [])];
+const autoBurnAccrual = autoBurnEvents.find(({ name }) => (
+  name === 'ReceiptRewardAccruedV1' || name === 'receiptRewardAccruedV1'
+))?.data;
+assert.ok(autoBurnAccrual, 'Auto-burn settlement must emit the versioned accrual event');
+assert.ok(autoBurnAccrual.claimVault.equals(stakePool));
+assert.equal(autoBurnAccrual.solLamports.toString(), '47666667');
 await assert.rejects(
   program.methods
     .settleReceipt()
@@ -630,6 +651,9 @@ await assert.rejects(
     .rpc(),
   /InvalidReceiptAuthority|receipt authority|custom program error/i,
 );
+const rogueBalanceBeforeAccrual = await provider.connection.getBalance(rogue.publicKey, 'confirmed');
+const roguePositionBeforeAccrual = await program.account.stakePosition.fetch(rogueStakePosition);
+const claimVaultBeforeRogueAccrual = await provider.connection.getBalance(stakePool, 'confirmed');
 await program.methods
   .settleReceipt()
   .accounts({
@@ -638,6 +662,25 @@ await program.methods
     executor: payer.publicKey,
   })
   .rpc();
+const rogueBalanceAfterAccrual = await provider.connection.getBalance(rogue.publicKey, 'confirmed');
+const roguePositionAfterAccrual = await program.account.stakePosition.fetch(rogueStakePosition);
+const claimVaultAfterRogueAccrual = await provider.connection.getBalance(stakePool, 'confirmed');
+assert.equal(
+  rogueBalanceAfterAccrual,
+  rogueBalanceBeforeAccrual,
+  'Permissionless receipt processing must leave the beneficiary wallet unchanged',
+);
+assert.equal(
+  BigInt(roguePositionAfterAccrual.pendingSol.toString())
+    - BigInt(roguePositionBeforeAccrual.pendingSol.toString()),
+  47_666_667n,
+  'The exact receipt SOL reward accrues to its canonical claim balance',
+);
+assert.equal(
+  BigInt(claimVaultAfterRogueAccrual - claimVaultBeforeRogueAccrual),
+  47_666_667n,
+  'The exact receipt SOL reward moves from Round to the claim vault',
+);
 await assert.rejects(
   program.methods
     .archiveRound([...Buffer.alloc(32, 7)])
@@ -663,6 +706,11 @@ assert.equal(roundState.totalReceipts.toString(), '5');
 assert.equal(roundState.processedReceipts.toString(), '5');
 assert.equal(roundState.closedReceipts.toString(), '0');
 assert.equal(roundState.buybackCompleted, true);
+assert.equal(
+  BigInt((await provider.connection.getBalance(stakePool, 'confirmed')) - claimVaultLamportsBeforeReceipts),
+  572_000_000n,
+  'Every player payout leaves the temporary round and remains in the durable claim vault',
+);
 const settledConfig = await program.account.protocolConfig.fetch(config);
 assert.equal(settledConfig.motherlodeLamports.toString(), '13000000');
 const autoBurnPosition = await program.account.stakePosition.fetch(stakePosition);
@@ -826,8 +874,10 @@ await program.methods
   .accounts({ stakePool, stakePosition, authority: payer.publicKey })
   .rpc();
 const stakePoolState = await program.account.stakePool.fetch(stakePool);
-assert.equal(stakePoolState.totalFundedLamports.toString(), '146800000');
-assert.equal(stakePoolState.totalClaimedLamports.toString(), '146800000');
+const payerPositionAfterSolClaim = await program.account.stakePosition.fetch(stakePosition);
+assert.equal(payerPositionAfterSolClaim.pendingSol.toString(), '0');
+assert.equal(stakePoolState.totalFundedLamports.toString(), '718800000');
+assert.equal(stakePoolState.totalClaimedLamports.toString(), '671133333');
 
 const archiveHash = [...createHash('sha256').update('local-round-0-canonical-snapshot').digest()];
 await assert.rejects(
@@ -884,6 +934,26 @@ await program.methods
   .accounts({ round, rentPayer: payer.publicKey, executor: payer.publicKey })
   .rpc();
 assert.equal(await program.account.round.fetchNullable(round), null);
+
+// Closing the temporary receipt and round accounts cannot strand or auto-pay
+// the user's durable SOL claim. The owner may withdraw it afterwards, and a
+// different fee payer cannot redirect a single lamport.
+const rogueBalanceBeforeClaim = await provider.connection.getBalance(rogue.publicKey, 'confirmed');
+await program.methods
+  .claimStakingRewards()
+  .accounts({ stakePool, stakePosition: rogueStakePosition, authority: rogue.publicKey })
+  .signers([rogue])
+  .rpc();
+const rogueBalanceAfterClaim = await provider.connection.getBalance(rogue.publicKey, 'confirmed');
+assert.equal(
+  BigInt(rogueBalanceAfterClaim - rogueBalanceBeforeClaim),
+  47_666_667n,
+  'Only the owner-signed claim transfers the accrued SOL to the beneficiary wallet',
+);
+const roguePositionAfterClaim = await program.account.stakePosition.fetch(rogueStakePosition);
+const fullyClaimedStakePool = await program.account.stakePool.fetch(stakePool);
+assert.equal(roguePositionAfterClaim.pendingSol.toString(), '0');
+assert.equal(fullyClaimedStakePool.totalClaimedLamports.toString(), '718800000');
 
 await program.methods
   .proposeAdmin(rogue.publicKey)

@@ -14,6 +14,10 @@ import { fileURLToPath } from 'node:url';
 import anchor from '@anchor-lang/core';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
+import {
+  PROVIDER_PREPARATION_LEAD_SECONDS,
+  roundIdsToPrepare,
+} from './round-schedule-policy.mjs';
 
 const { AnchorProvider, Program, Wallet } = anchor;
 export const DEFAULT_PROGRAM_ID = 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e';
@@ -21,7 +25,7 @@ export const WORKER_NAMES = Object.freeze([
   'round-indexer',
   'round-lifecycle',
   'buyback-keeper',
-  'switchboard-round-keeper',
+  'round-keeper',
 ]);
 
 export function requiredEnv(env, name) {
@@ -57,7 +61,17 @@ export function workerMode(env) {
   return mode;
 }
 
-export function liveWorkerSpecs({ programId, randomnessWalletPath, buybackWalletPath, dataDir }) {
+export function liveWorkerSpecs({
+  programId,
+  randomnessWalletPath,
+  buybackWalletPath,
+  dataDir,
+  randomnessMode = 'switchboard',
+}) {
+  assert.ok(
+    randomnessMode === 'switchboard' || randomnessMode === 'server',
+    'randomnessMode must be switchboard or server',
+  );
   return [
     {
       name: 'round-indexer',
@@ -86,13 +100,18 @@ export function liveWorkerSpecs({ programId, randomnessWalletPath, buybackWallet
       },
     },
     {
-      name: 'switchboard-round-keeper',
-      script: 'switchboard-round-keeper.mjs',
+      name: 'round-keeper',
+      script: randomnessMode === 'server'
+        ? 'server-round-keeper.mjs'
+        : 'switchboard-round-keeper.mjs',
       walletPath: randomnessWalletPath,
-      env: {
-        SWITCHBOARD_KEEPER_LIVE: programId,
-      },
-      oneShot: true,
+      env: randomnessMode === 'server'
+        ? {
+          SERVER_RANDOMNESS_KEEPER_LIVE: programId,
+          SERVER_RANDOMNESS_STATE_DIR: `${dataDir}/server-randomness`,
+        }
+        : { SWITCHBOARD_KEEPER_LIVE: programId },
+      perRound: true,
     },
   ];
 }
@@ -191,13 +210,17 @@ export async function main(env = process.env) {
   const program = new Program(idl, provider);
   const [configAddress] = PublicKey.findProgramAddressSync([Buffer.from('config')], programId);
   const [gateAddress] = PublicKey.findProgramAddressSync([Buffer.from('liquidity_gate')], programId);
+  let validatedRandomnessMode = null;
+  let validatedRoundSchedule = null;
 
   const validate = async () => {
     const genesisHash = await connection.getGenesisHash();
     const config = await program.account.protocolConfig.fetch(configAddress);
+    const serverRandomness = config.randomnessProgram.equals(programId);
     const network = requireMatchingSolanaNetwork({
       genesisHash,
       randomnessProgram: config.randomnessProgram.toBase58(),
+      serverRandomnessProgram: programId.toBase58(),
     });
     assert.equal(network, 'mainnet-beta', 'Production worker host requires Solana Mainnet');
     assert.equal(Number(config.version), 6, 'Production worker host requires protocol v6');
@@ -207,6 +230,22 @@ export async function main(env = process.env) {
       'Randomness keypair does not match the configured authority',
     );
     assert.ok(config.buybackWallet.equals(buyback.publicKey), 'Buyback keypair does not match config');
+    const bettingDurationSeconds = Number(config.bettingDurationSeconds.toString());
+    const roundDurationSeconds = Number(config.roundDurationSeconds.toString());
+    const initializedAt = Number(config.initializedAt.toString());
+    assert.equal(
+      bettingDurationSeconds,
+      PROVIDER_PREPARATION_LEAD_SECONDS,
+      'Worker preparation lead must match the deployed v6 betting duration',
+    );
+    assert.ok(
+      Number.isSafeInteger(roundDurationSeconds)
+        && roundDurationSeconds > PROVIDER_PREPARATION_LEAD_SECONDS,
+      'Configured round duration is invalid',
+    );
+    assert.ok(Number.isSafeInteger(initializedAt), 'Configured genesis timestamp is invalid');
+    validatedRandomnessMode = serverRandomness ? 'server' : 'switchboard';
+    validatedRoundSchedule = { initializedAt, roundDurationSeconds };
     const gate = await program.account.liquidityGate.fetch(gateAddress);
     assert.equal(gate.verified, true, 'Meteora liquidity gate is not verified');
     assert.ok(!gate.pool.equals(PublicKey.default), 'Meteora liquidity pool is missing');
@@ -296,6 +335,7 @@ export async function main(env = process.env) {
       randomnessWalletPath,
       buybackWalletPath,
       dataDir,
+      randomnessMode: validatedRandomnessMode,
     });
 
     const startWorker = (spec) => {
@@ -315,16 +355,100 @@ export async function main(env = process.env) {
         if (stopping) return;
         const healthyRun = Date.now() - startedAt >= 60_000;
         status.restarts = healthyRun ? 1 : status.restarts + 1;
-        const delay = spec.oneShot && code === 0
-          ? 5_000
-          : Math.min(60_000, 1_000 * (2 ** Math.min(status.restarts, 6)));
+        const delay = Math.min(60_000, 1_000 * (2 ** Math.min(status.restarts, 6)));
         console.error(JSON.stringify({
           event: 'worker-exited', worker: spec.name, code, signal, restartInMs: delay,
         }));
         schedule(() => startWorker(spec), delay);
       });
     };
-    for (const spec of specs) startWorker(spec);
+
+    const roundSpec = specs.find((spec) => spec.perRound);
+    assert.ok(roundSpec, 'A per-round randomness keeper is required');
+    const launchedRounds = new Set();
+    const roundRestartAttempts = new Map();
+    const roundInstance = (roundId) => `${roundSpec.name}:${roundId}`;
+    const refreshRoundWorkerStatus = () => {
+      const status = state.workers.get(roundSpec.name);
+      status.running = [...children.keys()].some((name) => name.startsWith(`${roundSpec.name}:`));
+    };
+    const startRoundWorker = (roundId) => {
+      const id = String(roundId);
+      if (stopping || launchedRounds.has(id)) return;
+      launchedRounds.add(id);
+      const instance = roundInstance(id);
+      const status = state.workers.get(roundSpec.name);
+      const child = spawn(
+        process.execPath,
+        [fileURLToPath(new URL(roundSpec.script, import.meta.url))],
+        {
+          env: {
+            ...commonEnv,
+            ...roundSpec.env,
+            ANCHOR_WALLET: roundSpec.walletPath,
+            MYNE_ROUND_ID: id,
+          },
+          stdio: 'inherit',
+        },
+      );
+      children.set(instance, child);
+      refreshRoundWorkerStatus();
+      console.log(JSON.stringify({
+        event: 'round-worker-started',
+        worker: roundSpec.name,
+        provider: validatedRandomnessMode,
+        round: id,
+        pid: child.pid,
+      }));
+      child.once('exit', (code, signal) => {
+        children.delete(instance);
+        refreshRoundWorkerStatus();
+        if (stopping || code === 0) {
+          roundRestartAttempts.delete(id);
+          return;
+        }
+        const attempt = (roundRestartAttempts.get(id) || 0) + 1;
+        roundRestartAttempts.set(id, attempt);
+        status.restarts += 1;
+        const delay = Math.min(30_000, 500 * (2 ** Math.min(attempt, 6)));
+        console.error(JSON.stringify({
+          event: 'round-worker-exited',
+          worker: roundSpec.name,
+          provider: validatedRandomnessMode,
+          round: id,
+          code,
+          signal,
+          restartInMs: delay,
+        }));
+        schedule(() => {
+          launchedRounds.delete(id);
+          startRoundWorker(id);
+        }, delay);
+      });
+    };
+
+    for (const spec of specs.filter((entry) => !entry.perRound)) startWorker(spec);
+    const scheduleRoundWorkers = () => {
+      if (stopping) return;
+      const roundIds = roundIdsToPrepare({
+        now: Math.floor(Date.now() / 1_000),
+        initializedAt: validatedRoundSchedule.initializedAt,
+        roundDurationSeconds: validatedRoundSchedule.roundDurationSeconds,
+      });
+      for (const roundId of roundIds) startRoundWorker(roundId);
+
+      // Completed identifiers no longer need memory once they are well behind
+      // the active schedule. Running/retrying children retain their entries.
+      const oldestRetained = (roundIds[0] ?? 0) - 2;
+      for (const id of launchedRounds) {
+        if (Number(id) < oldestRetained && !children.has(roundInstance(id))) {
+          launchedRounds.delete(id);
+          roundRestartAttempts.delete(id);
+        }
+      }
+      schedule(scheduleRoundWorkers, 500);
+    };
+    scheduleRoundWorkers();
   }
 
   const shutdown = async (signal) => {

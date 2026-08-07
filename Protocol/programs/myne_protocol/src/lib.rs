@@ -4611,7 +4611,8 @@ pub struct ClaimAutoBurnReceipt<'info> {
     pub round: Box<Account<'info, Round>>,
     #[account(mut, seeds=[BET_SEED, &round.id.to_le_bytes(), receipt.authority.as_ref(), &receipt.nonce.to_le_bytes()], bump=receipt.bump)]
     pub receipt: Box<Account<'info, BetReceipt>>,
-    /// CHECK: Must be the immutable receipt owner; receives SOL only.
+    /// CHECK: Must be the immutable receipt owner. Retained in the stable
+    /// instruction account list; reward SOL accrues to `stake_position`.
     #[account(mut, constraint=beneficiary.key() == receipt.authority @ MyneError::InvalidReceiptAuthority)]
     pub beneficiary: UncheckedAccount<'info>,
     pub executor: Signer<'info>,
@@ -4632,7 +4633,8 @@ pub struct SettleReceipt<'info> {
     pub round: Box<Account<'info, Round>>,
     #[account(mut, seeds=[BET_SEED, &round.id.to_le_bytes(), receipt.authority.as_ref(), &receipt.nonce.to_le_bytes()], bump=receipt.bump)]
     pub receipt: Box<Account<'info, BetReceipt>>,
-    /// CHECK: Immutable receipt owner; the only destination for SOL rewards.
+    /// CHECK: Immutable receipt owner retained as an explicit authority
+    /// constraint; reward SOL accrues to `stake_position`, never this account.
     #[account(mut, constraint=beneficiary.key() == receipt.authority @ MyneError::InvalidReceiptAuthority)]
     pub beneficiary: UncheckedAccount<'info>,
     pub executor: Signer<'info>,

@@ -70,10 +70,22 @@ test('receipt settlement status is derived from the normalized Anchor event name
     source.indexOf("case 'BuybackCompleted'"),
   );
   assert.match(source, /const eventName = normalizeAnchorEventName\(event\.name\)/);
-  assert.match(receiptCases, /status: eventName === 'ReceiptClaimed'/);
+  assert.match(receiptCases, /case 'ReceiptRewardAccruedV1'/);
+  assert.match(receiptCases, /eventName === 'ReceiptRewardAccruedV1'[\s\S]*'accrued'/);
+  assert.match(receiptCases, /eventName === 'ReceiptClaimed'[\s\S]*'claimed'/);
   assert.match(receiptCases, /eventName === 'ReceiptRefunded'/);
   assert.match(receiptCases, /eventName === 'ReceiptClosed'/);
   assert.doesNotMatch(receiptCases, /event\.name ===/);
+});
+
+test('receipt accrual migration preserves historical paid rows and adds the claim-vault status', async () => {
+  const migration = await readFile(
+    new URL('../../supabase/migrations/20260808120000_receipt_reward_accrual.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(migration, /'claimed', 'accrued', 'refunded', 'closed'/);
+  assert.match(migration, /claimed = historical direct wallet payment/);
+  assert.match(migration, /accrued = reward processed into the owner claim vault/);
 });
 
 test('refund-only archival follows finalized Solana time rather than the host clock', async () => {

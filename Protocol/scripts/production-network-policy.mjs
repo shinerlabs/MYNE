@@ -10,13 +10,17 @@ export const SWITCHBOARD_DEVNET_PROGRAM = 'Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkht
  * In particular, a Mainnet config using the Devnet Switchboard address would
  * otherwise also select the no-liquidity-gate rehearsal path.
  */
-export function requireMatchingSolanaNetwork({ genesisHash, randomnessProgram }) {
+export function requireMatchingSolanaNetwork({
+  genesisHash,
+  randomnessProgram,
+  serverRandomnessProgram = null,
+}) {
   const program = String(randomnessProgram);
   if (genesisHash === SOLANA_MAINNET_GENESIS_HASH) {
-    assert.equal(
-      program,
-      SWITCHBOARD_MAINNET_PROGRAM,
-      'Mainnet must use the Switchboard On-Demand Mainnet program',
+    assert.ok(
+      program === SWITCHBOARD_MAINNET_PROGRAM
+        || (serverRandomnessProgram !== null && program === String(serverRandomnessProgram)),
+      'Mainnet must use Switchboard Mainnet or the explicitly supplied server commit–reveal marker',
     );
     return 'mainnet-beta';
   }

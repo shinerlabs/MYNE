@@ -196,6 +196,87 @@
       ]
     },
     {
+      "name": "bind_round_server_commitment",
+      "docs": [
+        "Binds a server secret commitment before the first deployment. The",
+        "commitment alone cannot determine an outcome because settlement also",
+        "incorporates a future Solana slot hash selected only after betting",
+        "closes. Its bytes occupy the legacy randomness-account field, so no",
+        "mainnet account resize or migration is required."
+      ],
+      "discriminator": [
+        231,
+        232,
+        135,
+        78,
+        175,
+        74,
+        215,
+        92
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        },
+        {
+          "name": "commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "burn_stake",
       "discriminator": [
         97,
@@ -533,9 +614,9 @@
       "docs": [
         "Permissionless completion for receipts created by an Auto-burn plan.",
         "The reward mode is committed into the receipt before the outcome is",
-        "known. Any keeper may execute this instruction, but SOL can only go to",
-        "the receipt owner and MYNE can only become that owner's non-withdrawable",
-        "5x virtual burn stake."
+        "known. Any keeper may execute this instruction, but SOL can only accrue",
+        "in the receipt owner's canonical claim balance and MYNE can only become",
+        "that owner's non-withdrawable 5x virtual burn stake."
       ],
       "discriminator": [
         107,
@@ -2087,6 +2168,80 @@
       ]
     },
     {
+      "name": "lock_round_server_entropy",
+      "docs": [
+        "Permissionlessly fixes the first eligible future entropy slot after",
+        "betting closes. The delay ensures its block hash does not exist when",
+        "this instruction executes and therefore cannot be selected to favour a",
+        "known outcome."
+      ],
+      "discriminator": [
+        197,
+        70,
+        136,
+        46,
+        117,
+        12,
+        251,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executor",
+          "docs": [
+            "Any signer may promptly lock the future slot after betting closes."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "mark_buyback_completed",
       "docs": [
         "The dedicated buyback signer records completion only after the swap and",
@@ -3329,7 +3484,9 @@
       "docs": [
         "Permissionless settlement for either reward mode. The beneficiary,",
         "miner and staking position are all constrained to the immutable receipt",
-        "authority, so the executor can neither redirect SOL nor take MYNE."
+        "authority, so the executor can neither redirect the claim balance nor",
+        "take MYNE. No reward SOL reaches a wallet until its owner later signs a",
+        "claim-staking-rewards instruction."
       ],
       "discriminator": [
         216,
@@ -3660,6 +3817,170 @@
       "args": [
         {
           "name": "randomness",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "settle_round_server",
+      "docs": [
+        "Permissionless server commit-reveal settlement. The reveal must match",
+        "the pre-betting commitment, while the selected SlotHashes entry was",
+        "necessarily unknown until after betting closed. Both inputs are",
+        "domain-separated into the exact bytes consumed by round economics."
+      ],
+      "discriminator": [
+        134,
+        90,
+        94,
+        89,
+        232,
+        185,
+        120,
+        197
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_gate",
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  105,
+                  113,
+                  117,
+                  105,
+                  100,
+                  105,
+                  116,
+                  121,
+                  95,
+                  103,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "liquidity_pool",
+          "optional": true
+        },
+        {
+          "name": "myne_vault",
+          "optional": true
+        },
+        {
+          "name": "sol_vault",
+          "optional": true
+        },
+        {
+          "name": "slot_hashes",
+          "docs": [
+            "handler before any bytes are used as entropy."
+          ],
+          "address": "SysvarS1otHashes111111111111111111111111111"
+        },
+        {
+          "name": "buyback_wallet",
+          "docs": [
+            "Direct SOL destination controlled by the buyback keeper."
+          ],
+          "writable": true
+        },
+        {
+          "name": "admin_fee_wallet",
+          "docs": [
+            "Direct SOL destination for every administrator round allocation."
+          ],
+          "writable": true
+        },
+        {
+          "name": "executor",
+          "docs": [
+            "Any signer may reveal a valid preimage and finish settlement."
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "reveal",
           "type": {
             "array": [
               "u8",
@@ -4458,6 +4779,19 @@
       ]
     },
     {
+      "name": "ReceiptRewardAccruedV1",
+      "discriminator": [
+        119,
+        194,
+        17,
+        170,
+        242,
+        9,
+        226,
+        54
+      ]
+    },
+    {
       "name": "RoundArchived",
       "discriminator": [
         223,
@@ -4533,6 +4867,45 @@
         143,
         112,
         133
+      ]
+    },
+    {
+      "name": "RoundServerCommitmentBound",
+      "discriminator": [
+        205,
+        85,
+        207,
+        168,
+        175,
+        170,
+        209,
+        143
+      ]
+    },
+    {
+      "name": "RoundServerEntropyLocked",
+      "discriminator": [
+        113,
+        150,
+        59,
+        147,
+        33,
+        167,
+        155,
+        188
+      ]
+    },
+    {
+      "name": "RoundServerEntropyRevealed",
+      "discriminator": [
+        220,
+        189,
+        78,
+        183,
+        42,
+        23,
+        210,
+        139
       ]
     },
     {
@@ -4846,7 +5219,7 @@
     {
       "code": 6043,
       "name": "ProductionRandomnessRequired",
-      "msg": "This production artifact requires Switchboard mainnet randomness"
+      "msg": "This production artifact requires an approved mainnet randomness mode"
     },
     {
       "code": 6044,
@@ -4932,6 +5305,41 @@
       "code": 6060,
       "name": "MiningRewardBelowSharePrecision",
       "msg": "The mining reward is below the unclaimed-share precision"
+    },
+    {
+      "code": 6061,
+      "name": "ServerRandomnessModeRequired",
+      "msg": "This instruction requires MYNE server commit-reveal mode"
+    },
+    {
+      "code": 6062,
+      "name": "InvalidServerRandomnessCommitment",
+      "msg": "The server randomness commitment or reveal is invalid"
+    },
+    {
+      "code": 6063,
+      "name": "ServerRandomnessNotPending",
+      "msg": "The server commitment is not awaiting an entropy-slot lock"
+    },
+    {
+      "code": 6064,
+      "name": "ServerEntropyNotLocked",
+      "msg": "The server entropy slot has not been locked"
+    },
+    {
+      "code": 6065,
+      "name": "ServerEntropySlotNotReached",
+      "msg": "The locked server entropy slot has not yet been produced"
+    },
+    {
+      "code": 6066,
+      "name": "ServerEntropyUnavailable",
+      "msg": "The locked server entropy slot is no longer available"
+    },
+    {
+      "code": 6067,
+      "name": "InvalidSlotHashesSysvar",
+      "msg": "The supplied SlotHashes sysvar is invalid"
     }
   ],
   "types": [
@@ -5750,6 +6158,11 @@
     },
     {
       "name": "ReceiptClaimed",
+      "docs": [
+        "Historical v6 event emitted when receipt settlement also paid SOL directly",
+        "to the wallet. It remains in the IDL so the production indexer can replay",
+        "pre-upgrade transactions without losing their original meaning."
+      ],
       "type": {
         "kind": "struct",
         "fields": [
@@ -5825,6 +6238,46 @@
       }
     },
     {
+      "name": "ReceiptRewardAccruedV1",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "sol_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "myne_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "claim_vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_sol_after",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "Round",
       "type": {
         "kind": "struct",
@@ -5889,13 +6342,19 @@
           {
             "name": "randomness_account",
             "docs": [
-              "Switchboard randomness account bound before betting closes. A default",
-              "key is only allowed for the explicitly local/devnet legacy path."
+              "Switchboard account for legacy/verified rounds, or the 32-byte server",
+              "commitment interpreted as a Pubkey for commit-reveal rounds. A default",
+              "key is allowed only for the explicitly local rehearsal path."
             ],
             "type": "pubkey"
           },
           {
             "name": "randomness_commit_slot",
+            "docs": [
+              "Plain Switchboard commit slot when the high bit is clear. Server mode",
+              "uses the high bit as a mode tag; all ones means commitment pending, and",
+              "a finite tagged value is the locked/final entropy slot."
+            ],
             "type": "u64"
           },
           {
@@ -6149,6 +6608,107 @@
           {
             "name": "randomness_commit_slot",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundServerCommitmentBound",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundServerEntropyLocked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "target_slot",
+            "type": "u64"
+          },
+          {
+            "name": "executor",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundServerEntropyRevealed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "commitment",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "reveal",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "target_slot",
+            "type": "u64"
+          },
+          {
+            "name": "entropy_slot",
+            "type": "u64"
+          },
+          {
+            "name": "slot_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "randomness",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "executor",
+            "type": "pubkey"
           }
         ]
       }
