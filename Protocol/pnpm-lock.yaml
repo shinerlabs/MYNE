@@ -13,8 +13,8 @@ importers:
   .:
     dependencies:
       '@anchor-lang/core':
-        specifier: 1.0.2
-        version: 1.0.2(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
+        specifier: 1.1.2
+        version: 1.1.2(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
       '@metaplex-foundation/mpl-token-metadata':
         specifier: 3.4.0
         version: 3.4.0(@metaplex-foundation/umi@1.5.1)
@@ -32,7 +32,7 @@ importers:
         version: 1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
       '@switchboard-xyz/on-demand':
         specifier: 3.10.3
-        version: 3.10.3(bufferutil@4.1.0)(debug@4.4.3)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)
+        version: 3.10.3(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)
       bigint-buffer:
         specifier: link:vendor/bigint-buffer
         version: link:vendor/bigint-buffer
@@ -45,9 +45,9 @@ packages:
     peerDependencies:
       '@solana/web3.js': ^1.69.1
 
-  '@anchor-lang/core@1.0.2':
-    resolution: {integrity: sha512-XZy430qI7s3iJsT46GAcbqyJdxk2MmUo7m0fJUDYmDZSIngI5cbtNo/MAEQ3WC9YqXxesAw7KFKlOkiqNW3e9w==}
-    engines: {node: '>=17'}
+  '@anchor-lang/core@1.1.2':
+    resolution: {integrity: sha512-rUG9qzxoK1avDtwYBuufiwMm2t18nVt4eU9T35NT8ZzIZ2k9wbUgW9PQ9lEjteem2t/ozyfvjapsLj4algi4pA==}
+    engines: {node: '>=20.18'}
 
   '@anchor-lang/errors@1.1.2':
     resolution: {integrity: sha512-+l5fLYF79t7LAYz+YbjjLzmjj6U1za6Q0cH4GBMWx4vUijlPTkm9Oj/cyDPLJG6Hsx+VFxceh7/+qbca5nnEmg==}
@@ -797,7 +797,7 @@ snapshots:
       bn.js: 5.2.5
       buffer-layout: 1.2.2
 
-  '@anchor-lang/core@1.0.2(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)':
+  '@anchor-lang/core@1.1.2(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)':
     dependencies:
       '@anchor-lang/borsh': 1.1.2(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6))
       '@anchor-lang/errors': 1.1.2
@@ -806,8 +806,6 @@ snapshots:
       bn.js: 5.2.5
       bs58: 4.0.1
       buffer-layout: 1.2.2
-      camelcase: 6.3.0
-      cross-fetch: 3.2.0
       eventemitter3: 4.0.7
       pako: 2.2.0
       superstruct: 0.15.5
@@ -1127,18 +1125,18 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@switchboard-xyz/common-legacy@1.1.1(@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6))(debug@4.4.3)':
+  '@switchboard-xyz/common-legacy@1.1.1(@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6))':
     dependencies:
-      '@switchboard-xyz/common': 5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6)
-      axios: 1.19.0(debug@4.4.3)
+      '@switchboard-xyz/common': 5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
+      axios: 1.19.0
     transitivePeerDependencies:
       - debug
       - supports-color
 
-  '@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6)':
+  '@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)':
     dependencies:
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
-      axios: 1.19.0(debug@4.4.3)
+      axios: 1.19.0
       big.js: 6.2.2
       bn.js: 5.2.5
       bs58: 6.0.0
@@ -1155,16 +1153,16 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@switchboard-xyz/on-demand@3.10.3(bufferutil@4.1.0)(debug@4.4.3)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)':
+  '@switchboard-xyz/on-demand@3.10.3(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)':
     dependencies:
       '@coral-xyz/anchor-31': '@coral-xyz/anchor@0.31.1(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)'
       '@isaacs/ttlcache': 1.4.1
       '@noble/hashes': 1.8.0
       '@solana/spl-token': 0.4.14(@solana/web3.js@1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6))(bufferutil@4.1.0)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)
       '@solana/web3.js': 1.98.4(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
-      '@switchboard-xyz/common': 5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6)
-      '@switchboard-xyz/common-legacy': 1.1.1(@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(debug@4.4.3)(typescript@7.0.2)(utf-8-validate@6.0.6))(debug@4.4.3)
-      axios: 1.19.0(debug@4.4.3)
+      '@switchboard-xyz/common': 5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6)
+      '@switchboard-xyz/common-legacy': 1.1.1(@switchboard-xyz/common@5.8.5(bufferutil@4.1.0)(typescript@7.0.2)(utf-8-validate@6.0.6))
+      axios: 1.19.0
       bs58: 6.0.0
       buffer: 6.0.3
       events: 3.3.0
@@ -1275,9 +1273,9 @@ snapshots:
 
   asynckit@0.4.0: {}
 
-  axios@1.19.0(debug@4.4.3):
+  axios@1.19.0:
     dependencies:
-      follow-redirects: 1.16.0(debug@4.4.3)
+      follow-redirects: 1.16.0
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -1399,9 +1397,7 @@ snapshots:
 
   fastestsmallesttextencoderdecoder@1.0.22: {}
 
-  follow-redirects@1.16.0(debug@4.4.3):
-    optionalDependencies:
-      debug: 4.4.3
+  follow-redirects@1.16.0: {}
 
   form-data@4.0.6:
     dependencies:
