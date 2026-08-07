@@ -68,6 +68,10 @@ test('Switchboard keeper tolerates confirmed-state RPC propagation lag', async (
   assert.match(source, /Randomness commitment recording/);
   assert.match(source, /Verified round settlement/);
   assert.match(source, /Math\.min\(4_000, 250 \* \(2 \*\* attempt\)\)/);
+  assert.match(source, /connection\.getSlot\('finalized'\)/);
+  assert.match(source, /offset < 32/);
+  assert.match(source, /Number\(error\?\.code\) !== -32004/);
+  assert.match(source, /Finalized chain time is temporarily unavailable/);
 });
 
 test('Switchboard keeper resumes the oldest indexed open round before scheduling another', async () => {

@@ -143,10 +143,33 @@ const sendKeeperInstructions = async (ixs, extraSigners = []) => {
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const chainTimeSeconds = async () => {
-  const slot = await connection.getSlot(commitment);
-  const blockTime = await connection.getBlockTime(slot);
-  assert.ok(Number.isInteger(blockTime), `Confirmed block time is unavailable at slot ${slot}`);
-  return blockTime;
+  let lastError = null;
+  // A valid confirmed/finalized slot can be skipped, and load-balanced RPC
+  // backends can briefly report -32004 while its block is propagating. Read a
+  // finalized slot and walk back over skipped slots; retry transient failures
+  // rather than terminating the production keeper between open and commit.
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const slot = await connection.getSlot('finalized');
+      for (let offset = 0; offset < 32 && slot >= offset; offset += 1) {
+        try {
+          const candidate = slot - offset;
+          const blockTime = await connection.getBlockTime(candidate);
+          if (Number.isInteger(blockTime)) return blockTime;
+        } catch (error) {
+          lastError = error;
+          // -32004 is the expected skipped/unavailable-slot response. Other
+          // RPC failures are retried by the bounded outer loop.
+          if (Number(error?.code) !== -32004) break;
+        }
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(Math.min(4_000, 250 * (2 ** attempt)));
+  }
+  const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
+  throw new Error(`Finalized chain time is temporarily unavailable${detail}`);
 };
 const waitForChainTimestamp = async (target) => {
   for (;;) {
