@@ -124,8 +124,8 @@ assert.equal(String(umi.identity.publicKey), payer.publicKey.toBase58());
 const umiMint = publicKey(mintAddress);
 const metadataPda = findMetadataPda(umi, { mint: umiMint });
 
-if (await umi.rpc.accountExists(metadataPda[0], { commitment: 'confirmed' })) {
-  const existing = await fetchMetadataFromSeeds(umi, { mint: umiMint }, { commitment: 'confirmed' });
+if (await umi.rpc.accountExists(metadataPda[0], { commitment: 'finalized' })) {
+  const existing = await fetchMetadataFromSeeds(umi, { mint: umiMint }, { commitment: 'finalized' });
   assert.equal(existing.name, TOKEN_NAME, 'Existing metadata name differs');
   assert.equal(existing.symbol, TOKEN_SYMBOL, 'Existing metadata symbol differs');
   assert.equal(existing.uri, METADATA_URI, 'Existing metadata URI differs');
@@ -185,11 +185,11 @@ const signature = await umi.rpc.sendTransaction(transaction, {
   maxRetries: 3,
 });
 const confirmation = await umi.rpc.confirmTransaction(signature, {
-  commitment: 'confirmed',
+  commitment: 'finalized',
   strategy: { type: 'blockhash', ...latestBlockhash },
 });
 assert.equal(confirmation.value.err, null, 'Metadata transaction failed confirmation');
-const created = await fetchMetadataFromSeeds(umi, { mint: umiMint }, { commitment: 'confirmed' });
+const created = await fetchMetadataFromSeeds(umi, { mint: umiMint }, { commitment: 'finalized' });
 assert.equal(created.name, TOKEN_NAME);
 assert.equal(created.symbol, TOKEN_SYMBOL);
 assert.equal(created.uri, METADATA_URI);
