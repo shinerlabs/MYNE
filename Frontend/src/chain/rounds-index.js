@@ -331,6 +331,31 @@ export async function loadSettledRounds(address = null) {
 }
 
 /**
+ * Newest resolved round that actually accepted a deployment, optionally capped
+ * at an elapsed round id. This keeps the Mine result card on the latest played
+ * round without scanning the entire production history when numeric rounds were
+ * empty and therefore have no on-chain PDA.
+ */
+export async function loadLatestSettledRoundId(atOrBefore = null) {
+  if (!(await indexAvailable())) return null;
+  try {
+    let query = supabase
+      .from('mine_rounds')
+      .select('round_id')
+      .eq('resolved', true)
+      .gt('total_wager_wei', 0)
+      .order('round_id', { ascending: false })
+      .limit(1);
+    if (atOrBefore !== null) query = query.lte('round_id', String(atOrBefore));
+    const { data, error } = await query;
+    if (error || !data?.length) return null;
+    return BigInt(data[0].round_id);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Miners who bet on a given square in a given round, biggest stake first.
  *
  * This is the one thing the chain genuinely cannot answer: `getBettorsOnSquare` returns a COUNT,

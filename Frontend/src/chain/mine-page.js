@@ -17,7 +17,7 @@ import {
   verifyFeeEconomics, verifyPremine, verifyRoundTiming, waitForTx, withdrawUnrefined,
   burnUnclaimedMyne, claimManyEthOnly, syncRoundGenesis,
 } from './lottery.js';
-import { loadSettledRounds } from './rounds-index.js';
+import { loadLatestSettledRoundId } from './rounds-index.js';
 import { ROUND_DURATION, BETTING_DURATION, isPremine } from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
 
@@ -216,17 +216,16 @@ function tick() {
  * lags so the previous-miners panel updates atomically from its last known-good result.
  */
 async function loadResolved(roundId, attempt = 0) {
-  // A suspended/background tab can skip several rounds between ticks. Only the settled round
-  // immediately before the currently displayed round is valid for the miners panel; discard
-  // late responses/retries for older ids instead of letting the panel drift out of sync.
+  // A suspended/background tab can skip several elapsed ids between ticks. Discard late
+  // responses for an older current-round snapshot, then resolve the newest PLAYED round at or
+  // before this target below; empty ids deliberately have no round PDA.
   if (state.roundId !== BigInt(roundId) + 1n) return;
   try {
     // Empty numeric rounds are intentionally not created on chain. Use the
     // production index to locate the newest resolved, played round at or before
     // the elapsed id instead of replacing a correct result with an empty PDA.
-    const indexed = await loadSettledRounds();
-    const indexedRound = indexed?.find(({ roundId: candidate }) => BigInt(candidate) <= BigInt(roundId));
-    const resolvedRoundId = indexedRound?.roundId ?? roundId;
+    const indexedRoundId = await loadLatestSettledRoundId(roundId);
+    const resolvedRoundId = indexedRoundId ?? roundId;
     const round = await readRound(resolvedRoundId);
     if (round.resolved && state.roundId === BigInt(roundId) + 1n) {
       state.lastResolved = { roundId: BigInt(resolvedRoundId), ...round };

@@ -58,6 +58,25 @@ pub const SWITCHBOARD_DEVNET_PROGRAM: Pubkey =
     pubkey!("Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2");
 pub const SWITCHBOARD_MAINNET_PROGRAM: Pubkey =
     pubkey!("SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv");
+/// Explicit marker for MYNE's temporary commit-reveal mode. No external
+/// program is invoked: the server commits before betting, then a permissionless
+/// settlement mixes the reveal with a future hash from Solana's SlotHashes
+/// sysvar. Reusing this program ID avoids adding configuration account bytes.
+pub const SERVER_RANDOMNESS_PROGRAM: Pubkey = crate::ID;
+pub const SLOT_HASHES_SYSVAR: Pubkey = pubkey!("SysvarS1otHashes111111111111111111111111111");
+/// `Round::randomness_commit_slot` is reused without resizing the account.
+/// Legacy Switchboard slots always have the high bit clear. Server rounds set
+/// it, with `u64::MAX` denoting a bound commitment whose future slot has not
+/// yet been locked.
+pub const SERVER_RANDOMNESS_SLOT_FLAG: u64 = 1u64 << 63;
+pub const SERVER_RANDOMNESS_PENDING: u64 = u64::MAX;
+pub const SERVER_ENTROPY_DELAY_SLOTS: u64 = 16;
+const SERVER_RANDOMNESS_SLOT_MASK: u64 = !SERVER_RANDOMNESS_SLOT_FLAG;
+const SLOT_HASHES_MAX_ENTRIES: usize = 512;
+const SLOT_HASHES_HEADER_SIZE: usize = 8;
+const SLOT_HASHES_ENTRY_SIZE: usize = 40;
+const SERVER_COMMIT_DOMAIN: &[u8] = b"MYNE_SERVER_COMMIT_V1";
+const SERVER_OUTPUT_DOMAIN: &[u8] = b"MYNE_SERVER_OUTPUT_V1";
 /// The abandoned pre-launch mint is pinned in the production artifact so the
 /// one-time migration cannot be reused to replace a live MYNE market later.
 pub const LEGACY_PRELAUNCH_MINT: Pubkey = pubkey!("2NtsuCtsXCU1f5dwGcNPyBLnKx5tRHsCFfUt6py3dwWS");
@@ -660,16 +679,9 @@ pub mod myne_protocol {
             MyneError::RandomnessAuthorityLocked
         );
         assert_randomness_program_allowed_for_build(randomness_program)?;
-        // Production is a one-way transition. Once mainnet Switchboard is
-        // selected, an administrator cannot downgrade to caller-supplied or
-        // devnet randomness and thereby bypass the mainnet liquidity gate.
-        if ctx.accounts.config.randomness_program == SWITCHBOARD_MAINNET_PROGRAM {
-            require_keys_eq!(
-                randomness_program,
-                SWITCHBOARD_MAINNET_PROGRAM,
-                MyneError::ProductionModeLocked
-            );
-        }
+        // Production may move only between the two explicitly compiled and
+        // pool-gated providers. Per-round mode is encoded in `Round`, so this
+        // does not alter or strand already-open Switchboard/server rounds.
         ctx.accounts.config.randomness_program = randomness_program;
         emit!(RandomnessProgramChanged { randomness_program });
         Ok(())
@@ -832,9 +844,8 @@ pub mod myne_protocol {
             CURRENT_VERSION,
             MyneError::ProtocolUpgradeRequired
         );
-        require_keys_neq!(
-            ctx.accounts.config.randomness_program,
-            Pubkey::default(),
+        require!(
+            is_switchboard_program(ctx.accounts.config.randomness_program),
             MyneError::RandomnessProviderRequired
         );
         require!(ctx.accounts.round.id == round_id, MyneError::InvalidRound);
@@ -871,6 +882,100 @@ pub mod myne_protocol {
             round_id,
             randomness_account: ctx.accounts.randomness_account.key(),
             randomness_commit_slot: 0,
+        });
+        Ok(())
+    }
+
+    /// Binds a server secret commitment before the first deployment. The
+    /// commitment alone cannot determine an outcome because settlement also
+    /// incorporates a future Solana slot hash selected only after betting
+    /// closes. Its bytes occupy the legacy randomness-account field, so no
+    /// mainnet account resize or migration is required.
+    pub fn bind_round_server_commitment(
+        ctx: Context<BindRoundServerCommitment>,
+        round_id: u64,
+        commitment: [u8; 32],
+    ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        require_eq!(
+            ctx.accounts.config.version,
+            CURRENT_VERSION,
+            MyneError::ProtocolUpgradeRequired
+        );
+        require_keys_eq!(
+            ctx.accounts.config.randomness_program,
+            SERVER_RANDOMNESS_PROGRAM,
+            MyneError::ServerRandomnessModeRequired
+        );
+        require_keys_eq!(
+            ctx.accounts.authority.key(),
+            ctx.accounts.config.randomness_authority,
+            MyneError::InvalidRandomnessAuthority
+        );
+        let now = Clock::get()?.unix_timestamp;
+        let round = &mut ctx.accounts.round;
+        require_eq!(round.id, round_id, MyneError::InvalidRound);
+        require!(
+            !round.settled && now < round.betting_ends_at,
+            MyneError::BettingClosed
+        );
+        require!(
+            round.total_receipts == 0 && round.gross_deployed_lamports == 0,
+            MyneError::RandomnessAlreadyCommitted
+        );
+        require!(
+            round.randomness_account == Pubkey::default() && round.randomness_commit_slot == 0,
+            MyneError::RandomnessAlreadyCommitted
+        );
+        require!(
+            commitment != [0; 32],
+            MyneError::InvalidServerRandomnessCommitment
+        );
+        round.randomness_account = Pubkey::new_from_array(commitment);
+        round.randomness_commit_slot = SERVER_RANDOMNESS_PENDING;
+        emit!(RoundServerCommitmentBound {
+            round_id,
+            commitment,
+        });
+        Ok(())
+    }
+
+    /// Permissionlessly fixes the first eligible future entropy slot after
+    /// betting closes. The delay ensures its block hash does not exist when
+    /// this instruction executes and therefore cannot be selected to favour a
+    /// known outcome.
+    pub fn lock_round_server_entropy(
+        ctx: Context<LockRoundServerEntropy>,
+        round_id: u64,
+    ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        require_eq!(
+            ctx.accounts.config.version,
+            CURRENT_VERSION,
+            MyneError::ProtocolUpgradeRequired
+        );
+        let clock = Clock::get()?;
+        let round = &mut ctx.accounts.round;
+        require_eq!(round.id, round_id, MyneError::InvalidRound);
+        require!(!round.settled, MyneError::RoundAlreadySettled);
+        require!(
+            clock.unix_timestamp >= round.betting_ends_at && clock.unix_timestamp < round.refund_at,
+            MyneError::RoundNotReady
+        );
+        require!(
+            round.randomness_commit_slot == SERVER_RANDOMNESS_PENDING
+                && round.randomness_account != Pubkey::default(),
+            MyneError::ServerRandomnessNotPending
+        );
+        let target_slot = clock
+            .slot
+            .checked_add(SERVER_ENTROPY_DELAY_SLOTS)
+            .ok_or(MyneError::ArithmeticOverflow)?;
+        round.randomness_commit_slot = encode_server_randomness_slot(target_slot)?;
+        emit!(RoundServerEntropyLocked {
+            round_id,
+            target_slot,
+            executor: ctx.accounts.executor.key(),
         });
         Ok(())
     }
@@ -917,10 +1022,8 @@ pub mod myne_protocol {
             ctx.accounts.config.randomness_authority,
             MyneError::InvalidRandomnessAuthority
         );
-        let parsed = parse_switchboard_randomness(
-            &ctx.accounts.randomness_account.to_account_info(),
-            &ctx.accounts.config.randomness_program,
-        )?;
+        let parsed =
+            parse_bound_switchboard_randomness(&ctx.accounts.randomness_account.to_account_info())?;
         require_keys_eq!(
             parsed.authority,
             ctx.accounts.config.randomness_authority,
@@ -1317,7 +1420,8 @@ pub mod myne_protocol {
             MyneError::InvalidRandomnessAccount
         );
         require!(
-            ctx.accounts.round.randomness_commit_slot > 0,
+            ctx.accounts.round.randomness_commit_slot > 0
+                && !server_randomness_slot_is_encoded(ctx.accounts.round.randomness_commit_slot),
             MyneError::RandomnessNotCommitted
         );
         require_keys_eq!(
@@ -1331,10 +1435,12 @@ pub mod myne_protocol {
             MyneError::InvalidFeeDestination
         );
         let clock = Clock::get()?;
-        let randomness = parse_switchboard_randomness(
-            &ctx.accounts.randomness_account.to_account_info(),
-            &ctx.accounts.config.randomness_program,
-        )?;
+        // Settlement is keyed by the mode stored on the round, not the
+        // provider currently selected for future rounds. This keeps every
+        // already-open Switchboard request settleable after a paused switch to
+        // server commit-reveal mode.
+        let randomness =
+            parse_bound_switchboard_randomness(&ctx.accounts.randomness_account.to_account_info())?;
         require_keys_eq!(
             randomness.authority,
             ctx.accounts.config.randomness_authority,
@@ -1371,6 +1477,95 @@ pub mod myne_protocol {
             ctx.accounts.myne_vault.as_ref(),
             ctx.accounts.sol_vault.as_ref(),
             randomness.value,
+        )
+    }
+
+    /// Permissionless server commit-reveal settlement. The reveal must match
+    /// the pre-betting commitment, while the selected SlotHashes entry was
+    /// necessarily unknown until after betting closed. Both inputs are
+    /// domain-separated into the exact bytes consumed by round economics.
+    pub fn settle_round_server(ctx: Context<SettleRoundServer>, reveal: [u8; 32]) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        assert_randomness_program_allowed_for_build(ctx.accounts.config.randomness_program)?;
+        require_eq!(
+            ctx.accounts.config.version,
+            CURRENT_VERSION,
+            MyneError::ProtocolUpgradeRequired
+        );
+        let clock = Clock::get()?;
+        let round = &mut ctx.accounts.round;
+        require!(!round.settled, MyneError::RoundAlreadySettled);
+        require!(
+            clock.unix_timestamp >= round.settles_at && clock.unix_timestamp < round.refund_at,
+            MyneError::RoundNotReady
+        );
+        let encoded_slot = round.randomness_commit_slot;
+        require!(
+            encoded_slot != SERVER_RANDOMNESS_PENDING
+                && server_randomness_slot_is_encoded(encoded_slot),
+            MyneError::ServerEntropyNotLocked
+        );
+        let target_slot = decode_server_randomness_slot(encoded_slot)?;
+        require!(
+            clock.slot > target_slot,
+            MyneError::ServerEntropySlotNotReached
+        );
+        let commitment = server_randomness_commitment(ctx.accounts.config.mint, round.id, &reveal);
+        require!(
+            round.randomness_account.to_bytes() == commitment,
+            MyneError::InvalidServerRandomnessCommitment
+        );
+        require_keys_eq!(
+            ctx.accounts.slot_hashes.key(),
+            SLOT_HASHES_SYSVAR,
+            MyneError::InvalidSlotHashesSysvar
+        );
+        let slot_hashes_data = ctx
+            .accounts
+            .slot_hashes
+            .try_borrow_data()
+            .map_err(|_| error!(MyneError::InvalidSlotHashesSysvar))?;
+        let (entropy_slot, slot_hash) =
+            select_slot_hash_at_or_after(&slot_hashes_data, target_slot)?;
+        let randomness = server_randomness_output(
+            ctx.accounts.config.mint,
+            round.id,
+            &reveal,
+            entropy_slot,
+            &slot_hash,
+        );
+        // Preserve the server-mode flag while replacing the target with the
+        // exact produced slot. This makes the proof self-contained in the
+        // round and prevents the legacy Switchboard settlement path from ever
+        // accepting it.
+        round.randomness_commit_slot = encode_server_randomness_slot(entropy_slot)?;
+        emit!(RoundServerEntropyRevealed {
+            round_id: round.id,
+            commitment,
+            reveal,
+            target_slot,
+            entropy_slot,
+            slot_hash,
+            randomness,
+            executor: ctx.accounts.executor.key(),
+        });
+        let liquidity_pool = ctx
+            .accounts
+            .liquidity_pool
+            .as_ref()
+            .map(|pool| pool.to_account_info());
+        drop(slot_hashes_data);
+        settle_round_core(
+            round,
+            &mut ctx.accounts.config,
+            &mut ctx.accounts.stake_pool,
+            ctx.accounts.liquidity_gate.as_ref(),
+            liquidity_pool.as_ref(),
+            &ctx.accounts.buyback_wallet.to_account_info(),
+            &ctx.accounts.admin_fee_wallet.to_account_info(),
+            ctx.accounts.myne_vault.as_ref(),
+            ctx.accounts.sol_vault.as_ref(),
+            randomness,
         )
     }
 
@@ -2265,12 +2460,13 @@ fn round_can_open_after_emission(
 
 /// Compile-time release policy. A `production` SBF artifact cannot initialize,
 /// unpause or operate with caller-supplied/devnet randomness, even if it is
-/// installed over a configuration created by an older rehearsal build.
+/// installed over a configuration created by an older rehearsal build. Both
+/// production modes remain Meteora-gated by `liquidity_gate_required`.
 fn assert_randomness_program_allowed_for_build(randomness_program: Pubkey) -> Result<()> {
     #[cfg(feature = "production")]
-    require_keys_eq!(
-        randomness_program,
-        SWITCHBOARD_MAINNET_PROGRAM,
+    require!(
+        randomness_program == SWITCHBOARD_MAINNET_PROGRAM
+            || randomness_program == SERVER_RANDOMNESS_PROGRAM,
         MyneError::ProductionRandomnessRequired
     );
 
@@ -2278,10 +2474,16 @@ fn assert_randomness_program_allowed_for_build(randomness_program: Pubkey) -> Re
     require!(
         randomness_program == Pubkey::default()
             || randomness_program == SWITCHBOARD_DEVNET_PROGRAM
-            || randomness_program == SWITCHBOARD_MAINNET_PROGRAM,
+            || randomness_program == SWITCHBOARD_MAINNET_PROGRAM
+            || randomness_program == SERVER_RANDOMNESS_PROGRAM,
         MyneError::InvalidRandomnessAccount
     );
     Ok(())
+}
+
+fn is_switchboard_program(randomness_program: Pubkey) -> bool {
+    randomness_program == SWITCHBOARD_DEVNET_PROGRAM
+        || randomness_program == SWITCHBOARD_MAINNET_PROGRAM
 }
 fn mul_div(value: u64, numerator: u64, denominator: u64) -> Result<u64> {
     require!(denominator > 0, MyneError::ArithmeticOverflow);
@@ -2737,7 +2939,8 @@ mod motherlode_tests {
         liquidity_gate_required, max_supply_base_units, mining_share_value,
         mining_shares_for_credit, motherlode_hit, motherlode_pays_round, mul_div, mul_div_u64_u128,
         parse_meteora_damm_v2_pool, parse_meteora_lb_pair, proportional_interval_share,
-        round_can_open_after_emission, stake_reward_increment_and_remainder,
+        round_can_open_after_emission, select_slot_hash_at_or_after, server_randomness_commitment,
+        server_randomness_output, stake_reward_increment_and_remainder,
         switchboard_randomness_is_uncommitted, BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER,
         METEORA_DAMM_ACTIVATION_POINT_OFFSET, METEORA_DAMM_ACTIVATION_TYPE_OFFSET,
         METEORA_DAMM_POOL_STATUS_OFFSET, METEORA_DAMM_POOL_TYPE_OFFSET,
@@ -2749,9 +2952,13 @@ mod motherlode_tests {
         METEORA_LB_PAIR_RESERVE_X_OFFSET, METEORA_LB_PAIR_RESERVE_Y_OFFSET, METEORA_LB_PAIR_SIZE,
         METEORA_LB_PAIR_STATUS_OFFSET, METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET,
         METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET, MINING_PROTOCOL_FEE_BPS, MINING_SHARE_SCALE,
-        MOTHERLODE_ODDS, REWARD_SCALE, SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
+        MOTHERLODE_ODDS, REWARD_SCALE, SERVER_RANDOMNESS_PENDING, SERVER_RANDOMNESS_PROGRAM,
+        SERVER_RANDOMNESS_SLOT_MASK, SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
     };
-    use super::{is_fresh_switchboard_commit, SwitchboardRandomness};
+    use super::{
+        decode_server_randomness_slot, encode_server_randomness_slot, is_fresh_switchboard_commit,
+        server_randomness_slot_is_encoded, SwitchboardRandomness,
+    };
     use crate::state::MiningPool;
     use anchor_lang::prelude::Pubkey;
 
@@ -3066,6 +3273,9 @@ mod motherlode_tests {
     fn mainnet_provider_remains_pool_gated() {
         assert!(liquidity_gate_required(SWITCHBOARD_MAINNET_PROGRAM));
         assert!(assert_randomness_program_allowed_for_build(SWITCHBOARD_MAINNET_PROGRAM).is_ok());
+        assert!(liquidity_gate_required(SERVER_RANDOMNESS_PROGRAM));
+        assert!(assert_randomness_program_allowed_for_build(SERVER_RANDOMNESS_PROGRAM).is_ok());
+        assert!(assert_randomness_program_allowed_for_build(Pubkey::new_unique()).is_err());
     }
 
     #[cfg(feature = "production")]
@@ -3075,6 +3285,75 @@ mod motherlode_tests {
         assert!(liquidity_gate_required(SWITCHBOARD_DEVNET_PROGRAM));
         assert!(assert_randomness_program_allowed_for_build(Pubkey::default()).is_err());
         assert!(assert_randomness_program_allowed_for_build(SWITCHBOARD_DEVNET_PROGRAM).is_err());
+    }
+
+    #[test]
+    fn server_mode_tag_cannot_be_confused_with_legacy_switchboard_slots() {
+        let encoded = encode_server_randomness_slot(42).unwrap();
+        assert!(server_randomness_slot_is_encoded(encoded));
+        assert_eq!(decode_server_randomness_slot(encoded).unwrap(), 42);
+        assert!(!server_randomness_slot_is_encoded(42));
+        assert!(decode_server_randomness_slot(42).is_err());
+        assert!(decode_server_randomness_slot(SERVER_RANDOMNESS_PENDING).is_err());
+        assert!(encode_server_randomness_slot(0).is_err());
+        assert!(encode_server_randomness_slot(SERVER_RANDOMNESS_SLOT_MASK).is_err());
+    }
+
+    #[test]
+    fn server_commitment_and_output_are_domain_separated_and_deterministic() {
+        let mint = Pubkey::new_unique();
+        let reveal = [7u8; 32];
+        let commitment = server_randomness_commitment(mint, 41, &reveal);
+        assert_eq!(commitment, server_randomness_commitment(mint, 41, &reveal));
+        assert_ne!(commitment, server_randomness_commitment(mint, 42, &reveal));
+        assert_ne!(commitment, server_randomness_commitment(mint, 41, &[8; 32]));
+
+        let slot_hash = [9u8; 32];
+        let output = server_randomness_output(mint, 41, &reveal, 100, &slot_hash);
+        assert_eq!(
+            output,
+            server_randomness_output(mint, 41, &reveal, 100, &slot_hash)
+        );
+        assert_ne!(commitment, output);
+        assert_ne!(
+            output,
+            server_randomness_output(mint, 41, &reveal, 101, &slot_hash)
+        );
+        assert_ne!(
+            output,
+            server_randomness_output(mint, 41, &reveal, 100, &[10; 32])
+        );
+    }
+
+    #[test]
+    fn slot_hash_selection_uses_first_produced_slot_at_or_after_target() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u64.to_le_bytes());
+        for (slot, byte) in [(105u64, 5u8), (103, 3), (100, 1)] {
+            data.extend_from_slice(&slot.to_le_bytes());
+            data.extend_from_slice(&[byte; 32]);
+        }
+        assert_eq!(
+            select_slot_hash_at_or_after(&data, 101).unwrap(),
+            (103, [3; 32])
+        );
+        assert_eq!(
+            select_slot_hash_at_or_after(&data, 105).unwrap(),
+            (105, [5; 32])
+        );
+        assert!(select_slot_hash_at_or_after(&data, 99).is_err());
+        assert!(select_slot_hash_at_or_after(&data, 106).is_err());
+    }
+
+    #[test]
+    fn slot_hash_parser_rejects_malformed_or_oversized_data() {
+        assert!(select_slot_hash_at_or_after(&[], 1).is_err());
+        let mut truncated = Vec::new();
+        truncated.extend_from_slice(&1u64.to_le_bytes());
+        truncated.extend_from_slice(&1u64.to_le_bytes());
+        assert!(select_slot_hash_at_or_after(&truncated, 1).is_err());
+        let oversized = 513u64.to_le_bytes();
+        assert!(select_slot_hash_at_or_after(&oversized, 1).is_err());
     }
 
     #[test]
@@ -3391,7 +3670,28 @@ fn assert_bound_randomness_accepting_bets(
     round: &Round,
     randomness_account: Option<&UncheckedAccount<'_>>,
 ) -> Result<()> {
+    if round.randomness_commit_slot == SERVER_RANDOMNESS_PENDING {
+        require!(
+            round.randomness_account != Pubkey::default(),
+            MyneError::RandomnessNotBound
+        );
+        require!(
+            randomness_account.is_none(),
+            MyneError::InvalidRandomnessAccount
+        );
+        return Ok(());
+    }
+    require!(
+        !server_randomness_slot_is_encoded(round.randomness_commit_slot),
+        MyneError::RandomnessAlreadyCommitted
+    );
     if config.randomness_program == Pubkey::default() {
+        require!(
+            round.randomness_account == Pubkey::default()
+                && round.randomness_commit_slot == 0
+                && randomness_account.is_none(),
+            MyneError::InvalidRandomnessAccount
+        );
         return Ok(());
     }
     let randomness_account = randomness_account.ok_or(MyneError::RandomnessNotBound)?;
@@ -3400,10 +3700,7 @@ fn assert_bound_randomness_accepting_bets(
         round.randomness_account,
         MyneError::InvalidRandomnessAccount
     );
-    let parsed = parse_switchboard_randomness(
-        &randomness_account.to_account_info(),
-        &config.randomness_program,
-    )?;
+    let parsed = parse_bound_switchboard_randomness(&randomness_account.to_account_info())?;
     require_keys_eq!(
         parsed.authority,
         config.randomness_authority,
@@ -3416,6 +3713,128 @@ fn assert_bound_randomness_accepting_bets(
     Ok(())
 }
 
+fn server_randomness_slot_is_encoded(slot: u64) -> bool {
+    slot & SERVER_RANDOMNESS_SLOT_FLAG != 0
+}
+
+fn encode_server_randomness_slot(slot: u64) -> Result<u64> {
+    require!(
+        slot > 0 && slot < SERVER_RANDOMNESS_SLOT_MASK,
+        MyneError::ArithmeticOverflow
+    );
+    Ok(SERVER_RANDOMNESS_SLOT_FLAG | slot)
+}
+
+fn decode_server_randomness_slot(encoded: u64) -> Result<u64> {
+    require!(
+        encoded != SERVER_RANDOMNESS_PENDING && server_randomness_slot_is_encoded(encoded),
+        MyneError::ServerEntropyNotLocked
+    );
+    let slot = encoded & SERVER_RANDOMNESS_SLOT_MASK;
+    require!(slot > 0, MyneError::ServerEntropyNotLocked);
+    Ok(slot)
+}
+
+fn server_randomness_commitment(mint: Pubkey, round_id: u64, reveal: &[u8; 32]) -> [u8; 32] {
+    hashv(&[
+        SERVER_COMMIT_DOMAIN,
+        crate::ID.as_ref(),
+        mint.as_ref(),
+        &round_id.to_le_bytes(),
+        reveal,
+    ])
+    .to_bytes()
+}
+
+fn server_randomness_output(
+    mint: Pubkey,
+    round_id: u64,
+    reveal: &[u8; 32],
+    entropy_slot: u64,
+    slot_hash: &[u8; 32],
+) -> [u8; 32] {
+    hashv(&[
+        SERVER_OUTPUT_DOMAIN,
+        crate::ID.as_ref(),
+        mint.as_ref(),
+        &round_id.to_le_bytes(),
+        reveal,
+        &entropy_slot.to_le_bytes(),
+        slot_hash,
+    ])
+    .to_bytes()
+}
+
+/// Decode the compact bincode layout of the SlotHashes sysvar without heap
+/// allocation. Entries are newest-first on chain; choosing the numerically
+/// smallest produced slot at or after the target makes skipped slots
+/// deterministic and independent of when settlement is submitted.
+fn select_slot_hash_at_or_after(data: &[u8], target_slot: u64) -> Result<(u64, [u8; 32])> {
+    require!(
+        data.len() >= SLOT_HASHES_HEADER_SIZE,
+        MyneError::InvalidSlotHashesSysvar
+    );
+    let count = u64::from_le_bytes(
+        data[..SLOT_HASHES_HEADER_SIZE]
+            .try_into()
+            .map_err(|_| error!(MyneError::InvalidSlotHashesSysvar))?,
+    );
+    let count = usize::try_from(count).map_err(|_| error!(MyneError::InvalidSlotHashesSysvar))?;
+    require!(
+        count <= SLOT_HASHES_MAX_ENTRIES,
+        MyneError::InvalidSlotHashesSysvar
+    );
+    let required_len = SLOT_HASHES_HEADER_SIZE
+        .checked_add(
+            count
+                .checked_mul(SLOT_HASHES_ENTRY_SIZE)
+                .ok_or(MyneError::ArithmeticOverflow)?,
+        )
+        .ok_or(MyneError::ArithmeticOverflow)?;
+    require!(
+        data.len() >= required_len,
+        MyneError::InvalidSlotHashesSysvar
+    );
+
+    let mut selected: Option<(u64, [u8; 32])> = None;
+    let mut oldest_slot: Option<u64> = None;
+    for index in 0..count {
+        let offset = SLOT_HASHES_HEADER_SIZE
+            .checked_add(
+                index
+                    .checked_mul(SLOT_HASHES_ENTRY_SIZE)
+                    .ok_or(MyneError::ArithmeticOverflow)?,
+            )
+            .ok_or(MyneError::ArithmeticOverflow)?;
+        let slot_end = offset.checked_add(8).ok_or(MyneError::ArithmeticOverflow)?;
+        let hash_end = slot_end
+            .checked_add(32)
+            .ok_or(MyneError::ArithmeticOverflow)?;
+        let slot = u64::from_le_bytes(
+            data[offset..slot_end]
+                .try_into()
+                .map_err(|_| error!(MyneError::InvalidSlotHashesSysvar))?,
+        );
+        oldest_slot = Some(oldest_slot.map_or(slot, |oldest| oldest.min(slot)));
+        if slot < target_slot || selected.is_some_and(|(selected_slot, _)| slot >= selected_slot) {
+            continue;
+        }
+        let mut hash = [0u8; 32];
+        hash.copy_from_slice(&data[slot_end..hash_end]);
+        selected = Some((slot, hash));
+    }
+    // If the target predates the oldest retained entry, the program can no
+    // longer distinguish an aged-out produced slot from a skipped slot. Fail
+    // closed instead of silently substituting newer, chooser-influenced
+    // entropy; the normal round refund path remains available.
+    let oldest_slot = oldest_slot.ok_or_else(|| error!(MyneError::ServerEntropyUnavailable))?;
+    require!(
+        target_slot >= oldest_slot,
+        MyneError::ServerEntropyUnavailable
+    );
+    selected.ok_or_else(|| error!(MyneError::ServerEntropyUnavailable))
+}
+
 fn switchboard_randomness_is_uncommitted(randomness: &SwitchboardRandomness) -> bool {
     randomness.seed_slot == 0 && randomness.reveal_slot == 0 && randomness.value == [0; 32]
 }
@@ -3425,6 +3844,25 @@ fn switchboard_randomness_is_uncommitted(randomness: &SwitchboardRandomness) -> 
 /// keeper from presenting a stale commitment selected after betting closed.
 fn is_fresh_switchboard_commit(seed_slot: u64, current_slot: u64) -> bool {
     seed_slot > 0 && current_slot.checked_sub(1) == Some(seed_slot)
+}
+
+/// Parse a Switchboard account according to its own pinned owner rather than
+/// the provider selected for future rounds. This is intentionally used only
+/// after a round has already bound the account, preserving old commitments
+/// across a paused provider migration.
+fn parse_bound_switchboard_randomness(account: &AccountInfo<'_>) -> Result<SwitchboardRandomness> {
+    #[cfg(feature = "production")]
+    {
+        parse_switchboard_randomness(account, &SWITCHBOARD_MAINNET_PROGRAM)
+    }
+    #[cfg(not(feature = "production"))]
+    {
+        require!(
+            is_switchboard_program(*account.owner),
+            MyneError::InvalidRandomnessAccount
+        );
+        parse_switchboard_randomness(account, account.owner)
+    }
 }
 
 /// Parse the stable zero-copy Switchboard randomness account layout without
@@ -3942,6 +4380,26 @@ pub struct BindRoundRandomness<'info> {
     pub authority: Signer<'info>,
 }
 #[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct BindRoundServerCommitment<'info> {
+    #[account(seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[ROUND_SEED, &round_id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(address=config.randomness_authority @ MyneError::InvalidRandomnessAuthority)]
+    pub authority: Signer<'info>,
+}
+#[derive(Accounts)]
+#[instruction(round_id: u64)]
+pub struct LockRoundServerEntropy<'info> {
+    #[account(seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[ROUND_SEED, &round_id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    /// Any signer may promptly lock the future slot after betting closes.
+    pub executor: Signer<'info>,
+}
+#[derive(Accounts)]
 #[instruction(round_id: u64, nonce: u64)]
 pub struct Deploy<'info> {
     #[account(seeds=[CONFIG_SEED], bump=config.bump)]
@@ -4050,6 +4508,33 @@ pub struct SettleRoundVerified<'info> {
     /// Direct SOL destination for every administrator round allocation.
     #[account(mut, address=config.admin_fee_wallet @ MyneError::InvalidFeeDestination)]
     pub admin_fee_wallet: SystemAccount<'info>,
+}
+#[derive(Accounts)]
+pub struct SettleRoundServer<'info> {
+    #[account(mut, seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
+    pub stake_pool: Box<Account<'info, StakePool>>,
+    #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(seeds=[LIQUIDITY_GATE_SEED], bump=liquidity_gate.bump)]
+    pub liquidity_gate: Option<Account<'info, LiquidityGate>>,
+    /// CHECK: pool key and owner are checked against LiquidityGate.
+    pub liquidity_pool: Option<UncheckedAccount<'info>>,
+    pub myne_vault: Option<InterfaceAccount<'info, TokenAccount>>,
+    pub sol_vault: Option<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: exact sysvar address and serialized bounds are checked in the
+    /// handler before any bytes are used as entropy.
+    #[account(address=SLOT_HASHES_SYSVAR @ MyneError::InvalidSlotHashesSysvar)]
+    pub slot_hashes: UncheckedAccount<'info>,
+    /// Direct SOL destination controlled by the buyback keeper.
+    #[account(mut, address=config.buyback_wallet @ MyneError::InvalidFeeDestination)]
+    pub buyback_wallet: SystemAccount<'info>,
+    /// Direct SOL destination for every administrator round allocation.
+    #[account(mut, address=config.admin_fee_wallet @ MyneError::InvalidFeeDestination)]
+    pub admin_fee_wallet: SystemAccount<'info>,
+    /// Any signer may reveal a valid preimage and finish settlement.
+    pub executor: Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct ClaimReceipt<'info> {
@@ -4359,6 +4844,28 @@ pub struct RoundRandomnessCommitted {
     pub round_id: u64,
     pub randomness_account: Pubkey,
     pub randomness_commit_slot: u64,
+}
+#[event]
+pub struct RoundServerCommitmentBound {
+    pub round_id: u64,
+    pub commitment: [u8; 32],
+}
+#[event]
+pub struct RoundServerEntropyLocked {
+    pub round_id: u64,
+    pub target_slot: u64,
+    pub executor: Pubkey,
+}
+#[event]
+pub struct RoundServerEntropyRevealed {
+    pub round_id: u64,
+    pub commitment: [u8; 32],
+    pub reveal: [u8; 32],
+    pub target_slot: u64,
+    pub entropy_slot: u64,
+    pub slot_hash: [u8; 32],
+    pub randomness: [u8; 32],
+    pub executor: Pubkey,
 }
 #[event]
 pub struct DeploymentCreated {

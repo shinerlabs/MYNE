@@ -79,9 +79,13 @@ pub struct Round {
     pub solo_mode: bool,
     pub motherlode_hit: bool,
     pub randomness: [u8; 32],
-    /// Switchboard randomness account bound before betting closes. A default
-    /// key is only allowed for the explicitly local/devnet legacy path.
+    /// Switchboard account for legacy/verified rounds, or the 32-byte server
+    /// commitment interpreted as a Pubkey for commit-reveal rounds. A default
+    /// key is allowed only for the explicitly local rehearsal path.
     pub randomness_account: Pubkey,
+    /// Plain Switchboard commit slot when the high bit is clear. Server mode
+    /// uses the high bit as a mode tag; all ones means commitment pending, and
+    /// a finite tagged value is the locked/final entropy slot.
     pub randomness_commit_slot: u64,
     pub solo_sample: u64,
     pub tile_lamports: [u64; TILE_COUNT],

@@ -3985,6 +3985,14 @@ const renderChain = (state) => {
     claimsAccount = state.account;
     claimsResolvedKey = resolvedKey;
     if (state.account) {
+      if (accountChanged) {
+        // Never leave wallet A's actionable receipts on screen while wallet
+        // B's indexed history is still loading.
+        claimableRounds = [];
+        claimableTotals = { count: 0, bullion: 0n, eth: 0n };
+        claimableUnknown = 0;
+        renderClaimable();
+      }
       refreshRoundHistory({ force: true });
       // …and again shortly after, because this fires the moment the CHAIN says the round settled,
       // while the claimable panel is built from the Supabase index the backend fills on its own 3s
@@ -4748,6 +4756,11 @@ const explorerTx = (hash) => `${solanaNetwork.blockExplorers.default.url}/tx/${h
 const settlementTxCache = new Map();
 let roundFilter = 'all';
 let roundHistory = [];
+// Only the newest history request may publish account-scoped claim receipts.
+// Wallet adapters can emit a new account while the previous wallet's index
+// query is still in flight; without this guard that late response can restore
+// wallet A's actionable buttons after the UI has switched to wallet B.
+let roundHistoryRefreshId = 0;
 // Paginated FULL history (see chain/rounds-page.js). These mirror loadRoundHistory's return.
 let roundPage = 0;
 let roundPages = 1;
@@ -5142,8 +5155,11 @@ document.querySelector('#round-miners-pagination')?.addEventListener('click', (e
 });
 
 const refreshRoundHistory = async ({ force = false } = {}) => {
+  const requestId = ++roundHistoryRefreshId;
+  const requestedAccount = chain.state.account;
   try {
-    const res = await loadRoundHistory({ page: roundPage, filter: roundFilter, account: chain.state.account, force });
+    const res = await loadRoundHistory({ page: roundPage, filter: roundFilter, account: requestedAccount, force });
+    if (requestId !== roundHistoryRefreshId || requestedAccount !== chain.state.account) return;
     roundHistory = res.rows;
     roundPage = res.page; // clamped if the page count shrank
     roundPages = res.pages;

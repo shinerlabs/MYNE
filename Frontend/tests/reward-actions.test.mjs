@@ -25,9 +25,15 @@ test('keeper-paid receipts refresh both the claim index and miner ledger before 
 });
 
 test('previous-round result resolves through the latest indexed played round', () => {
-  assert.match(mine, /const indexed = await loadSettledRounds\(\)/);
-  assert.match(mine, /candidate.*<= BigInt\(roundId\)/);
+  assert.match(mine, /const indexedRoundId = await loadLatestSettledRoundId\(roundId\)/);
   assert.match(mine, /state\.lastResolved = \{ roundId: BigInt\(resolvedRoundId\), \.\.\.round \}/);
+});
+
+test('wallet changes clear another wallet\'s actionable receipt state immediately', () => {
+  assert.match(main, /if \(accountChanged\) \{[\s\S]*claimableRounds = \[\];[\s\S]*claimableTotals = \{ count: 0, bullion: 0n, eth: 0n \}/);
+  assert.match(main, /const requestId = \+\+roundHistoryRefreshId/);
+  assert.match(main, /const requestedAccount = chain\.state\.account/);
+  assert.match(main, /requestId !== roundHistoryRefreshId \|\| requestedAccount !== chain\.state\.account/);
 });
 
 test('Claim All settles receipts before withdrawing MYNE and never aliases SOL-only', () => {

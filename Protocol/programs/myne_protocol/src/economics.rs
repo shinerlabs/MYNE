@@ -195,7 +195,7 @@ pub enum MyneError {
     AutoPlanInactive,
     #[msg("Production mode cannot be downgraded after mainnet randomness is selected")]
     ProductionModeLocked,
-    #[msg("This production artifact requires Switchboard mainnet randomness")]
+    #[msg("This production artifact requires an approved mainnet randomness mode")]
     ProductionRandomnessRequired,
     #[msg("The staking token account is not the canonical stake-pool vault")]
     InvalidStakeVault,
@@ -231,6 +231,20 @@ pub enum MyneError {
     InvalidMiningPoolAccounting,
     #[msg("The mining reward is below the unclaimed-share precision")]
     MiningRewardBelowSharePrecision,
+    #[msg("This instruction requires MYNE server commit-reveal mode")]
+    ServerRandomnessModeRequired,
+    #[msg("The server randomness commitment or reveal is invalid")]
+    InvalidServerRandomnessCommitment,
+    #[msg("The server commitment is not awaiting an entropy-slot lock")]
+    ServerRandomnessNotPending,
+    #[msg("The server entropy slot has not been locked")]
+    ServerEntropyNotLocked,
+    #[msg("The locked server entropy slot has not yet been produced")]
+    ServerEntropySlotNotReached,
+    #[msg("The locked server entropy slot is no longer available")]
+    ServerEntropyUnavailable,
+    #[msg("The supplied SlotHashes sysvar is invalid")]
+    InvalidSlotHashesSysvar,
 }
 
 #[cfg(test)]
