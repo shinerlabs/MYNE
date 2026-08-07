@@ -1,4 +1,4 @@
-const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&include_last_updated_at=true';
+const COINGECKO_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=solana%2Cusd-coin&vs_currencies=usd&include_last_updated_at=true';
 const KRAKEN_URL = 'https://api.kraken.com/0/public/Ticker?pair=SOLUSD';
 
 const validPrice = (value) => {
@@ -9,12 +9,15 @@ const validPrice = (value) => {
 export function parseSolPrice(source, body, now = Date.now()) {
   if (source === 'backend') {
     const usd = validPrice(body?.usd);
-    return usd == null ? null : { usd, at: Number(body.at) || now, stale: Boolean(body.stale), source };
+    const usdc = validPrice(body?.usdc) ?? usd;
+    return usd == null ? null : { usd, usdc, at: Number(body.at) || now, stale: Boolean(body.stale), source };
   }
   if (source === 'coingecko') {
     const usd = validPrice(body?.solana?.usd);
+    const usdcUsd = validPrice(body?.['usd-coin']?.usd) ?? 1;
     return usd == null ? null : {
       usd,
+      usdc: usd / usdcUsd,
       at: Number(body.solana.last_updated_at) * 1000 || now,
       stale: false,
       source,
@@ -23,7 +26,7 @@ export function parseSolPrice(source, body, now = Date.now()) {
   if (source === 'kraken') {
     const ticker = Object.values(body?.result ?? {})[0];
     const usd = validPrice(ticker?.c?.[0]);
-    return usd == null ? null : { usd, at: now, stale: false, source };
+    return usd == null ? null : { usd, usdc: usd, at: now, stale: false, source };
   }
   return null;
 }

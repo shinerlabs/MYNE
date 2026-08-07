@@ -39,6 +39,7 @@ assert.ok(Number.isInteger(maxPages) && maxPages > 0, 'ROUND_INDEXER_MAX_PAGES m
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const asString = (value) => value?.toString?.() ?? String(value ?? 0);
+const referralCodeFor = (authority) => new PublicKey(authority).toBase58().slice(-10);
 const u64Seed = (value) => {
   const buffer = Buffer.alloc(8);
   buffer.writeBigUInt64LE(BigInt(asString(value)));
@@ -139,12 +140,13 @@ async function processEvent(event, signature, slot) {
       const roundId = asString(data.roundId);
       await ensureRound(roundId);
       const receipt = new PublicKey(data.receipt).toBase58();
+      const authority = new PublicKey(data.authority).toBase58();
       const rows = data.amounts.map((amount, square) => ({
         round_id: roundId,
         receipt,
         // Base58 public keys are case-sensitive. Store the canonical address;
         // lowercasing changes the key and breaks indexed identity lookups.
-        bettor: new PublicKey(data.authority).toBase58(),
+        bettor: authority,
         rent_payer: new PublicKey(data.rentPayer).toBase58(),
         nonce: asString(data.nonce),
         square,
@@ -154,7 +156,14 @@ async function processEvent(event, signature, slot) {
         deployment_signature: signature,
         deployment_slot: slot,
       })).filter((row) => BigInt(row.amount_wei) > 0n);
-      if (rows.length) await upsert('mine_round_bets', rows, 'round_id,receipt,square');
+      if (rows.length) {
+        await upsert('mine_round_bets', rows, 'round_id,receipt,square');
+        // One exact indexed read resolves a short social referral code. Never scan program
+        // accounts or wildcard-query the ever-growing bet ledger in production.
+        await upsert('mine_referral_codes', {
+          code: referralCodeFor(authority), wallet_address: authority,
+        }, 'wallet_address');
+      }
       break;
     }
     case 'AutoPlanConfigured': {

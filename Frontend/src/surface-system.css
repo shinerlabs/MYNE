@@ -353,6 +353,56 @@ body[data-route="mine"] .reward-action.is-busy::after {
 
 @keyframes reward-action-spin { to { transform: rotate(360deg); } }
 
+/* USDC is the alternate display unit for Mine. Bids remain canonical SOL amounts; these marks
+   label the equivalent quote only and never enter transaction construction. */
+body[data-route="mine"] .usdc-icon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border: 0 !important;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+body[data-route="mine"] .mine-currency-toggle > b {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+body[data-route="mine"] .mine-currency-toggle .toggle-usdc,
+body[data-route="mine"] .quick-amounts .quick-usdc {
+  width: 12px;
+  height: 12px;
+  flex-basis: 12px;
+}
+
+body[data-route="mine"] .quick-amounts button:has(.quick-usdc) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+body.mine-display-usd[data-route="mine"] .mine-currency-value[data-usd]::after {
+  padding-left: 1.25em;
+  background: url('/usdc-mark.svg') no-repeat left center / .9em .9em;
+}
+
+body[data-route="mine"] .round-summary .deployed-usd-value,
+body[data-route="mine"] .round-summary .motherlode-eth-usd {
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px;
+}
+
+body[data-route="mine"] .round-summary .summary-usdc {
+  width: .72em;
+  height: .72em;
+  flex-basis: .72em;
+}
+
 @media (max-width: 420px) {
   body[data-route="mine"] .reward-action {
     min-height: 48px !important;

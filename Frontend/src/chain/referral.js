@@ -2,6 +2,10 @@ import { PublicKey, SystemProgram } from '@solana/web3.js';
 
 import { connection, getAccount } from './client.js';
 import { derivePda, fetchProtocolAccount, getWritableProgram, protocolPdas, sendInstructions } from './anchor-client.js';
+import { isSocialConfigured, supabase } from '../social/config.js';
+import {
+  canonicalSolanaAddress, isReferralCode, referralCodeFor,
+} from './referral-code.js';
 
 const minerPda = (owner) => derivePda('miner', new PublicKey(owner));
 const positionPda = (owner) => derivePda('stake_position', new PublicKey(owner));
@@ -39,6 +43,29 @@ export async function setReferrer(referrerAddress) {
     miner: minerPda(account), stakePosition: positionPda(account), referrerMiner: minerPda(referrer), authority,
     systemProgram: SystemProgram.programId,
   }).instruction()]);
+}
+
+/**
+ * Resolve the compact public referral code through the indexed, read-only mapping. Old links
+ * containing a complete Solana address remain valid, but newly shared links never expose it.
+ * The deterministic suffix is checked again client-side so a corrupt index row cannot redirect
+ * attribution to a different wallet.
+ */
+export async function resolveReferrerReference(reference) {
+  const raw = String(reference ?? '').trim();
+  const legacyAddress = canonicalSolanaAddress(raw);
+  if (legacyAddress) return legacyAddress;
+  if (!isReferralCode(raw) || !isSocialConfigured || !supabase) return null;
+
+  const { data, error } = await supabase
+    .from('mine_referral_codes')
+    .select('wallet_address')
+    .eq('code', raw)
+    .maybeSingle();
+  if (error || !data?.wallet_address) return null;
+
+  const address = canonicalSolanaAddress(data.wallet_address);
+  return address && referralCodeFor(address) === raw ? address : null;
 }
 
 export async function claimReferral() {

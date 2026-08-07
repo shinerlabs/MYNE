@@ -30,6 +30,9 @@ const paintMynePrice = (value) => {
 };
 
 export const getSolUsd = () => price?.usd ?? null;
+// Quote-only SOL/USDC rate. The cached endpoint may return `usdc`; older deployments fall back to
+// USD parity, while CoinGecko derives it from the independently reported USDC/USD value.
+export const getSolUsdc = () => price?.usdc ?? price?.usd ?? null;
 
 /** USD string for an SOL amount, or null when there is no price to convert with. */
 export function usdFor(solAmount) {
@@ -41,11 +44,22 @@ export function usdFor(solAmount) {
   return fmtUsd(value);
 }
 
+/** USDC amount for an SOL amount. This is presentation-only; mining instructions remain SOL. */
+export function usdcFor(solAmount) {
+  const solUsdc = getSolUsdc();
+  if (solUsdc == null || !Number.isFinite(solAmount)) return null;
+  const value = solAmount * solUsdc;
+  if (value > 0 && value < 0.005) return '< 0.01';
+  return value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 async function poll() {
   const next = await fetchSolPrice(ENDPOINT);
   if (next) {
     price = next;
-    window.dispatchEvent(new CustomEvent('solpricechange', { detail: { usd: next.usd, stale: Boolean(next.stale) } }));
+    window.dispatchEvent(new CustomEvent('solpricechange', {
+      detail: { usd: next.usd, usdc: next.usdc ?? next.usd, stale: Boolean(next.stale) },
+    }));
   }
   paintHeader();
 }

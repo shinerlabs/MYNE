@@ -1985,9 +1985,9 @@ body[data-route="referrals"] .referral-flex-trigger:hover { background: #202024;
    transaction units. The minimum gets a dedicated compact row instead of being silently hidden. */
 body[data-route="mine"] .amount-usd-mark {
   display: none;
-  color: #fff;
-  font: 800 28px/1 var(--font-number);
-  letter-spacing: -.04em;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
 }
 
 body.mine-display-usd[data-route="mine"] .amount-display .amount-eth {

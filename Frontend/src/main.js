@@ -15,7 +15,13 @@ import * as chain from './chain/mine-page.js';
 import { WALLET_LOGOS } from './wallet-logos.js';
 import { loadRoundBets, loadDrandLink, countMyBetRounds, loadIndexedRounds } from './chain/rounds-index.js';
 import { loadRoundHistory } from './chain/rounds-page.js';
-import { readReferralStats, readReferrerOf, setReferrer, claimReferral, readLeaderboard, readMyReferrals } from './chain/referral.js';
+import {
+  readReferralStats, readReferrerOf, setReferrer, claimReferral, readLeaderboard,
+  readMyReferrals, resolveReferrerReference,
+} from './chain/referral.js';
+import {
+  compactReferralLink, DEFAULT_SOLANA_ADDRESS, referralLinkFor as buildReferralLink,
+} from './chain/referral-code.js';
 import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/config.js';
 import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, invalidateReceiptCache } from './chain/lottery.js';
 import {
@@ -24,7 +30,10 @@ import {
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
 import { readSupplyStats } from './chain/supply.js';
 import { renderProtocolStats } from './about-stats.js';
-import { mountSolPrice, usdFor, getSolUsd, getMyneUsd, setMynePerSol, showPremineMynePrice } from './sol-price.js';
+import {
+  mountSolPrice, usdFor, usdcFor, getSolUsd, getSolUsdc, getMyneUsd,
+  setMynePerSol, showPremineMynePrice,
+} from './sol-price.js';
 import { readSwapState, quote, approveGld, swapSolForGld, swapGldForSol, spotMynePerSol, poolAvailable, withSlippage } from './chain/swap.js';
 
 // Slippage tolerance for swaps, in basis points. 100 = 1%. Enforced on chain.
@@ -93,6 +102,8 @@ const copyText = async (text) => {
 };
 
 const solIcon = (className = '') => `<img class="sol-icon ${className}" src="/solana-mark.svg" alt="" aria-hidden="true" title="Hover for USD value" />`;
+const usdcIcon = (className = '') => `<img class="usdc-icon ${className}" src="/usdc-mark.svg" alt="" aria-hidden="true" />`;
+const usdcValueFor = (solAmount) => usdcFor(solAmount);
 
 /**
  * Write "<mark> value" into `el` WITHOUT rebuilding the mark.
@@ -304,7 +315,7 @@ document.querySelector('#app').innerHTML = `
   <main class="workspace page-view" data-page="mine">
     ${socialPanel}
     <section class="board-panel panel" aria-label="Mining tiles"><div class="slot-grid">${slots.map(([id, value]) => `<button class="slot" data-slot="${id}" aria-label="Tile ${id}, ${value} SOL deployed" aria-pressed="false"><span>#${id}</span><strong>${value}</strong></button>`).join('')}</div><div class="board-footer"><div class="round-reward" tabindex="0" aria-describedby="round-reward-tip"><span class="round-reward-label"><img src="/gld-icon-transparent.png" alt=""/><b>+${isPremine ? '0.3' : '1'}</b><small>/ ROUND</small></span><aside class="round-reward-tip" id="round-reward-tip" role="tooltip"><strong>Mine ${isPremine ? '0.3' : '1'} MYNE</strong><p>${isPremine ? 'Premine emission is reduced until launch, and mined MYNE stays locked until liquidity opens.' : 'Mine MYNE every round for a chance to receive the Motherlode and staking bonus.'}</p></aside></div><button class="switchboard-proof-trigger" id="switchboard-proof-trigger" type="button" aria-haspopup="dialog" aria-label="Verify randomness via Switchboard"><span>Verifiably random via</span><img src="/switchboard-logo.svg" alt="Switchboard"/><b aria-hidden="true">↗</b></button></div></section>
-    <aside class="control-column"><section class="round-summary panel"><div class="summary-stat"><span>DEPLOYED</span><strong>${solIcon('summary-eth')} 7.17</strong><small>≈ $24,748</small></div><div class="summary-stat"><span>MOTHERLODE</span><strong><img src="/gld-icon-transparent.png" alt=""/> 4.4</strong><small>MYNE</small></div><div class="summary-stat"><span>TIME LEFT</span><strong>00:34</strong><small>Round #458</small></div></section><section class="deploy-panel panel"><div class="deploy-head"><div><span class="eyebrow">MINT MYNE</span><h2>Configure mine</h2></div><div class="refine-chip" id="mined-chip"><span>${isPremine ? 'MINED · LOCKED' : 'UNCLAIMED'}</span><b><img src="/gld-icon-transparent.png" alt=""/> <em id="mined-chip-value">0.000</em></b></div></div><button class="last-round" data-route="rounds"><span>Last round</span><aside>${icon('grid')} #— <b>—</b> ${icon('chevron')}</aside></button><div class="amount-label-bar"><label class="amount-label" for="amount"><span>SOL per tile</span><small>Balance 2.500 SOL</small></label><button class="mine-currency-toggle" id="mine-currency-toggle" type="button" aria-pressed="false" aria-label="Show mining values in US dollars"><span>SOL</span><i></i><b>USD</b></button></div><div class="amount-display"><i class="extraction-field" aria-hidden="true"></i>${solIcon('amount-eth')}<b class="amount-usd-mark" aria-hidden="true">$</b><input id="amount" value="" placeholder="0.00" inputmode="decimal" aria-label="SOL per tile" autocomplete="off" autocorrect="off" spellcheck="false"/><span>SOL</span></div><div class="quick-amounts"><button data-add="0.0001">+0.0001</button><button data-add="0.001">+0.001</button><button data-add="0.01">+0.01</button><button data-add="0.1">+0.1</button></div><small class="amount-min" hidden></small><div class="configuration"><div class="config-row"><div><b>Tiles</b><small id="tile-helper">No tiles selected</small></div><div class="stepper"><button id="all">ALL</button><button id="tiles-minus" aria-label="Remove tile">${icon('minus')}</button><strong id="tile-count">0</strong><button id="tiles-plus" aria-label="Add tile">${icon('plus')}</button></div></div><div class="config-row auto-row"><div><b>Auto-round</b><small id="auto-helper">Manually enter each round</small></div><button class="auto-toggle" id="auto-round" role="switch" aria-checked="false"><span></span><b>Off</b></button></div><div class="config-row rounds-config"><div><b>Rounds</b><small id="round-helper">Repeat deployment</small></div><div class="stepper compact"><button id="rounds-minus" aria-label="Remove round">${icon('minus')}</button><strong id="round-count">1</strong><button id="rounds-plus" aria-label="Add round">${icon('plus')}</button></div><button class="until-balance-toggle" id="until-balance" role="switch" aria-checked="false" title="Fund as many rounds as your wallet balance allows"><span></span><b>Max</b></button></div><div class="config-row auto-claim-row" hidden><div><b>Auto-claim</b><small>Settle and reclaim after each round</small></div><button class="auto-toggle" id="auto-claim" role="switch" aria-checked="true"><span></span><b>On</b></button></div></div><div class="total-row per-round-row" id="per-round-row" hidden><div><span>Total per round</span></div><strong>${solIcon('total-eth')} <em .00</em> SOL</strong></div><div class="total-row"><div><span>Total deployment</span><small id="total-detail">0 tiles × 0.00 SOL × 1 round</small></div><strong>${solIcon('total-eth')} <em .00</em> SOL</strong></div><div class="auto-plan" id="auto-plan" hidden></div><button class="deploy" id="deploy"><i class="mine-button-mark"><img src="/gld-icon-transparent.png" alt=""/></i><span>MINE</span><b aria-hidden="true">→</b></button><div class="security-note">${icon('shield')} Transactions settle on Solana</div></section><section class="miners round-results panel" hidden aria-live="polite"><div class="miners-head"><div><span class="eyebrow">LIVE THIS ROUND · #458</span><h2>Top miners</h2></div><button data-route="rounds">History</button></div><div class="settlement-result"><span><small>WINNING TILE</small><strong>#13</strong></span><span><small>DEPLOYED</small><strong>${solIcon()} 7.17</strong></span><span><small>REWARD</small><strong><img src="/gld-icon-transparent.png" alt=""/> 1.0</strong></span></div><div class="miner"><i class="bullion-avatar"><img src="/gld-icon-transparent.png" alt=""/></i><b>WILD</b><span>${icon('grid')} 9</span><strong>${solIcon()} 1.250</strong></div><div class="miner"><i>${icon('user')}</i><b>7ykD...B3Ng</b><span>${icon('grid')} 6</span><strong>${solIcon()} 1.111</strong></div><div class="miner"><i>${icon('user')}</i><b>Hm1t...4ENk</b><span>${icon('grid')} 4</span><strong>${solIcon()} 0.780</strong></div><div class="next-round"><span>NEXT ROUND</span><b>00:08</b></div></section></aside>
+    <aside class="control-column"><section class="round-summary panel"><div class="summary-stat"><span>DEPLOYED</span><strong>${solIcon('summary-eth')} 7.17</strong><small>≈ $24,748</small></div><div class="summary-stat"><span>MOTHERLODE</span><strong><img src="/gld-icon-transparent.png" alt=""/> 4.4</strong><small>MYNE</small></div><div class="summary-stat"><span>TIME LEFT</span><strong>00:34</strong><small>Round #458</small></div></section><section class="deploy-panel panel"><div class="deploy-head"><div><span class="eyebrow">MINT MYNE</span><h2>Configure mine</h2></div><div class="refine-chip" id="mined-chip"><span>${isPremine ? 'MINED · LOCKED' : 'UNCLAIMED'}</span><b><img src="/gld-icon-transparent.png" alt=""/> <em id="mined-chip-value">0.000</em></b></div></div><button class="last-round" data-route="rounds"><span>Last round</span><aside>${icon('grid')} #— <b>—</b> ${icon('chevron')}</aside></button><div class="amount-label-bar"><label class="amount-label" for="amount"><span>SOL per tile</span><small>Balance 2.500 SOL</small></label><button class="mine-currency-toggle" id="mine-currency-toggle" type="button" aria-pressed="false" aria-label="Show mining values in USDC"><span>SOL</span><i></i><b>${usdcIcon('toggle-usdc')}<span>USDC</span></b></button></div><div class="amount-display"><i class="extraction-field" aria-hidden="true"></i>${solIcon('amount-eth')}<img class="amount-usd-mark usdc-icon" src="/usdc-mark.svg" alt="" aria-hidden="true"/><input id="amount" value="" placeholder="0.00" inputmode="decimal" aria-label="SOL per tile" autocomplete="off" autocorrect="off" spellcheck="false"/><span>SOL</span></div><div class="quick-amounts"><button data-add="0.0001">+0.0001</button><button data-add="0.001">+0.001</button><button data-add="0.01">+0.01</button><button data-add="0.1">+0.1</button></div><small class="amount-min" hidden></small><div class="configuration"><div class="config-row"><div><b>Tiles</b><small id="tile-helper">No tiles selected</small></div><div class="stepper"><button id="all">ALL</button><button id="tiles-minus" aria-label="Remove tile">${icon('minus')}</button><strong id="tile-count">0</strong><button id="tiles-plus" aria-label="Add tile">${icon('plus')}</button></div></div><div class="config-row auto-row"><div><b>Auto-round</b><small id="auto-helper">Manually enter each round</small></div><button class="auto-toggle" id="auto-round" role="switch" aria-checked="false"><span></span><b>Off</b></button></div><div class="config-row rounds-config"><div><b>Rounds</b><small id="round-helper">Repeat deployment</small></div><div class="stepper compact"><button id="rounds-minus" aria-label="Remove round">${icon('minus')}</button><strong id="round-count">1</strong><button id="rounds-plus" aria-label="Add round">${icon('plus')}</button></div><button class="until-balance-toggle" id="until-balance" role="switch" aria-checked="false" title="Fund as many rounds as your wallet balance allows"><span></span><b>Max</b></button></div><div class="config-row auto-claim-row" hidden><div><b>Auto-claim</b><small>Settle and reclaim after each round</small></div><button class="auto-toggle" id="auto-claim" role="switch" aria-checked="true"><span></span><b>On</b></button></div></div><div class="total-row per-round-row" id="per-round-row" hidden><div><span>Total per round</span></div><strong>${solIcon('total-eth')} <em .00</em> SOL</strong></div><div class="total-row"><div><span>Total deployment</span><small id="total-detail">0 tiles × 0.00 SOL × 1 round</small></div><strong>${solIcon('total-eth')} <em .00</em> SOL</strong></div><div class="auto-plan" id="auto-plan" hidden></div><button class="deploy" id="deploy"><i class="mine-button-mark"><img src="/gld-icon-transparent.png" alt=""/></i><span>MINE</span><b aria-hidden="true">→</b></button><div class="security-note">${icon('shield')} Transactions settle on Solana</div></section><section class="miners round-results panel" hidden aria-live="polite"><div class="miners-head"><div><span class="eyebrow">LIVE THIS ROUND · #458</span><h2>Top miners</h2></div><button data-route="rounds">History</button></div><div class="settlement-result"><span><small>WINNING TILE</small><strong>#13</strong></span><span><small>DEPLOYED</small><strong>${solIcon()} 7.17</strong></span><span><small>REWARD</small><strong><img src="/gld-icon-transparent.png" alt=""/> 1.0</strong></span></div><div class="miner"><i class="bullion-avatar"><img src="/gld-icon-transparent.png" alt=""/></i><b>WILD</b><span>${icon('grid')} 9</span><strong>${solIcon()} 1.250</strong></div><div class="miner"><i>${icon('user')}</i><b>7ykD...B3Ng</b><span>${icon('grid')} 6</span><strong>${solIcon()} 1.111</strong></div><div class="miner"><i>${icon('user')}</i><b>Hm1t...4ENk</b><span>${icon('grid')} 4</span><strong>${solIcon()} 0.780</strong></div><div class="next-round"><span>NEXT ROUND</span><b>00:08</b></div></section></aside>
   </main>
 
   <main class="feature-shell page-view" data-page="rounds"><header class="feature-hero route-header"><div><span class="eyebrow">ROUNDS</span><h1>History.</h1></div></header><section class="feature-metrics"><article><span>ROUNDS</span><strong>—</strong><small></small></article><article><span>DEPLOYED</span><strong>${solIcon()} 0.00</strong></article><article><span>AVG DEPLOYED</span><strong>${solIcon()} 0.00</strong><small>per mined round</small></article><article><span>MOTHERLODES</span><strong>0</strong></article></section><section class="ledger-panel panel"><div class="ledger-head"><div class="round-filters" role="tablist" aria-label="Filter round history"><button class="active" role="tab" aria-selected="true" data-round-filter="all">All</button><button role="tab" aria-selected="false" data-round-filter="split">Split</button><button role="tab" aria-selected="false" data-round-filter="solo">Solo</button><button role="tab" aria-selected="false" data-round-filter="motherlode">Motherlode</button></div></div><div class="round-table-head"><span>ROUND</span><span>TILE</span><span>MODE</span><span>SOL DEPLOYED</span><span>WINNERS</span><span>TIME</span><span></span></div><div class="round-list">${roundRows}</div></section></main>
@@ -504,10 +515,10 @@ const deployedHeading = deployedStat.querySelector(':scope > span');
 const deployedTokenValue = deployedStat.querySelector('strong');
 const deployedTokenLabel = deployedStat.querySelector('small');
 deployedStat.classList.add('deployed-stat');
-deployedHeading.dataset.usdLabel = '≈$—';
+deployedHeading.dataset.usdLabel = '≈— USDC';
 deployedStat.setAttribute('aria-label', 'Deployed 7.17 SOL, approximately $24,748');
 deployedTokenValue.classList.add('deployed-token-value');
-deployedTokenValue.insertAdjacentHTML('afterend', '<strong class="deployed-usd-value" aria-hidden="true">$—</strong>');
+deployedTokenValue.insertAdjacentHTML('afterend', `<strong class="deployed-usd-value" aria-hidden="true">${usdcIcon('summary-usdc')}<span>—</span></strong>`);
 deployedStat.tabIndex = 0;
 deployedTokenLabel.textContent = '';
 deployedTokenLabel.setAttribute('aria-hidden', 'true');
@@ -517,11 +528,11 @@ const motherlodeHeading = motherlodeStat.querySelector(':scope > span');
 const motherlodeTokenValue = motherlodeStat.querySelector('strong');
 const motherlodeTokenLabel = motherlodeStat.querySelector('small');
 motherlodeStat.classList.add('motherlode-stat');
-motherlodeHeading.dataset.usdLabel = '≈$—';
+motherlodeHeading.dataset.usdLabel = '≈— USDC';
 motherlodeStat.setAttribute('aria-label', 'Motherlode SOL payment plus staking bonus MYNE, burned and staked at 5× reward weight');
 motherlodeTokenValue.classList.add('motherlode-token-value');
 motherlodeTokenValue.innerHTML = `<img src="/gld-icon-transparent.png" alt=""/><em class="motherlode-primary-value">4.4</em><b class="motherlode-unit">MYNE</b>`;
-motherlodeTokenLabel.innerHTML = `${solIcon('motherlode-eth')}<span class="motherlode-eth-value">0.0072</span><span class="motherlode-eth-usd" aria-hidden="true">$—</span><b>SOL</b>`;
+motherlodeTokenLabel.innerHTML = `${solIcon('motherlode-eth')}<span class="motherlode-eth-value">0.0072</span><span class="motherlode-eth-usd" aria-hidden="true">${usdcIcon('summary-usdc')}<span class="motherlode-usdc-value">—</span></span><b>SOL</b>`;
 motherlodeTokenLabel.classList.add('motherlode-secondary');
 motherlodeStat.tabIndex = 0;
 roundSummary.classList.add('motherlode-inline');
@@ -643,7 +654,7 @@ let mineDisplayCurrency = (() => {
 const captureMineAmount = () => {
   const shown = Math.max(0, Number(amount.value || 0));
   if (mineDisplayCurrency === 'usd') {
-    const price = getSolUsd();
+    const price = getSolUsdc();
     if (price) amountSolValue = shown / price;
   } else amountSolValue = shown;
 };
@@ -653,7 +664,7 @@ const paintMineAmount = () => {
     return;
   }
   if (mineDisplayCurrency === 'usd') {
-    const price = getSolUsd();
+    const price = getSolUsdc();
     amount.value = price ? (amountSolValue * price).toFixed(2) : '';
   } else {
     amount.value = String(Number(amountSolValue.toFixed(18)));
@@ -661,21 +672,20 @@ const paintMineAmount = () => {
 };
 const MINE_QUICK_AMOUNTS = ['0.005', '0.01', '0.1', '1'];
 const paintMineQuickAmounts = () => {
-  const price = getSolUsd();
+  const price = getSolUsdc();
   document.querySelectorAll('.quick-amounts [data-add]').forEach((button, index) => {
     const solText = MINE_QUICK_AMOUNTS[index] || MINE_QUICK_AMOUNTS[MINE_QUICK_AMOUNTS.length - 1];
     button.dataset.add = solText;
     const solAmount = Number(solText);
-    button.textContent = mineDisplayCurrency === 'usd'
-      ? (price ? `+$${(solAmount * price).toFixed(2)}` : '+$—')
-      : `+${solText}`;
+    if (mineDisplayCurrency === 'usd') {
+      button.innerHTML = `${usdcIcon('quick-usdc')}<span>+${price ? (solAmount * price).toFixed(2) : '—'}</span>`;
+    } else button.textContent = `+${solText}`;
   });
 };
 const setMineUsdValue = (element, solAmount) => {
   if (!element) return;
   element.classList.add('mine-currency-value');
-  const label = usdFor(solAmount);
-  element.dataset.usd = label ?? '$—';
+  element.dataset.usd = usdcValueFor(solAmount) ?? '—';
 };
 const stripMineSolTooltips = () => {
   document.querySelectorAll('.deploy-panel img.sol-icon, .round-summary img.sol-icon')
@@ -688,10 +698,10 @@ const syncMineCurrency = () => {
   if (!mineCurrencyToggle) return;
   mineCurrencyToggle.classList.toggle('active', usd);
   mineCurrencyToggle.setAttribute('aria-pressed', String(usd));
-  mineCurrencyToggle.setAttribute('aria-label', usd ? 'Show mining values in SOL' : 'Show mining values in US dollars');
-  document.querySelector('.amount-label > span').textContent = usd ? 'USD / tile' : 'SOL / tile';
-  amount.setAttribute('aria-label', usd ? 'US dollars per tile' : 'SOL per tile');
-  amount.readOnly = usd && !getSolUsd();
+  mineCurrencyToggle.setAttribute('aria-label', usd ? 'Show mining values in SOL' : 'Show mining values in USDC');
+  document.querySelector('.amount-label > span').textContent = usd ? 'USDC / tile' : 'SOL / tile';
+  amount.setAttribute('aria-label', usd ? 'USDC equivalent per tile' : 'SOL per tile');
+  amount.readOnly = usd && !getSolUsdc();
   amount.placeholder = amount.readOnly ? 'Price unavailable' : '0.00';
   paintMineQuickAmounts();
 };
@@ -1848,13 +1858,10 @@ const calculatorAmount = document.querySelector('#calculator-amount');
 // it's the plain mine URL (sharing it referral-free rather than sharing a fake address).
 const REF_BASE = `${window.location.origin}/#mine`;
 let referralUrl = REF_BASE;
-const referralLinkFor = (account) => account ? `${REF_BASE}?ref=${account}` : REF_BASE;
-// Display form: no scheme, address truncated. Used by the referral panel, the projection card and
-// the PNG that card exports — all three shipped the same hardcoded `bullion.rhc/mine?ref=0x3iP4`.
-const referralShortLink = (account) => {
-  const base = REF_BASE.replace(/^https?:\/\//, '');
-  return account ? `${base}?ref=${chain.format.short(account)}` : base;
-};
+const referralLinkFor = (account) => buildReferralLink(REF_BASE, account);
+// Display and share the same compact, deterministic code. The complete wallet is resolved by the
+// indexed lookup only when a referred miner connects, then the full address is passed on-chain.
+const referralShortLink = (account) => compactReferralLink(REF_BASE, account);
 // ── FLEX · live, shareable staking position card -------------------------------------------
 const stakeFlexDialog = document.querySelector('#stake-flex-dialog');
 const stakeFlexNumber = (value, digits = 3) => Number(value || 0).toLocaleString(undefined, {
@@ -2095,7 +2102,7 @@ stakeFlexDialog?.querySelectorAll('#stake-flex-x, #stake-flex-tg').forEach((shar
 
     // A website cannot inject an attachment into another origin's composer. Open the correct
     // platform synchronously (so popup blockers allow it), then put the PNG on the clipboard for
-    // a single paste. The platform URL already contains this wallet's full referral URL.
+    // a single paste. The platform URL already contains this wallet's compact referral URL.
     const shareWindow = window.open(shareLink.href, '_blank', 'noopener,noreferrer');
     const blob = await createStakeFlexCard();
     if (!blob) return notify('Could not create position card');
@@ -2330,7 +2337,7 @@ const ethNum = (n) => {
 };
 
 const mineCostLabel = (solAmount) => mineDisplayCurrency === 'usd'
-  ? (usdFor(solAmount) ?? '$—')
+  ? `${usdcValueFor(solAmount) ?? '—'} USDC`
   : `${ethNum(solAmount)} SOL`;
 
 const paintMineBalance = () => {
@@ -2445,7 +2452,7 @@ const updateMine = () => {
       : bettingOpen
         ? `Mine this round with ${mineCostLabel(total)}`
         : `Queue a bid for the next round with ${mineCostLabel(total)}`
-    : `Select tiles and enter an ${mineDisplayCurrency === 'usd' ? 'USD' : 'SOL'} amount to mine`);
+    : `Select tiles and enter an ${mineDisplayCurrency === 'usd' ? 'USDC equivalent' : 'SOL'} amount to mine`);
   stripMineSolTooltips();
 };
 
@@ -3130,7 +3137,8 @@ const renderReferral = () => {
   if (!referralShell) return;
   const acct = chain.state.account;
 
-  // Link + share targets use the connected wallet's address as ?ref=.
+  // Link + share targets use the wallet's indexed ten-character referral code. The full public
+  // key remains out of the social URL and is resolved only for the on-chain registration call.
   referralUrl = referralLinkFor(acct);
   setReferralText('.referral-link code', acct ? referralShortLink(acct) : 'Connect wallet for your link');
   const copyReferralButton = referralShell.querySelector('[data-copy-ref]');
@@ -3176,6 +3184,10 @@ const renderReferral = () => {
   refFlex('[data-ref-flex-link]', referralShortLink(acct));
   const referralShareText = `I have referred ${s?.referrals ?? 0} miners and earned ${s ? chain.format.solIcon(s.lifetime) : '0.000'} MYNE on Solana.`;
   const referralShareUrl = referralUrl || REF_BASE;
+  const pageX = referralShell.querySelector('#share-ref-x');
+  const pageTg = referralShell.querySelector('#share-ref-tg');
+  if (pageX) pageX.href = `https://x.com/intent/post?text=${encodeURIComponent(referralShareText)}&url=${encodeURIComponent(referralShareUrl)}`;
+  if (pageTg) pageTg.href = `https://t.me/share/url?url=${encodeURIComponent(referralShareUrl)}&text=${encodeURIComponent(referralShareText)}`;
   const refX = referralFlexDialog?.querySelector('#ref-flex-x');
   const refTg = referralFlexDialog?.querySelector('#ref-flex-tg');
   if (refX) refX.href = `https://x.com/intent/post?text=${encodeURIComponent(referralShareText)}&url=${encodeURIComponent(referralShareUrl)}`;
@@ -3288,7 +3300,8 @@ const syncReferralPageSize = () => {
 window.addEventListener('resize', syncReferralPageSize);
 
 /**
- * If the visitor arrived via a ?ref=0x… link, bind that referrer once — permanently. Only
+ * If the visitor arrived via a compact ?ref= code (or a legacy full Solana address), resolve and
+ * bind that referrer once — permanently. Only
  * possible if they've never set one (the contract enforces first-wins). Silent no-op
  * otherwise, so it can run on every connect without nagging.
  */
@@ -3297,15 +3310,17 @@ const applyPendingReferral = async () => {
   if (!acct) return;
   const params = new URLSearchParams(window.location.hash.split('?')[1] || window.location.search);
   const ref = params.get('ref');
-  if (!ref || !/^0x[0-9a-fA-F]{40}$/.test(ref)) return;
-  if (ref.toLowerCase() === acct.toLowerCase()) return;
+  if (!ref) return;
+  const referrer = await resolveReferrerReference(ref);
+  if (!referrer) return notify('This referral link is invalid or is not active yet');
+  if (referrer === acct) return;
 
   const existing = await readReferrerOf(acct).catch(() => null);
-  if (existing && !/^0x0+$/i.test(existing)) return; // already bound — permanent
+  if (existing && existing !== DEFAULT_SOLANA_ADDRESS) return; // already bound — permanent
 
   try {
     notify('Setting your referrer (one-time)…');
-    const hash = await setReferrer(ref);
+    const hash = await setReferrer(referrer);
     await waitForTx(hash);
     notify('Referrer set — they earn 1% when you claim');
   } catch (error) {
@@ -3556,10 +3571,12 @@ const renderGridWinner = (state) => {
 const connectButton = document.querySelector('#connect-wallet');
 const deployedValue = document.querySelector('.deployed-token-value');
 const deployedUsdValue = document.querySelector('.deployed-usd-value');
+const deployedUsdcNumber = deployedUsdValue.querySelector('span');
 const motherlodePrimaryValue = document.querySelector('.motherlode-primary-value');
 const motherlodeSecondary = document.querySelector('.motherlode-secondary');
 const motherlodeEthValue = motherlodeSecondary.querySelector('.motherlode-eth-value');
 const motherlodeEthUsdValue = motherlodeSecondary.querySelector('.motherlode-eth-usd');
+const motherlodeUsdcNumber = motherlodeEthUsdValue.querySelector('.motherlode-usdc-value');
 const balanceLabel = document.querySelector('.amount-label small');
 let availableEth = 0;
 let lastRoundId = null;
@@ -3718,11 +3735,11 @@ const renderChain = (state) => {
   const deployedSolText = (Number(state.totalWager) / 1e9).toFixed(2);
   setMarkedValue(deployedValue, solIcon('summary-eth'), deployedSolText);
   setMineUsdValue(deployedValue, Number(state.totalWager) / 1e9);
-  const deployedUsdText = usdFor(Number(state.totalWager) / 1e9) ?? '$—';
-  deployedUsdValue.textContent = deployedUsdText;
+  const deployedUsdText = usdcValueFor(Number(state.totalWager) / 1e9) ?? '—';
+  deployedUsdcNumber.textContent = deployedUsdText;
   deployedHeading.dataset.solLabel = `≈${deployedSolText} SOL`;
-  deployedHeading.dataset.usdLabel = `≈${deployedUsdText}`;
-  deployedStat.setAttribute('aria-label', `Deployed ${deployedSolText} SOL${deployedUsdText === '$—' ? '' : `, approximately ${deployedUsdText}`}`);
+  deployedHeading.dataset.usdLabel = `≈${deployedUsdText} USDC`;
+  deployedStat.setAttribute('aria-label', `Deployed ${deployedSolText} SOL${deployedUsdText === '—' ? '' : `, approximately ${deployedUsdText} USDC`}`);
   const motherlodeGldText = chain.format.solIcon(state.jackpot.bullion, 2);
   const displayedMotherlodeNative = displayedMotherlodeSol(
     state.jackpot.native,
@@ -3732,10 +3749,10 @@ const renderChain = (state) => {
   const motherlodeEthText = chain.format.ethSmart(displayedMotherlodeNative);
   rollMotherlodeValue(motherlodePrimaryValue, Number(state.jackpot.bullion) / 1e9, motherlodeGldText);
   rollMotherlodeValue(motherlodeEthValue, Number(displayedMotherlodeNative) / 1e9, motherlodeEthText);
-  const motherlodeUsdText = usdFor(Number(displayedMotherlodeNative) / 1e9) ?? '$—';
-  motherlodeEthUsdValue.textContent = motherlodeUsdText;
+  const motherlodeUsdText = usdcValueFor(Number(displayedMotherlodeNative) / 1e9) ?? '—';
+  motherlodeUsdcNumber.textContent = motherlodeUsdText;
   motherlodeHeading.dataset.solLabel = `≈${motherlodeEthText} SOL`;
-  motherlodeHeading.dataset.usdLabel = `≈${motherlodeUsdText}`;
+  motherlodeHeading.dataset.usdLabel = `≈${motherlodeUsdText} USDC`;
   syncSummaryHoverLabels();
   motherlodeStat.setAttribute('aria-label', `Motherlode SOL payment ${motherlodeEthText} SOL plus staking bonus ${motherlodeGldText} MYNE, burned and staked at 5× reward weight; 1 in 650 chance per round`);
 
