@@ -156,6 +156,21 @@ async function verifyInitialized() {
   };
 }
 
+async function waitForInitialized(maxAttempts = 12) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await verifyInitialized();
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 1_500));
+      }
+    }
+  }
+  throw lastError;
+}
+
 if (existingCount === 3) {
   console.log(JSON.stringify({ ok: true, alreadyExists: true, ...await verifyInitialized() }, null, 2));
   process.exit(0);
@@ -292,5 +307,5 @@ console.log(JSON.stringify({
   simulationOnly: false,
   submitted: true,
   signature,
-  ...await verifyInitialized(),
+  ...await waitForInitialized(),
 }, null, 2));

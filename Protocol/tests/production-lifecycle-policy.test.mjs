@@ -115,6 +115,7 @@ test('Mainnet initialization is atomic, paused, and exact-address guarded', asyn
   assert.match(source, /simulateTransaction/);
   assert.match(source, /SUBMIT_MAINNET_INITIALIZE !== config\.toBase58\(\)/);
   assert.match(source, /confirmTransaction[\s\S]*'finalized'/);
+  assert.match(source, /waitForInitialized/);
   assert.match(source, /state\.paused, true/);
   assert.match(source, /mintState\.mintAuthority\?\.equals\(config\)/);
 });
