@@ -72,6 +72,14 @@ body[data-route="stake"] .staking-dashboard > .staking-history {
 body[data-route="stake"] .staking-dashboard > .staking-overview { grid-area: overview !important; }
 body[data-route="stake"] .staking-dashboard > .staking-actions { grid-area: actions !important; }
 
+/* These cards used to be direct children of .staking-shell and were assigned rows 3 and 4.
+   They now live inside the two dashboard columns; clear those stale coordinates or empty implicit
+   rows and their gaps appear above the rewards card at some viewport sizes. */
+body[data-route="stake"] .staking-overview > :is(.stake-rewards, .staking-position-strip),
+body[data-route="stake"] .staking-actions > .staking-layout {
+  grid-area: auto !important;
+}
+
 .staking-overview,
 .staking-actions,
 .referrals-primary,
@@ -211,7 +219,7 @@ body[data-route="referrals"] .referral-row {
   }
 
   body[data-route="stake"] .staking-overview {
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
     align-content: stretch;
   }
 

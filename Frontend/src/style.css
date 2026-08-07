@@ -4039,7 +4039,7 @@ body[data-route="mine"] .slot.round-winner {
   box-sizing: border-box !important;
   border: 2px solid transparent !important;
   background:
-    linear-gradient(135deg, #fff27a 0%, #ffe86a 18%, #42ddff 45%, #477cff 68%, #f04bdd 100%) padding-box,
+    var(--tile-pearl-border) padding-box,
     var(--tile-pearl-border) border-box !important;
   background-size: 100% 100%, 100% 100% !important;
   box-shadow: none !important;

@@ -6,6 +6,7 @@ import './brand-uniform.css';
 import './wide-dashboards.css';
 import './about-stats.css';
 import './surface-system.css';
+import './viewport-fit.css';
 import { LINKS, NETWORK, PRODUCT, PROGRAMS } from './app-config.js';
 import {
   fetchProtocolAccount, getProtocolConfig, protocolPdas, protocolProgramId,
@@ -309,29 +310,38 @@ document.querySelector('#app').innerHTML = `
   <main class="feature-shell page-view" data-page="rounds"><header class="feature-hero route-header"><div><span class="eyebrow">ROUNDS</span><h1>History.</h1></div></header><section class="feature-metrics"><article><span>ROUNDS</span><strong>—</strong><small></small></article><article><span>DEPLOYED</span><strong>${solIcon()} 0.00</strong></article><article><span>AVG DEPLOYED</span><strong>${solIcon()} 0.00</strong><small>per mined round</small></article><article><span>MOTHERLODES</span><strong>0</strong></article></section><section class="ledger-panel panel"><div class="ledger-head"><div class="round-filters" role="tablist" aria-label="Filter round history"><button class="active" role="tab" aria-selected="true" data-round-filter="all">All</button><button role="tab" aria-selected="false" data-round-filter="split">Split</button><button role="tab" aria-selected="false" data-round-filter="solo">Solo</button><button role="tab" aria-selected="false" data-round-filter="motherlode">Motherlode</button></div></div><div class="round-table-head"><span>ROUND</span><span>TILE</span><span>MODE</span><span>SOL DEPLOYED</span><span>WINNERS</span><span>TIME</span><span></span></div><div class="round-list">${roundRows}</div></section></main>
 
   <main class="feature-shell page-view" data-page="referrals">
-    <header class="feature-hero route-header referrals-hero"><div><span class="eyebrow">EARN MYNE</span><h1>Referrals.</h1></div></header>
+    <header class="feature-hero route-header referrals-hero"><div><span class="eyebrow">EARN MYNE</span><h1>Referrals.</h1><p class="referrals-hero-subtitle">Earn 1% whenever a permanently referred miner claims MYNE.</p></div></header>
     <section class="feature-metrics referral-metrics"><article><span>CLAIMABLE</span><strong><img src="/gld-icon-transparent.png" alt=""/> 0.000</strong></article><article><span>ACTIVE</span><strong class="referral-active"><b>0</b><small>/ 0</small></strong></article><article><span>EARNED</span><strong><img src="/gld-icon-transparent.png" alt=""/> 0.000</strong></article></section>
-    <div class="referrals-dashboard">
-      <div class="referrals-column referrals-primary">
-        <section class="referral-command panel"><div class="referral-link-block"><span class="eyebrow">YOUR LINK</span><div class="referral-link"><code>Connect wallet for your link</code><button data-copy-ref>Copy</button></div><div class="share-actions"><a id="share-ref-x" href="#" target="_blank" rel="noreferrer" aria-label="Share referral on X" title="Share on X">${icon('x')}</a><a id="share-ref-tg" href="#" target="_blank" rel="noreferrer" aria-label="Share referral on Telegram" title="Share on Telegram">${icon('telegram')}</a></div></div><div class="referral-performance"><span class="eyebrow">30 DAYS</span><strong>1,284 <small>visits</small></strong><strong>94 <small>miners</small></strong><strong class="referral-earned">12.840 <small>earned</small></strong></div></section>
+    <div class="referrals-dashboard" data-mobile-view="link">
+      <nav class="dashboard-view-tabs referral-dashboard-tabs" role="tablist" aria-label="Referral dashboard view">
+        <button class="active" type="button" role="tab" aria-selected="true" aria-controls="referral-link-view" data-dashboard-view="link">Link</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="referral-network-view" data-dashboard-view="network" tabindex="-1">Network</button>
+        <button type="button" role="tab" aria-selected="false" aria-controls="referral-leaders-view" data-dashboard-view="leaders" tabindex="-1">Leaders</button>
+      </nav>
+      <div class="referrals-column referrals-primary" id="referral-link-view" role="tabpanel">
+        <section class="referral-command panel"><div class="referral-link-block"><span class="eyebrow">YOUR LINK</span><p class="referral-link-note">Share one permanent link. Your wallet earns from every MYNE claim made by miners you refer.</p><div class="referral-link"><code>Connect wallet for your link</code><button data-copy-ref>Copy</button></div><div class="share-actions"><a id="share-ref-x" href="#" target="_blank" rel="noreferrer" aria-label="Share referral on X" title="Share on X">${icon('x')}</a><a id="share-ref-tg" href="#" target="_blank" rel="noreferrer" aria-label="Share referral on Telegram" title="Share on Telegram">${icon('telegram')}</a></div></div><div class="referral-performance"><span class="eyebrow">30 DAYS</span><strong>1,284 <small>referred</small></strong><strong>94 <small>active</small></strong><strong class="referral-earned">12.840 <small>earned</small></strong></div><section class="referral-rules" aria-label="How referrals work"><span class="eyebrow">HOW IT WORKS</span><div><i>01</i><span><b>Permanent attribution</b><small>The first valid referral stays linked.</small></span></div><div><i>02</i><span><b>Paid when they claim</b><small>You receive 1% of each MYNE claim.</small></span></div><div><i>03</i><span><b>No additional fee</b><small>Your reward comes from the existing claim fee.</small></span></div></section></section>
       </div>
       <div class="referrals-column referrals-secondary">
-        <section class="my-referrals panel"><div class="ledger-head"><div><span class="eyebrow">YOUR NETWORK</span><h2>People you referred</h2></div></div><div class="my-referrals-head"><span>WALLET</span><span>STATUS</span><span>EARNED FOR YOU</span><span></span></div><div class="my-referrals-list"></div></section>
-        <section class="referral-leaderboard panel"><div class="ledger-head"><div><span class="eyebrow">TOP NETWORKS</span><h2>Leaderboard</h2></div></div><div class="referral-table-head"><span>RANK</span><span>CREATOR</span><span>REFERRALS</span><span>ACTIVE</span><span>NETWORK</span><span>EARNED</span><span></span></div><div class="referral-list">${referralRows}</div></section>
+        <section class="my-referrals panel" id="referral-network-view" role="tabpanel"><div class="ledger-head"><div><span class="eyebrow">YOUR NETWORK</span><h2>People you referred</h2></div></div><div class="my-referrals-head"><span>WALLET</span><span>STATUS</span><span>EARNED FOR YOU</span><span></span></div><div class="my-referrals-list"></div><nav class="referral-pagination" data-referral-pagination="network" aria-label="Your network pages" hidden><button type="button" data-referral-page="prev" aria-label="Previous network page">‹</button><span aria-live="polite"></span><button type="button" data-referral-page="next" aria-label="Next network page">›</button></nav></section>
+        <section class="referral-leaderboard panel" id="referral-leaders-view" role="tabpanel"><div class="ledger-head"><div><span class="eyebrow">TOP NETWORKS</span><h2>Leaderboard</h2></div></div><div class="referral-table-head"><span>RANK</span><span>CREATOR</span><span>REFERRALS</span><span>ACTIVE</span><span>EARNED</span><span></span></div><div class="referral-list">${referralRows}</div><nav class="referral-pagination" data-referral-pagination="leaders" aria-label="Leaderboard pages" hidden><button type="button" data-referral-page="prev" aria-label="Previous leaderboard page">‹</button><span aria-live="polite"></span><button type="button" data-referral-page="next" aria-label="Next leaderboard page">›</button></nav></section>
       </div>
     </div>
   </main>
 
   <main class="feature-shell staking-shell page-view" data-page="stake">
-    <header class="feature-hero route-header staking-hero"><div><span class="eyebrow">SOL REWARDS</span><h1>Stake.</h1><p class="staking-hero-subtitle">8% of mining deployment.</p></div></header>
-    <section class="feature-metrics staking-metrics"><article><span>STAKING APY</span><strong id="metric-apr">—</strong></article><article><span>TOTAL STAKED</span><strong><img src="/gld-icon-transparent.png" alt=""/> <b id="metric-staked">—</b></strong></article><article><span>SOL REWARDS POOL</span><strong class="staking-sol-pool">${solIcon()} <b id="metric-pool">—</b></strong></article><article><span>STAKERS</span><strong id="metric-stakers">—</strong></article></section>
-    <div class="staking-dashboard">
+    <header class="feature-hero route-header staking-hero"><div><span class="eyebrow">SOL REWARDS</span><h1>Stake.</h1><p class="staking-hero-subtitle">8% of all mining volume is paid to stakers in SOL.</p></div></header>
+    <section class="feature-metrics staking-metrics"><article class="staking-yield-metric"><span>STAKING APY</span><strong id="metric-apr">—</strong><small>LAST 30 MINUTES</small></article><article><span>TOTAL STAKED</span><strong><img src="/gld-icon-transparent.png" alt=""/> <b id="metric-staked">—</b></strong></article><article><span>SOL REWARDS POOL</span><strong class="staking-sol-pool">${solIcon()} <b id="metric-pool">—</b></strong></article><article><span>STAKERS</span><strong id="metric-stakers">—</strong></article></section>
+    <div class="staking-dashboard" data-mobile-view="overview">
       <section class="staking-history panel" data-staking-chart aria-label="Total MYNE staked over time">
     <header><div><span>STAKED MYNE · 30 DAYS</span><strong data-staking-chart-total>—</strong></div><small>PAST 30 DAYS · ON-CHAIN</small></header>
-    <div class="staking-history-plot" data-staking-chart-plot><span>Loading staking history…</span></div>
-    <footer><span data-staking-chart-start>—</span><span>NOW</span></footer>
+      <div class="staking-history-plot" data-staking-chart-plot><span>Loading staking history…</span></div>
+      <footer><span data-staking-chart-start>—</span><span>NOW</span></footer>
       </section>
-      <div class="staking-dashboard-column staking-overview">
+      <nav class="dashboard-view-tabs stake-dashboard-tabs" role="tablist" aria-label="Staking dashboard view">
+        <button class="active" id="stake-overview-tab" type="button" role="tab" aria-selected="true" aria-controls="stake-overview-view" data-dashboard-view="overview">Rewards</button>
+        <button id="stake-actions-tab" type="button" role="tab" aria-selected="false" aria-controls="stake-actions-view" data-dashboard-view="actions" tabindex="-1">Stake / Unstake</button>
+      </nav>
+      <div class="staking-dashboard-column staking-overview" id="stake-overview-view" role="tabpanel" aria-labelledby="stake-overview-tab">
         <section class="stake-rewards eth-claim-hero" aria-labelledby="eth-claim-title">
       <div class="eth-claim-main">
         <img class="eth-claim-logo" src="/solana-mark.svg" alt="Solana"/>
@@ -352,7 +362,7 @@ document.querySelector('#app').innerHTML = `
       <article><span>POOL SHARE</span><strong id="stake-share">0.0000%</strong><small>Your SOL share</small></article>
         </section>
       </div>
-      <div class="staking-dashboard-column staking-actions">
+      <div class="staking-dashboard-column staking-actions" id="stake-actions-view" role="tabpanel" aria-labelledby="stake-actions-tab">
         <section class="staking-layout">
           <article class="stake-composer panel"><div class="stake-heading"><span class="eyebrow">NEW POSITION</span><h2>Stake</h2></div><label class="stake-amount-label" for="stake-amount"><span>Amount</span><small>2,500 MYNE</small></label><div class="stake-amount"><img src="/gld-icon-transparent.png" alt=""/><input id="stake-amount" value="0" inputmode="decimal" aria-label="MYNE to stake"/><span>MYNE</span><button id="stake-max">MAX</button></div><div class="unstake-policy"><i>30</i><div><span>UNSTAKING</span><b>30-day withdrawal queue</b><p>Request withdrawal at any time. Your MYNE becomes claimable 30 days later.</p></div></div><button class="stake-submit" id="stake-submit">Enter amount</button><small class="stake-caution">Unstaking requests have a 30-day cooldown.</small></article>
         </section>
@@ -1000,12 +1010,12 @@ chain.setWalletChooser(walletPicker);
 const stakingRewards = document.querySelector('.stake-rewards');
 const stakingHero = document.querySelector('.staking-hero');
 const stakeComposer = document.querySelector('.stake-composer');
-stakeComposer.querySelector('.stake-amount-label').insertAdjacentHTML('beforebegin', '<div class="stake-mode-tabs" role="tablist" aria-label="Staking action"><button class="active" id="stake-deposit-tab" role="tab" aria-selected="true">Stake</button><button id="stake-withdraw-tab" role="tab" aria-selected="false">Unstake</button></div>');
+stakeComposer.querySelector('.stake-amount-label').insertAdjacentHTML('beforebegin', '<div class="stake-mode-tabs" role="tablist" aria-label="Staking action"><button class="active" id="stake-deposit-tab" type="button" role="tab" aria-selected="true">Stake</button><button id="stake-withdraw-tab" type="button" role="tab" aria-selected="false" tabindex="-1">Unstake</button></div>');
 // Lock-tier chooser (deposit only): keep commitment clear without oversized multipliers.
 stakeComposer.querySelector('.stake-mode-tabs').insertAdjacentHTML('afterend',
   '<div class="stake-tier-tabs" id="stake-tier-tabs" role="tablist" aria-label="Lock tier">'
-  + '<button id="stake-tier-flex" role="tab" aria-selected="false"><span><b>STANDARD STAKE</b><small>Flexible · withdraw anytime</small></span><strong id="stake-flex-apy">0.0%</strong></button>'
-  + '<button class="active" id="stake-tier-burn" role="tab" aria-selected="true"><span><b>STAKE + BURN</b><small>Permanent · MYNE is burned</small></span><strong id="stake-burn-apy">0.0%</strong></button>'
+  + '<button id="stake-tier-flex" type="button" role="tab" aria-selected="false" tabindex="-1"><span><b>STANDARD STAKE</b><small>Flexible · 30-day withdrawal queue</small></span><strong id="stake-flex-apy">0.0%</strong></button>'
+  + '<button class="active" id="stake-tier-burn" type="button" role="tab" aria-selected="true"><span><b>STAKE + BURN</b><small>Permanent · MYNE is burned</small></span><strong id="stake-burn-apy">0.0%</strong></button>'
   + '</div>');
 stakeComposer.querySelector('.stake-amount').insertAdjacentHTML('afterend', '<div class="stake-quick-actions"><button data-stake-percent="25">25%</button><button data-stake-percent="50">50%</button><button data-stake-percent="75">75%</button><button data-stake-percent="100">MAX</button></div>');
 document.querySelector('#claim-stake-rewards').textContent = 'Connect to claim';
@@ -1069,13 +1079,58 @@ if (referralShell) {
   const referralHero = referralShell.querySelector('.referrals-hero');
   if (referralHero) {
     referralHero.querySelector('h1').textContent = 'Referrals.';
-    referralHero.querySelector('p')?.remove();
     referralHero.querySelector('.primary-feature-action')?.setAttribute('hidden', '');
   }
   const referralShareSlot = referralShell.querySelector('.share-actions');
   referralShareSlot?.remove();
-  referralShell.querySelector('.referral-performance')?.insertAdjacentHTML('afterend', '<div class="referral-flex-actions"><button class="referral-claim-action" id="claim-referral-rewards" disabled>Nothing to claim</button></div>');
+  (referralShell.querySelector('.referral-rules') ?? referralShell.querySelector('.referral-performance'))?.insertAdjacentHTML('afterend', '<div class="referral-flex-actions"><button class="referral-claim-action" id="claim-referral-rewards" disabled>Nothing to claim</button></div>');
 }
+
+// Phones cannot show every dashboard card at once without reducing type and touch targets to an
+// unusable size. Keep the route itself fixed to the viewport and let these compact tablists choose
+// the active work panel. Wider screens hide the tabs and continue to show every column together.
+const bindDashboardViews = (tablist) => {
+  const dashboard = tablist.closest('.staking-dashboard, .referrals-dashboard');
+  const tabs = [...tablist.querySelectorAll('[data-dashboard-view]')];
+  if (!dashboard || !tabs.length) return;
+
+  const select = (tab, focus = false) => {
+    dashboard.dataset.mobileView = tab.dataset.dashboardView;
+    tabs.forEach((candidate) => {
+      const selected = candidate === tab;
+      candidate.classList.toggle('active', selected);
+      candidate.setAttribute('aria-selected', String(selected));
+      candidate.tabIndex = selected ? 0 : -1;
+    });
+    if (focus) tab.focus();
+  };
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => select(tab));
+    tab.addEventListener('keydown', (event) => {
+      const offset = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+      const next = event.key === 'Home'
+        ? tabs[0]
+        : event.key === 'End'
+          ? tabs.at(-1)
+          : offset
+            ? tabs[(index + offset + tabs.length) % tabs.length]
+            : null;
+      if (!next) return;
+      event.preventDefault();
+      select(next, true);
+    });
+  });
+
+  // Keep the DOM, ARIA state and responsive dataset aligned even if markup order changes later.
+  // This also preserves the selected compact subview when a window crosses the desktop breakpoint
+  // and comes back: desktop shows both panels, while the dataset remains the single mobile truth.
+  select(tabs.find((tab) => tab.dataset.dashboardView === dashboard.dataset.mobileView)
+    ?? tabs.find((tab) => tab.classList.contains('active'))
+    ?? tabs[0]);
+};
+
+document.querySelectorAll('.dashboard-view-tabs').forEach(bindDashboardViews);
 
 document.body.insertAdjacentHTML('beforeend', `
   <dialog class="stake-flex-dialog referral-flex-dialog" id="referral-flex-dialog" aria-labelledby="referral-flex-title">
@@ -1480,20 +1535,30 @@ const updateStake = () => {
       ? 'Your MYNE is burned permanently for a 5× reward share that never unlocks.'
       : 'Request withdrawal at any time. Your MYNE becomes claimable 30 days later.';
   }
+  const heading = stakeComposer.querySelector('.stake-heading h2');
+  if (heading) heading.textContent = stakeMode === 'deposit' ? 'Stake' : 'Unstake';
+  const caution = stakeComposer.querySelector('.stake-caution');
+  if (caution) caution.textContent = stakeMode !== 'deposit'
+    ? 'Your MYNE becomes claimable after the 30-day withdrawal queue.'
+    : isBurn
+      ? 'Burn staking is permanent and cannot be undone.'
+      : 'Standard unstaking uses a 30-day withdrawal queue.';
   document.querySelector('#stake-weight').textContent = projected.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   document.querySelector('#stake-share').textContent = `${(projTotal > 0 ? (projected / projTotal) * 100 : 0).toFixed(4)}%`;
 
   // Cap the input at wallet balance (deposit) or flexible-staked principal (withdraw).
-  const max = s ? Number(chain.format.solIcon(stakeMode === 'deposit' ? s.walletBullion : s.flexStaked)) : 0;
+  const available = s ? (stakeMode === 'deposit' ? s.walletBullion : s.flexStaked) : 0n;
+  const max = Number(chain.format.solIcon(available));
   const ballabel = stakeComposer.querySelector('.stake-amount-label small');
-  if (ballabel) ballabel.textContent = `${chain.format.solIcon(s ? (stakeMode === 'deposit' ? s.walletBullion : s.flexStaked) : 0n)} ${stakeMode === 'deposit' ? 'available' : 'staked'}`;
+  if (ballabel) ballabel.textContent = `${chain.format.solIcon(available)} ${stakeMode === 'deposit' ? 'available' : 'staked'}`;
+  stakeAmount.setAttribute('aria-label', stakeMode === 'deposit' ? 'MYNE to stake' : 'MYNE to unstake');
 
   const submit = document.querySelector('#stake-submit');
   const overMax = principal > max + 1e-9;
   submit.classList.toggle('ready', principal > 0 && !overMax);
   submit.textContent = !chain.state.account ? 'Connect wallet'
     : principal <= 0 ? 'Enter an amount'
-      : overMax ? `Only ${chain.format.solIcon(stakeMode === 'deposit' ? s.walletBullion : s.flexStaked, 2)} available`
+      : overMax ? `Only ${chain.format.solIcon(available, 2)} available`
         : stakeMode !== 'deposit' ? `Request unstake ${principal.toLocaleString()}`
           : isBurn ? `Burn ${principal.toLocaleString()} MYNE for 5×`
             : `Stake ${principal.toLocaleString()} MYNE`;
@@ -1536,7 +1601,7 @@ const renderStakingRewards = () => {
 
   const claimBtn = document.querySelector('#claim-stake-rewards');
   const has = s && (s.pendingEth > 0n || s.hasClaimableStocks);
-  claimBtn.disabled = !has;
+  claimBtn.disabled = !chain.state.account || !has;
   claimBtn.textContent = !chain.state.account ? 'Connect to claim'
     : !has ? 'Nothing to claim'
     : s.pendingEth > 0n
@@ -1730,28 +1795,50 @@ const refreshStaking = async () => {
 
 let stakeMode = 'deposit';
 let stakeTier = TIER_BURN; // Burn (5×) is the encouraged default; standard remains reversible.
+const stakeModeTabs = [...stakeComposer.querySelectorAll('.stake-mode-tabs [role="tab"]')];
+const stakeTierTabs = [...stakeComposer.querySelectorAll('.stake-tier-tabs [role="tab"]')];
+const syncRovingTabs = (tabs, activeTab) => {
+  tabs.forEach((tab) => {
+    const selected = tab === activeTab;
+    tab.classList.toggle('active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+  });
+};
+const bindRovingTabKeys = (tabs, activate) => {
+  tabs.forEach((tab, index) => tab.addEventListener('keydown', (event) => {
+    const offset = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    const next = event.key === 'Home'
+      ? tabs[0]
+      : event.key === 'End'
+        ? tabs.at(-1)
+        : offset
+          ? tabs[(index + offset + tabs.length) % tabs.length]
+          : null;
+    if (!next) return;
+    event.preventDefault();
+    activate(next);
+    next.focus();
+  }));
+};
 const setStakeMode = (mode) => {
   stakeMode = mode;
-  document.querySelector('#stake-deposit-tab').classList.toggle('active', mode === 'deposit');
-  document.querySelector('#stake-withdraw-tab').classList.toggle('active', mode === 'withdraw');
-  document.querySelector('#stake-deposit-tab').setAttribute('aria-selected', String(mode === 'deposit'));
-  document.querySelector('#stake-withdraw-tab').setAttribute('aria-selected', String(mode === 'withdraw'));
+  syncRovingTabs(stakeModeTabs, document.querySelector(mode === 'deposit' ? '#stake-deposit-tab' : '#stake-withdraw-tab'));
   // The lock-tier chooser only applies when depositing.
   document.querySelector('#stake-tier-tabs').hidden = mode !== 'deposit';
   updateStake();
 };
 const setStakeTier = (tier) => {
   stakeTier = tier;
-  document.querySelector('#stake-tier-flex').classList.toggle('active', tier === TIER_FLEX);
-  document.querySelector('#stake-tier-burn').classList.toggle('active', tier === TIER_BURN);
-  document.querySelector('#stake-tier-flex').setAttribute('aria-selected', String(tier === TIER_FLEX));
-  document.querySelector('#stake-tier-burn').setAttribute('aria-selected', String(tier === TIER_BURN));
+  syncRovingTabs(stakeTierTabs, document.querySelector(tier === TIER_FLEX ? '#stake-tier-flex' : '#stake-tier-burn'));
   updateStake();
 };
 document.querySelector('#stake-deposit-tab').addEventListener('click', () => setStakeMode('deposit'));
 document.querySelector('#stake-withdraw-tab').addEventListener('click', () => setStakeMode('withdraw'));
 document.querySelector('#stake-tier-flex').addEventListener('click', () => setStakeTier(TIER_FLEX));
 document.querySelector('#stake-tier-burn').addEventListener('click', () => setStakeTier(TIER_BURN));
+bindRovingTabKeys(stakeModeTabs, (tab) => setStakeMode(tab.id === 'stake-deposit-tab' ? 'deposit' : 'withdraw'));
+bindRovingTabKeys(stakeTierTabs, (tab) => setStakeTier(tab.id === 'stake-tier-flex' ? TIER_FLEX : TIER_BURN));
 document.querySelectorAll('[data-stake-percent]').forEach((button) => button.addEventListener('click', () => {
   // Percentage of the relevant balance: wallet (deposit) or flexible-staked (withdraw).
   const basis = stakingState ? (stakeMode === 'deposit' ? stakingState.walletBullion : stakingState.flexStaked) : 0n;
@@ -2422,7 +2509,14 @@ const setAboutSection = (name) => {
 const syncNavIndicator = () => window.requestAnimationFrame(() => {
   const nav = document.querySelector('.main-nav');
   const active = nav.querySelector('.nav-item.active');
-  if (!active) return;
+  // Swap and Tokenomics are reachable through contextual links rather than the primary nav. Clear
+  // the indicator on those routes instead of leaving it under whichever primary route was active
+  // previously.
+  if (!active) {
+    nav.style.setProperty('--nav-x', '0px');
+    nav.style.setProperty('--nav-width', '0px');
+    return;
+  }
   const navRect = nav.getBoundingClientRect();
   const activeRect = active.getBoundingClientRect();
   // + scrollLeft because the underline is absolutely positioned INSIDE the nav, so it scrolls
@@ -2963,6 +3057,7 @@ document.querySelector('#claim-stake-rewards').addEventListener('click', async (
 // Withdraw matured unstake requests (delegated — the button is re-rendered).
 document.querySelector('#unstake-status').addEventListener('click', async (event) => {
   if (!event.target.closest('#withdraw-unstaked')) return;
+  if (!chain.state.account) return notify('Connect wallet to withdraw unstaked MYNE');
   await runStakeTx('Withdrawing…', withdrawUnstaked);
 });
 // --- referrals (real, backed by BullionReferral) -------------------------------------
@@ -2970,6 +3065,69 @@ let referralStats = null;
 let referralLoadedFor = null;
 let leaderboardLoaded = false;
 let myReferralsLoadedFor = null;
+// Keep each ledger readable without wasting a tall desktop panel. Short windows and compact
+// dashboard subviews retain four rows; standard and tall desktops use six. The dashboard is
+// intentionally capped on large displays, so an eight-row page can clip its pager at 1080p.
+const referralPageSizeForViewport = () => {
+  const height = window.visualViewport?.height ?? window.innerHeight;
+  const width = window.visualViewport?.width ?? window.innerWidth;
+  if (width <= 900 || height <= 650) return 4;
+  if (height >= 840) return 6;
+  return 4;
+};
+let referralPageSize = referralPageSizeForViewport();
+let myReferralRows = [];
+let leaderboardRows = [];
+let myReferralPage = 0;
+let leaderboardPage = 0;
+
+const updateReferralPager = (kind, totalRows, requestedPage) => {
+  const pager = referralShell?.querySelector(`[data-referral-pagination="${kind}"]`);
+  const pageCount = Math.max(1, Math.ceil(totalRows / referralPageSize));
+  const page = Math.max(0, Math.min(requestedPage, pageCount - 1));
+  if (!pager) return page;
+  pager.hidden = totalRows <= referralPageSize;
+  pager.querySelector('span').textContent = `${page + 1} / ${pageCount}`;
+  pager.querySelector('[data-referral-page="prev"]').disabled = page === 0;
+  pager.querySelector('[data-referral-page="next"]').disabled = page >= pageCount - 1;
+  return page;
+};
+
+const hideReferralPager = (kind) => {
+  const pager = referralShell?.querySelector(`[data-referral-pagination="${kind}"]`);
+  if (pager) pager.hidden = true;
+};
+
+const paintMyReferralRows = () => {
+  const list = referralShell?.querySelector('.my-referrals-list');
+  if (!list || !myReferralRows.length) return;
+  myReferralPage = updateReferralPager('network', myReferralRows.length, myReferralPage);
+  const start = myReferralPage * referralPageSize;
+  list.innerHTML = myReferralRows.slice(start, start + referralPageSize).map((r) => `
+    <div class="my-referral-row">
+      <div class="referrer-identity"><div><b>${chain.format.short(r.addr)}</b></div></div>
+      <span class="referral-status ${r.active ? 'is-active' : 'is-pending'}">${r.active ? 'Mining' : 'Not mined yet'}</span>
+      <strong><img src="/gld-icon-transparent.png" alt=""/> ${chain.format.solIcon(r.earned)}</strong>
+      <a class="round-explorer" href="${explorerAddress(r.addr)}" target="_blank" rel="noreferrer">View ↗</a>
+    </div>`).join('');
+};
+
+const paintLeaderboardRows = () => {
+  const list = referralShell?.querySelector('.referral-list');
+  if (!list || !leaderboardRows.length) return;
+  leaderboardPage = updateReferralPager('leaders', leaderboardRows.length, leaderboardPage);
+  const start = leaderboardPage * referralPageSize;
+  const me = chain.state.account?.toLowerCase();
+  list.innerHTML = leaderboardRows.slice(start, start + referralPageSize).map((r, index) => `
+    <div class="referral-row${r.addr.toLowerCase() === me ? ' is-me' : ''}">
+      <span class="referral-rank">#${start + index + 1}</span>
+      <div class="referrer-identity"><i>${r.addr.slice(2, 3).toUpperCase()}</i><div><b>${chain.format.short(r.addr)}</b><span>${r.addr.toLowerCase() === me ? 'you' : 'referrer'}</span></div></div>
+      <span>${r.referrals}</span>
+      <span>${r.active}</span>
+      <strong><img src="/gld-icon-transparent.png" alt=""/> ${chain.format.solIcon(r.lifetime)}</strong>
+      <a class="round-explorer" href="${explorerAddress(r.addr)}" target="_blank" rel="noreferrer">View ↗</a>
+    </div>`).join('');
+};
 
 const setReferralText = (sel, value) => { const el = referralShell?.querySelector(sel); if (el) el.textContent = value; };
 
@@ -2980,6 +3138,8 @@ const renderReferral = () => {
   // Link + share targets use the connected wallet's address as ?ref=.
   referralUrl = referralLinkFor(acct);
   setReferralText('.referral-link code', acct ? referralShortLink(acct) : 'Connect wallet for your link');
+  const copyReferralButton = referralShell.querySelector('[data-copy-ref]');
+  if (copyReferralButton) copyReferralButton.disabled = !acct;
   const s = referralStats;
   // Metrics: CLAIMABLE / ACTIVE / EARNED
   const metrics = referralShell.querySelector('.referral-metrics');
@@ -2992,12 +3152,13 @@ const renderReferral = () => {
     metrics.querySelectorAll('article strong')[2].innerHTML = `<img src="/gld-icon-transparent.png" alt=""/> ${s ? chain.format.solIcon(s.lifetime) : '0.000'}`;
   }
 
-  // 30-day performance strip -> repurposed as live totals (contract has no time buckets).
+  // The supporting strip shows lifetime contract totals; the program has no visit analytics or
+  // rolling time buckets, so label the figures by what is actually measured on-chain.
   const perf = referralShell.querySelector('.referral-performance');
   if (perf) {
-    perf.querySelector('.eyebrow').textContent = 'YOUR NETWORK';
+    perf.querySelector('.eyebrow').textContent = 'LIFETIME';
     const [a, b, c] = perf.querySelectorAll('strong');
-    a.innerHTML = `${s ? s.referrals : 0} <small>visits</small>`;
+    a.innerHTML = `${s ? s.referrals : 0} <small>referred</small>`;
     b.innerHTML = `${s ? s.active : 0} <small>active</small>`;
     c.innerHTML = `${s ? chain.format.solIcon(s.lifetime) : '0.000'} <small>earned</small>`;
   }
@@ -3056,6 +3217,8 @@ const renderMyReferrals = async (force = false) => {
   if (!acct) {
     list.innerHTML = '<div class="round-empty">Connect your wallet to see who you referred.</div>';
     myReferralsLoadedFor = null;
+    myReferralRows = [];
+    hideReferralPager('network');
     return;
   }
   if (myReferralsLoadedFor === acct && !force) return;
@@ -3067,19 +3230,19 @@ const renderMyReferrals = async (force = false) => {
     // Distinguish "could not read" from "nobody yet" — a failed query must not read as zero.
     list.innerHTML = '<div class="round-empty">Couldn\'t load your referrals — the network didn\'t answer.</div>';
     myReferralsLoadedFor = null;
+    myReferralRows = [];
+    hideReferralPager('network');
     return;
   }
   if (!rows.length) {
     list.innerHTML = '<div class="round-empty">Nobody yet. Share your link above to start earning 1% of what they claim.</div>';
+    myReferralRows = [];
+    hideReferralPager('network');
     return;
   }
-  list.innerHTML = rows.map((r) => `
-    <div class="my-referral-row">
-      <div class="referrer-identity"><div><b>${chain.format.short(r.addr)}</b></div></div>
-      <span class="referral-status ${r.active ? 'is-active' : 'is-pending'}">${r.active ? 'Mining' : 'Not mined yet'}</span>
-      <strong><img src="/gld-icon-transparent.png" alt=""/> ${chain.format.solIcon(r.earned)}</strong>
-      <a class="round-explorer" href="${explorerAddress(r.addr)}" target="_blank" rel="noreferrer">View ↗</a>
-    </div>`).join('');
+  myReferralRows = rows;
+  myReferralPage = 0;
+  paintMyReferralRows();
 };
 
 const renderLeaderboard = async (force = false) => {
@@ -3092,19 +3255,42 @@ const renderLeaderboard = async (force = false) => {
   const rows = await readLeaderboard(10).catch(() => []);
   if (!rows.length) {
     list.innerHTML = '<div class="round-empty">No referrers yet. Share your link to be the first.</div>';
+    leaderboardRows = [];
+    hideReferralPager('leaders');
     return;
   }
-  const me = chain.state.account?.toLowerCase();
-  list.innerHTML = rows.map((r, i) => `
-    <div class="referral-row${r.addr.toLowerCase() === me ? ' is-me' : ''}">
-      <span class="referral-rank">#${i + 1}</span>
-      <div class="referrer-identity"><i>${r.addr.slice(2, 3).toUpperCase()}</i><div><b>${chain.format.short(r.addr)}</b><span>${r.addr.toLowerCase() === me ? 'you' : 'referrer'}</span></div></div>
-      <span>${r.referrals}</span>
-      <span>${r.active}</span>
-      <strong><img src="/gld-icon-transparent.png" alt=""/> ${chain.format.solIcon(r.lifetime)}</strong>
-      <a class="round-explorer" href="${explorerAddress(r.addr)}" target="_blank" rel="noreferrer">View ↗</a>
-    </div>`).join('');
+  leaderboardRows = rows;
+  leaderboardPage = 0;
+  paintLeaderboardRows();
 };
+
+referralShell?.querySelectorAll('.referral-pagination').forEach((pager) => {
+  pager.addEventListener('click', (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest('[data-referral-page]')
+      : null;
+    if (!button || button.disabled) return;
+    const delta = button.dataset.referralPage === 'next' ? 1 : -1;
+    if (pager.dataset.referralPagination === 'network') {
+      myReferralPage += delta;
+      paintMyReferralRows();
+    } else {
+      leaderboardPage += delta;
+      paintLeaderboardRows();
+    }
+  });
+});
+
+const syncReferralPageSize = () => {
+  const nextSize = referralPageSizeForViewport();
+  if (nextSize === referralPageSize) return;
+  referralPageSize = nextSize;
+  myReferralPage = 0;
+  leaderboardPage = 0;
+  if (myReferralRows.length) paintMyReferralRows();
+  if (leaderboardRows.length) paintLeaderboardRows();
+};
+window.addEventListener('resize', syncReferralPageSize);
 
 /**
  * If the visitor arrived via a ?ref=0x… link, bind that referrer once — permanently. Only

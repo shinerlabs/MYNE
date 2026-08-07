@@ -8,7 +8,8 @@
   --surface-control: #1b1b1d;
   --surface-control-hover: #252527;
   --surface-control-raised: #2c2c2e;
-  --surface-tile: linear-gradient(145deg, #151517 0%, #0f0f11 100%);
+  --surface-tile: linear-gradient(145deg, #17171a 0%, #111113 58%, #0d0d0f 100%);
+  --surface-tile-active: linear-gradient(145deg, #1b1b1e 0%, #131315 100%);
   --surface-rule: rgba(255,255,255,.065);
   --surface-rule-strong: rgba(255,255,255,.13);
   --surface-icon: #292a2e;
@@ -86,6 +87,20 @@ body[data-route="mine"] .control-column > .deploy-panel {
   box-shadow: none !important;
 }
 
+/* The mining board is a layout canvas, not another card. The generic `.panel::after` glass wash
+   was still painting a large rounded grey rectangle behind otherwise transparent tiles. */
+body[data-route="mine"] .board-panel.panel {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body[data-route="mine"] .board-panel.panel::after {
+  content: none !important;
+  display: none !important;
+}
+
 /* Secondary fields and grouped controls are darker than cards, but lighter than the page. */
 body[data-route="mine"] .amount-display,
 body[data-route="stake"] :is(.stake-amount, .stake-quick-actions),
@@ -122,16 +137,40 @@ body[data-route="stake"] .stake-amount button {
   background-color: var(--surface-control-raised) !important;
 }
 
-/* Empty mining tiles sit visibly above the page without reading as bright outlined cards.
-   Selected, committed and winner states retain the existing brand-gradient edge and overlay. */
-body[data-route="mine"] .slot:not(.selected):not(.has-position):not(.round-winner) {
-  border-color: var(--surface-rule-strong) !important;
+/* Mining tiles use one fixed transparent two-pixel edge channel in every state. At rest a quiet
+   one-pixel inset rule separates the tile from the page; during hover, focus, selection and live
+   positions that neutral rule disappears so the shared spectrum ring is the only visible edge. */
+body[data-route="mine"] .slot {
+  border: 2px solid transparent !important;
   background: var(--surface-tile) !important;
-  box-shadow: inset 0 1px rgba(255,255,255,.04) !important;
+  box-shadow:
+    inset 0 0 0 1px var(--surface-rule),
+    inset 0 1px rgba(255,255,255,.025) !important;
 }
 
-body[data-route="mine"] .slot:not(.selected):not(.has-position):not(.round-winner):hover {
-  border-color: rgba(255,255,255,.24) !important;
+body[data-route="mine"] .slot:not(.selected):not(.has-position):not(.round-winner) {
+  border-color: transparent !important;
+  background: var(--surface-tile) !important;
+}
+
+body[data-route="mine"] .slot:not(.round-winner):is(:hover, :focus-visible, .selected, .has-position) {
+  border-color: transparent !important;
+  background: var(--surface-tile-active) !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+body[data-route="mine"] .slot:focus-visible::after,
+body[data-route="mine"] .slot:hover::after,
+body[data-route="mine"] .slot.selected::after,
+body[data-route="mine"] .slot.has-position::after {
+  opacity: 1 !important;
+}
+
+/* Remove the older silver vein from direct interaction. Resolution still owns `::before`, where
+   the full multi-colour reveal wash remains visible independently of the card edge. */
+body[data-route="mine"] .slot:not(.rolling):not(.rolling-out):not(.round-winner):is(:hover, :focus-visible, .selected, .has-position)::before {
+  opacity: 0 !important;
 }
 
 /* Supporting data inside a page card uses the same inset layer on every dashboard. Dividers use

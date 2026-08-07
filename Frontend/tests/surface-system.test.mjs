@@ -5,10 +5,12 @@ import test from 'node:test';
 const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('../src/surface-system.css', import.meta.url), 'utf8');
 
-test('canonical surface system loads after route-specific styles', () => {
+test('canonical surface system loads after visual route styles and before viewport geometry', () => {
   const surfaceIndex = main.indexOf("import './surface-system.css'");
+  const viewportIndex = main.indexOf("import './viewport-fit.css'");
   assert.ok(surfaceIndex > main.indexOf("import './about-stats.css'"));
-  assert.equal(main.slice(surfaceIndex + 1).includes("import './"), false);
+  assert.ok(viewportIndex > surfaceIndex);
+  assert.equal(main.slice(viewportIndex + 1).includes("import './"), false);
 });
 
 test('surface hierarchy distinguishes page, cards, controls and tiles', () => {
@@ -22,8 +24,20 @@ test('surface hierarchy distinguishes page, cards, controls and tiles', () => {
 
 test('empty mining tiles use the neutral tile layer while brand states remain excluded', () => {
   assert.match(styles, /\.slot:not\(\.selected\):not\(\.has-position\):not\(\.round-winner\)/);
-  assert.match(styles, /border-color:\s*var\(--surface-rule-strong\) !important/);
+  assert.match(styles, /body\[data-route="mine"\] \.slot \{[\s\S]*border:\s*2px solid transparent !important/);
+  assert.match(styles, /inset 0 0 0 1px var\(--surface-rule\)/);
+  assert.match(styles, /border-color:\s*transparent !important/);
   assert.match(styles, /background:\s*var\(--surface-tile\) !important/);
+});
+
+test('interactive mining tiles expose only the spectrum edge', () => {
+  assert.match(styles, /\.slot:not\(\.round-winner\):is\(:hover, :focus-visible, \.selected, \.has-position\) \{[\s\S]*box-shadow:\s*none !important;[\s\S]*outline:\s*0 !important/);
+  assert.match(styles, /\.slot:focus-visible::after,[\s\S]*\.slot\.has-position::after \{[\s\S]*opacity:\s*1 !important/);
+});
+
+test('the mining board remains a transparent layout canvas', () => {
+  assert.match(styles, /\.board-panel\.panel \{[\s\S]*background:\s*transparent !important;[\s\S]*box-shadow:\s*none !important/);
+  assert.match(styles, /\.board-panel\.panel::after \{[\s\S]*content:\s*none !important;[\s\S]*display:\s*none !important/);
 });
 
 test('dashboard cards and supporting data share one route-independent elevation system', () => {
