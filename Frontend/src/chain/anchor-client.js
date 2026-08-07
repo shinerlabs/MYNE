@@ -1,5 +1,7 @@
 import * as anchorNamespace from '@anchor-lang/core';
-import { ComputeBudgetProgram, PublicKey, Transaction } from '@solana/web3.js';
+import {
+  ComputeBudgetProgram, PublicKey, Transaction, VersionedTransaction,
+} from '@solana/web3.js';
 
 import idl from '../generated/myne_protocol.json' with { type: 'json' };
 import { PROGRAMS } from '../app-config.js';
@@ -136,7 +138,13 @@ export async function sendInstructions(instructions) {
     ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
     ...instructions,
   );
-  const simulation = await connection.simulateTransaction(simulationTransaction, {
+  // web3.js only accepts SimulateTransactionConfig for VersionedTransaction.
+  // Passing this object beside a legacy Transaction throws "Invalid arguments"
+  // before the wallet is ever asked to sign. Compile the same legacy message into
+  // a versioned wrapper for simulation, then retain the legacy transaction for the
+  // broadest wallet compatibility when sending.
+  const versionedSimulation = new VersionedTransaction(simulationTransaction.compileMessage());
+  const simulation = await connection.simulateTransaction(versionedSimulation, {
     sigVerify: false,
     commitment: 'confirmed',
     minContextSlot: context.slot,
