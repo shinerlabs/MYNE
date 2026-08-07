@@ -61,6 +61,28 @@ assert.ok(Number.isInteger(referralStartSlot), 'REFERRAL_INDEXER_START_SLOT must
 assert.ok(Number.isInteger(maxPages) && maxPages > 0, 'ROUND_INDEXER_MAX_PAGES must be positive');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const finalizedChainTimeSeconds = async () => {
+  let lastError = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      const slot = await provider.connection.getSlot('finalized');
+      for (let offset = 0; offset < 32 && slot >= offset; offset += 1) {
+        try {
+          const blockTime = await provider.connection.getBlockTime(slot - offset);
+          if (Number.isInteger(blockTime)) return blockTime;
+        } catch (error) {
+          lastError = error;
+          if (Number(error?.code) !== -32004) break;
+        }
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(Math.min(4_000, 250 * (2 ** attempt)));
+  }
+  const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
+  throw new Error(`Finalized chain time is temporarily unavailable${detail}`);
+};
 const asString = (value) => value?.toString?.() ?? String(value ?? 0);
 const u64Seed = (value) => {
   const buffer = Buffer.alloc(8);
@@ -550,9 +572,10 @@ async function indexReferralTransactions() {
 
 async function archiveReadyRounds() {
   const rounds = await rest('mine_rounds?archive_verified=eq.false&closed_signature=is.null&select=*&order=round_id.asc&limit=20');
+  const chainNow = await finalizedChainTimeSeconds();
   let archived = 0;
   for (const round of rounds || []) {
-    if (!round.resolved && (!round.refund_at || Number(round.refund_at) > Math.floor(Date.now() / 1000))) continue;
+    if (!round.resolved && (!round.refund_at || Number(round.refund_at) > chainNow)) continue;
     const address = roundPda(round.round_id);
     const state = await program.account.round.fetchNullable(address);
     if (!state) continue;

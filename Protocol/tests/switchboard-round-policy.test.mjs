@@ -11,7 +11,7 @@ test('provider keeper binds uncommitted randomness, commits after close, then re
   const create = source.indexOf('sb.Randomness.create(');
   const bind = source.indexOf('[createIx, openIx, bindIx]');
   const bettingClose = source.indexOf('waitForChainTimestamp(bettingEndsAt)');
-  const commit = source.indexOf('randomnessClient.commitIx(queue, keypair.publicKey)');
+  const commit = source.indexOf('randomnessClient.commitIx(queue, keypair.publicKey, selectedOracle.oracle)');
   const record = source.indexOf('.recordRoundRandomnessCommit(ROUND_ID_BN)');
   const atomicCommit = source.indexOf('[commitIx, recordIx]');
   const seedWait = source.indexOf('connection.getSlot(commitment)) <= commitSlot');
@@ -32,6 +32,11 @@ test('provider keeper binds uncommitted randomness, commits after close, then re
   assert.match(source, /executeAutoPlan[\s\S]*randomnessAccount: randomnessPubkey/);
   assert.match(source, /replaceRecentBlockhash:\s*true/);
   assert.match(source, /blockhashCommitment\s*=\s*'finalized'/);
+  assert.match(source, /inspectRandomnessOracles\(\)/);
+  assert.match(source, /gateway\/api\/v1\/test/);
+  assert.match(source, /if \(response\.ok\) directlyHealthy\.push\(candidate\)/);
+  assert.match(source, /No Switchboard randomness oracle has a directly reachable healthy gateway/);
+  assert.match(source, /randomness-oracle-selected/);
 });
 
 test('Switchboard keeper converts the native round id to BN at every Anchor u64 boundary', async () => {

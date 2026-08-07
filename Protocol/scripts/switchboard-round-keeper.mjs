@@ -61,6 +61,55 @@ const network = requireMatchingSolanaNetwork({
 });
 const isMainnet = network === 'mainnet-beta';
 const queue = sb.getDefaultQueueAddress(isMainnet);
+const gatewayHealthTimeoutMs = Math.max(
+  1_000,
+  Math.min(10_000, Number(process.env.SWITCHBOARD_GATEWAY_HEALTH_TIMEOUT_MS || 5_000)),
+);
+assert.ok(
+  Number.isInteger(gatewayHealthTimeoutMs),
+  'SWITCHBOARD_GATEWAY_HEALTH_TIMEOUT_MS must be an integer',
+);
+const selectDirectlyHealthyRandomnessOracle = async () => {
+  const queueClient = new sb.Queue(switchboardProgram, queue);
+  const inspection = await queueClient.inspectRandomnessOracles();
+  const candidates = inspection.candidates
+    .filter((candidate) => candidate.gatewayUrl
+      && candidate.isOnQueue
+      && candidate.isVerified
+      && candidate.heartbeatFresh
+      && candidate.quoteFresh
+      && candidate.restricted !== true
+      && candidate.gatewayEnabled !== false
+      && candidate.pullOracleEnabled !== false)
+    .sort((left, right) => left.oracle.pubkey.toBase58().localeCompare(right.oracle.pubkey.toBase58()));
+  const directlyHealthy = [];
+  for (const candidate of candidates) {
+    try {
+      const healthUrl = `${candidate.gatewayUrl.replace(/\/$/, '')}/gateway/api/v1/test`;
+      const response = await fetch(healthUrl, {
+        signal: AbortSignal.timeout(gatewayHealthTimeoutMs),
+      });
+      if (response.ok) directlyHealthy.push(candidate);
+    } catch {
+      // The queue can report another oracle as healthy from a shared snapshot
+      // even while that oracle's own gateway is returning 503. Only an exact,
+      // direct 2xx response is eligible for a new randomness commitment.
+    }
+  }
+  assert.ok(
+    directlyHealthy.length > 0,
+    'No Switchboard randomness oracle has a directly reachable healthy gateway',
+  );
+  const sdkSelected = inspection.selectedCandidate.oracle.pubkey.toBase58();
+  const selected = directlyHealthy.find(
+    (candidate) => candidate.oracle.pubkey.toBase58() === sdkSelected,
+  ) || directlyHealthy[0];
+  return {
+    oracle: selected.oracle.pubkey,
+    gatewayUrl: selected.gatewayUrl,
+    directlyHealthyCount: directlyHealthy.length,
+  };
+};
 const indexedRows = async (path) => {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
@@ -361,7 +410,15 @@ if (!roundState.settled && asBigInt(roundState.randomnessCommitSlot) === 0n) {
   const latestRandomness = await randomnessClient.loadData();
   assert.equal(asBigInt(latestRandomness.seedSlot), 0n, 'Refusing to record a non-atomic or stale Switchboard commitment');
   assert.equal(asBigInt(latestRandomness.revealSlot), 0n, 'Refusing an already revealed randomness request');
-  const commitIx = await randomnessClient.commitIx(queue, keypair.publicKey);
+  const selectedOracle = await selectDirectlyHealthyRandomnessOracle();
+  console.log(JSON.stringify({
+    event: 'randomness-oracle-selected',
+    round: ROUND_ID.toString(),
+    oracle: selectedOracle.oracle.toBase58(),
+    gateway: selectedOracle.gatewayUrl,
+    directlyHealthyCount: selectedOracle.directlyHealthyCount,
+  }));
+  const commitIx = await randomnessClient.commitIx(queue, keypair.publicKey, selectedOracle.oracle);
   const recordIx = await myne.methods
     .recordRoundRandomnessCommit(ROUND_ID_BN)
     .accounts({ config, round, randomnessAccount: randomnessPubkey, authority: keypair.publicKey })

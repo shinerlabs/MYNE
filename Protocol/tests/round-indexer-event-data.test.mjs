@@ -53,3 +53,15 @@ test('observing RoundArchived never downgrades canonical archive verification', 
   assert.match(archivedCase, /archive_hash:/);
   assert.doesNotMatch(archivedCase, /archive_verified:\s*false/);
 });
+
+test('refund-only archival follows finalized Solana time rather than the host clock', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const archiveBody = source.slice(
+    source.indexOf('async function archiveReadyRounds'),
+    source.indexOf('export async function indexerTick'),
+  );
+  assert.match(source, /const finalizedChainTimeSeconds = async \(\) =>/);
+  assert.match(archiveBody, /const chainNow = await finalizedChainTimeSeconds\(\)/);
+  assert.match(archiveBody, /Number\(round\.refund_at\) > chainNow/);
+  assert.doesNotMatch(archiveBody, /Date\.now\(\)/);
+});
