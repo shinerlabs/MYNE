@@ -224,11 +224,6 @@ async function processEvent(event, signature, slot) {
         // Base58 public keys are case-sensitive. Store the canonical address;
         // lowercasing changes the key and breaks indexed identity lookups.
         bettor: authority,
-        // BetReceipt rent is always returned to its immutable authority when
-        // the receipt closes. DeploymentCreated intentionally has no separate
-        // rent-payer field, so indexing that absent event field crashes the
-        // cursor before this deployment can be persisted.
-        rent_payer: authority,
         nonce: asString(data.nonce),
         square,
         amount_wei: asString(amount),
