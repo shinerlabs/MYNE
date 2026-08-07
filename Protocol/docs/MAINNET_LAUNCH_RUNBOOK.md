@@ -117,7 +117,7 @@ MAINNET_RPC_URL=<reviewed Mainnet RPC> \
 ANCHOR_WALLET=<reviewed deployer keypair path> \
 MYNE_MINT_KEYPAIR=<offline mint keypair path> \
 MAINNET_LIQUIDITY_WALLET=<reviewed launch wallet> \
-CONFIRM_SOLANA_GENESIS_HASH=5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2Nbd \
+CONFIRM_SOLANA_GENESIS_HASH=5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d \
 CONFIRM_CREATE_MYNE_MINT=<reviewed mint address> \
 CONFIRM_LIQUIDITY_DESTINATION=<reviewed launch wallet> \
 pnpm prepare:mainnet-mint
@@ -142,7 +142,7 @@ locally constructed Metaplex transaction:
 MAINNET_RPC_URL=<reviewed Mainnet RPC> \
 ANCHOR_WALLET=<reviewed file-backed admin keypair path> \
 MYNE_MINT_ADDRESS=<reviewed mint> \
-CONFIRM_SOLANA_GENESIS_HASH=5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2Nbd \
+CONFIRM_SOLANA_GENESIS_HASH=5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d \
 CONFIRM_MAINNET_TOKEN_METADATA=<reviewed mint> \
 pnpm prepare:mainnet-metadata
 ```

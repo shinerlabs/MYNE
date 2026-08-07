@@ -9,6 +9,10 @@ import {
 } from '../scripts/production-network-policy.mjs';
 
 test('production keeper binds Mainnet to Switchboard Mainnet', () => {
+  assert.equal(
+    SOLANA_MAINNET_GENESIS_HASH,
+    '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d',
+  );
   assert.equal(requireMatchingSolanaNetwork({
     genesisHash: SOLANA_MAINNET_GENESIS_HASH,
     randomnessProgram: SWITCHBOARD_MAINNET_PROGRAM,
