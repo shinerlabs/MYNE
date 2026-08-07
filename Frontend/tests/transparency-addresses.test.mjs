@@ -30,8 +30,9 @@ test('transparency page retains canonical public protocol identities', () => {
     'Mining rewards ledger',
     'Liquidity gate',
     'Meteora pool',
-    'Switchboard program',
   ]) {
     assert.equal(renderer.includes(`label: '${label}'`), true, `${label} must remain visible`);
   }
+  assert.match(renderer, /label: serverRandomness \? 'MYNE randomness program' : 'Switchboard program'/);
+  assert.match(renderer, /address: configuredRandomness/);
 });

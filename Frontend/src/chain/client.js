@@ -218,6 +218,9 @@ export function readableError(error) {
   }
   const detail = messages.join(' · ');
   if (/reject|cancel/i.test(detail)) return 'Transaction rejected';
+  if (/owl extension-created tab was blocked before presentation/i.test(detail)) {
+    return 'This embedded browser blocked wallet approval — open myne.supply in Chrome, Brave, or your wallet browser';
+  }
   if (/extension-created tab.*blocked|popup|pop-up|user activation|user gesture|notallowederror|window.*(?:blocked|open)/i.test(detail)) {
     return 'Wallet popup was blocked — click Connect and choose your wallet again';
   }

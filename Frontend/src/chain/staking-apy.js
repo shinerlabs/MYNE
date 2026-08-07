@@ -64,10 +64,9 @@ const incompleteWindow = (windowMinutes, rows = 0) => ({
  * Validate and sum a public-index reward window ending at a fresh resolved watermark.
  *
  * The query deliberately supplies every scheduled round in the interval,
- * including unresolved rows and rows whose fee event has not been indexed. Numeric round-id
- * gaps are valid: a round PDA is not created when nobody mines, so those ids represent zero
- * volume rather than missing rewards. A missing fee, duplicate/out-of-order id, stale watermark,
- * malformed timestamp or negative amount makes the result unavailable.
+ * including zero-volume rounds, unresolved rows and rows whose fee event has not been indexed.
+ * Production indexing writes the scheduled zero-volume rows, so a missing/duplicate id, missing
+ * fee, stale watermark, malformed timestamp or negative amount makes the result unavailable.
  */
 export function summariseStakingRewardWindow(
   rows,
@@ -75,6 +74,7 @@ export function summariseStakingRewardWindow(
     start, end, windowMinutes, roundCadenceSeconds, maxRows = 1000,
     observedAt = end, watermarkSettlesAt = end,
     maxStalenessSeconds = roundCadenceSeconds * 3,
+    maxSettlementGapSeconds = roundCadenceSeconds + 5,
   },
 ) {
   if (!Array.isArray(rows) || rows.length === 0 || !Number.isSafeInteger(maxRows)
@@ -85,6 +85,7 @@ export function summariseStakingRewardWindow(
     || roundCadenceSeconds <= 0 || !Number.isSafeInteger(observedAt)
     || !Number.isSafeInteger(watermarkSettlesAt)
     || !Number.isSafeInteger(maxStalenessSeconds) || maxStalenessSeconds <= 0
+    || !Number.isSafeInteger(maxSettlementGapSeconds) || maxSettlementGapSeconds <= 0
     || watermarkSettlesAt !== end || watermarkSettlesAt > observedAt
     || observedAt - watermarkSettlesAt > maxStalenessSeconds) {
     return incompleteWindow(windowMinutes, Array.isArray(rows) ? rows.length : 0);
@@ -103,8 +104,13 @@ export function summariseStakingRewardWindow(
       const reward = unsignedInteger(row?.staking_net_lamports);
       if (roundId === null || reward === null || row?.resolved !== true
         || !Number.isSafeInteger(settlesAt) || settlesAt < start || settlesAt > end
-        || (previousRoundId !== null && roundId <= previousRoundId)
+        || (previousRoundId !== null && roundId !== previousRoundId + 1n)
         || (previousSettlesAt !== null && settlesAt <= previousSettlesAt)) {
+        return incompleteWindow(windowMinutes, rows.length);
+      }
+      // Indexed settlement time may not silently skip a scheduled fee-bearing interval. A gap
+      // larger than one cadence plus clock/confirmation tolerance fails closed.
+      if (previousSettlesAt !== null && settlesAt - previousSettlesAt > maxSettlementGapSeconds) {
         return incompleteWindow(windowMinutes, rows.length);
       }
       firstSettlesAt ??= settlesAt;
@@ -117,9 +123,10 @@ export function summariseStakingRewardWindow(
     }
   }
 
-  // The query is anchored to the newest fully indexed settlement, so its final row must be
-  // that watermark. Quiet time at the beginning of the window is valid zero-volume time.
-  const complete = lastSettlesAt === watermarkSettlesAt;
+  // The final row must be the selected watermark and the first scheduled settlement must cover
+  // the left edge. This rejects both a truncated query and an omitted edge row.
+  const complete = lastSettlesAt === watermarkSettlesAt
+    && firstSettlesAt < start + maxSettlementGapSeconds;
   return {
     complete,
     windowMinutes,

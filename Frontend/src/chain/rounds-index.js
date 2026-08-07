@@ -358,6 +358,7 @@ export async function loadStakingRewardWindow(windowMinutes = 30, nowSeconds = N
       observedAt,
       watermarkSettlesAt: end,
       maxStalenessSeconds: ROUND_CADENCE_SECONDS * 3,
+      maxSettlementGapSeconds: ROUND_CADENCE_SECONDS + 5,
     });
   })().catch(() => null);
   stakingWindowCache = { key, promise };

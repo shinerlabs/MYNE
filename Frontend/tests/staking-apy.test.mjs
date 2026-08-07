@@ -19,6 +19,7 @@ const context = {
   observedAt: 1_300,
   watermarkSettlesAt: 1_265,
   maxStalenessSeconds: 195,
+  maxSettlementGapSeconds: 70,
 };
 
 const completeRows = () => [
@@ -62,12 +63,22 @@ test('staking reward window sums exact indexed lamports only when coverage is co
   });
 });
 
-test('staking reward window accepts unopened round-id gaps as zero-volume intervals', () => {
+test('staking reward window rejects a missing scheduled id even when timestamps look continuous', () => {
+  const rows = completeRows();
+  rows[2] = { ...rows[2], round_id: '13' };
+  rows[3] = { ...rows[3], round_id: '14' };
+  rows[4] = { ...rows[4], round_id: '15' };
+  const result = summariseStakingRewardWindow(rows, context);
+  assert.equal(result.complete, false);
+  assert.equal(result.rewardLamports, 0n);
+});
+
+test('staking reward window fails closed when a scheduled fee row is missing', () => {
   const rows = completeRows();
   rows.splice(2, 1);
   const result = summariseStakingRewardWindow(rows, context);
-  assert.equal(result.complete, true);
-  assert.equal(result.rewardLamports, 1_000n);
+  assert.equal(result.complete, false);
+  assert.equal(result.rewardLamports, 0n);
 });
 
 test('staking reward window rejects duplicate/out-of-order ids and a stale watermark', () => {
@@ -118,8 +129,19 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.doesNotMatch(main, /TOTAL SOL EARNED|TOTAL SOL RECEIVED|Claimed \+ available/);
   assert.match(main, /CLAIMED SOL/);
   assert.match(main, /History not indexed/);
-  assert.match(main, /earned:\s*chain\.format\.ethSmart\(state\?\.pendingEth/);
-  assert.match(main, /const dailyPool = metrics\?\.aprWindowDays > 0 \? metrics\.rewardsToStakersEth : 0/);
+  assert.match(main, /earned:\s*positionAvailable \? chain\.format\.ethSmart\(state\.pendingEth\) : '—'/);
+  assert.match(main, /const dailyPool = metrics\?\.aprWindowDays > 0 \? metrics\.rewardsToStakersEth : null/);
+  assert.match(main, /positionApyPercent\(metrics\?\.apyStandardPct, principal, weight\)/);
+  assert.match(main, /setMetric\('#header-staking-apr', headerAprText\)/);
+  assert.match(main, /formatApyPercent\(m\.apyStandardPct, \{ compact: true \}\)/);
+  assert.match(main, /setMetric\('#stake-burn-apy', formatApyPercent\(m\.apyBurnPct\)\)/);
+  assert.match(main, /add\('staking\.apy', staking\.apyStandardPct, formatApyPercent\(staking\.apyStandardPct\)\)/);
+  assert.doesNotMatch(main, /m\.aprPct \* 5/);
+  assert.doesNotMatch(main, /const projectionRates/);
+  assert.match(main, /stakingMetricsState = null;[\s\S]*#header-staking-apr[\s\S]*updateStakeFlexCard\(\)/);
+  assert.match(main, /requestId !== stakingMetricsRefreshId/);
+  assert.match(main, /ctx\.fillText\('POSITION APY'/);
+  assert.match(main, /if \(data\.apy == null\) return null/);
   assert.doesNotMatch(main, /rewardsToStakersEth \/ metrics\.aprWindowDays/);
   assert.match(main, /dailyPool \* \(weight \/ metrics\.totalWeight\)/);
   assert.doesNotMatch(main, /dailyPool \* \(\(state\?\.share/);
@@ -132,5 +154,6 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.doesNotMatch(price, /if \(myneUsd != null && Number\.isFinite\(myneAmount\)\)/);
   assert.match(rounds, /select\('round_id,resolved,settles_at,staking_net_lamports::text'\)/);
   assert.match(rounds, /nowSeconds = Number\(chainNowSeconds\(\)\)/);
-  assert.doesNotMatch(rounds, /\.not\('staking_net_lamports',\s*'is',\s*null\)/);
+  assert.match(rounds, /\.eq\('resolved', true\)[\s\S]*\.not\('staking_net_lamports', 'is', null\)/);
+  assert.match(rounds, /watermarkSettlesAt: end/);
 });

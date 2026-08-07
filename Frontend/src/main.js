@@ -31,6 +31,9 @@ import { randomnessHex } from './chain/randomness-proof.js';
 import { isServerRandomnessProgram } from './chain/randomness-mode.js';
 import { formatApyPercent, positionApyPercent } from './chain/staking-apy.js';
 import {
+  affordableAutoPlanRounds, maxAutoPlanFundingLamports, requiredDeposit,
+} from './chain/autocommit.js';
+import {
   confirmedMinerRoundKey, previousConfirmedRoundId, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
@@ -366,8 +369,8 @@ document.querySelector('#app').innerHTML = `
         <section class="staking-calculator panel" hidden>
       <header class="calculator-head"><div><span class="eyebrow">REWARD CALCULATOR</span><h2>Project your stake.</h2><p>SOL rewards funded by 8% of mining volume.</p></div><div class="projection-period" role="group" aria-label="Projection period"><button class="active" data-projection-days="30">30D</button><button data-projection-days="90">90D</button><button data-projection-days="180">180D</button><button data-projection-days="365">1Y</button></div></header>
       <div class="calculator-layout">
-        <div class="projection-controls"><label for="calculator-amount"><span>MYNE STAKED</span><small>Revenue-based estimate</small></label><div class="calculator-input"><img src="/myne-token-icon.svg" alt=""/><input id="calculator-amount" value="150" inputmode="decimal" aria-label="MYNE staking projection amount"/><span>MYNE</span></div><div class="projection-results"><article><span>EST. MINING SOL</span><strong>${solIcon()} <b id="projected-eth">0.300</b></strong><small class="projection-usd" id="projected-eth-usd" aria-label="Estimated mining SOL value in US dollars">$1,035</small></article></div><p class="projection-note">The estimate uses current staking activity and reward funding. Actual rewards follow live round activity.</p></div>
-        <article class="projection-card" id="projection-card" aria-label="Shareable staking projection"><header><div><img src="/myne-token-icon.svg" alt=""/><b>MYNE</b></div><span>STAKING PROJECTION</span></header><div class="projection-card-principal"><small>STAKING</small><strong><b id="card-principal">1,000</b> MYNE</strong><span id="card-period">30 DAYS</span></div><div class="projection-card-rewards"><span><small>MINING SOL</small><strong>${solIcon()} <b id="card-eth">0.300</b></strong></span><span><small>TRADING SOL</small><strong>${solIcon()} <b id="card-gold">0.368</b></strong></span></div><footer><span>Powered by Solana</span><code id="card-link">—</code></footer></article>
+        <div class="projection-controls"><label for="calculator-amount"><span>MYNE STAKED</span><small>Revenue-based estimate</small></label><div class="calculator-input"><img src="/myne-token-icon.svg" alt=""/><input id="calculator-amount" value="150" inputmode="decimal" aria-label="MYNE staking projection amount"/><span>MYNE</span></div><div class="projection-results"><article><span>EST. MINING SOL</span><strong>${solIcon()} <b id="projected-eth">—</b></strong><small class="projection-usd" id="projected-eth-usd" aria-label="Estimated mining SOL value in US dollars">—</small></article></div><p class="projection-note">Uses the same live standard APY snapshot shown across MYNE. Actual rewards follow mining volume and market price.</p></div>
+        <article class="projection-card" id="projection-card" aria-label="Shareable staking projection"><header><div><img src="/myne-token-icon.svg" alt=""/><b>MYNE</b></div><span>STAKING PROJECTION</span></header><div class="projection-card-principal"><small>STAKING</small><strong><b id="card-principal">150</b> MYNE</strong><span id="card-period">30 DAYS</span></div><div class="projection-card-rewards"><span><small>MINING SOL</small><strong>${solIcon()} <b id="card-eth">—</b></strong></span><span><small>STANDARD APY</small><strong><b id="card-apy">—</b></strong></span></div><footer><span>Powered by Solana</span><code id="card-link">—</code></footer></article>
       </div>
       <div class="calculator-actions"><button id="share-projection"><span>Share card</span><b>↗</b></button><a id="share-projection-x" href="#" target="_blank" rel="noreferrer">${icon('x')} Share on X</a><button id="copy-projection-link">Copy referral link</button></div>
         </section>
@@ -632,7 +635,6 @@ let autoRound = false;
 // "Max": size the plan deposit from the wallet balance instead of a manual round count.
 // The plan is still prepaid — this just computes how many rounds the balance can fund.
 let fundMaxRounds = false;
-const GAS_RESERVE_ETH = 0.002; // keep enough back to pay for the transactions themselves
 // Auto-claim settles winnings back into the plan balance each round. NOTE: the contract
 // forces playsRemaining = UNLIMITED when this is on, so it can't combine with a finite
 // round count — the UI mirrors that by switching Rounds to ∞ (see syncAutoControls).
@@ -1542,7 +1544,9 @@ const refreshProtocolStats = async (force = false) => {
 
     const staking = stakingResult.status === 'fulfilled' ? stakingResult.value : null;
     if (staking) {
-      if (staking.aprPct != null) add('staking.apy', staking.aprPct, `${statsNumber(staking.aprPct, 1)}%`);
+      if (staking.apyStandardPct != null) {
+        add('staking.apy', staking.apyStandardPct, formatApyPercent(staking.apyStandardPct));
+      }
       add('staking.total', staking.totalStakedPrincipal, statsNumber(staking.totalStakedPrincipal));
       add('staking.weight', staking.totalWeight, statsNumber(staking.totalWeight));
       add('staking.rewards', staking.rewardsPoolEth, statsNumber(staking.rewardsPoolEth, 4));
@@ -1659,6 +1663,7 @@ if (aboutNav) {
 // Live staking state, loaded from the MYNE program on Solana.
 let stakingState = null;
 let stakingMetricsState = null;
+let stakingMetricsRefreshId = 0;
 
 const updateStake = () => {
   const principal = Math.max(0, Number(stakeAmount.value || 0));
@@ -1877,8 +1882,10 @@ const refreshStakingHistory = async () => {
  * hold their last value (or the em dash they start with).
  */
 const refreshStakingMetrics = async () => {
+  const requestId = ++stakingMetricsRefreshId;
   try {
     const m = await readStakingMetrics();
+    if (requestId !== stakingMetricsRefreshId) return;
     stakingMetricsState = m;
     // A bare dash reads as "broken" and sends people looking for a bug. `aprStatus` already says
     // WHICH input is missing, so show that instead — it is the difference between "this is down"
@@ -1929,13 +1936,27 @@ const refreshStakingMetrics = async () => {
       };
       apr.title = m.aprPct == null
         ? (aprReason[m.aprStatus] ?? aprReason.price)
-        : `Non-compounding estimate. Annualised from the latest ${Math.max(1, Math.round(m.aprWindowDays * 1440))}-minute indexed net SOL reward window, `
-          + 'divided by total staked weight and priced from a current MYNE/SOL pool spot quote. '
+        : `Spot-price run-rate, non-compounding estimate. Annualised from the latest ${Math.max(1, Math.round(m.aprWindowDays * 1440))}-minute indexed net SOL reward window, `
+          + 'divided by total staked weight and priced from the current MYNE/SOL pool spot quote. '
           + 'It is not a guaranteed return; mining volume and the market price can change.';
     }
     updateStakeFlexCard();
+    updateProjection();
   } catch (error) {
+    if (requestId !== stakingMetricsRefreshId) return;
     console.warn('staking metrics failed', error);
+    // Never leave a prior successful snapshot on-screen after the current authoritative read
+    // fails. An em dash is honest; a stale APY can be mistaken for a live return.
+    stakingMetricsState = null;
+    ['#metric-apr', '#header-staking-apr', '#stake-flex-apy', '#stake-burn-apy']
+      .forEach((selector) => setMetric(selector, '—'));
+    const headerApr = document.querySelector('.header-apr');
+    if (headerApr) {
+      headerApr.setAttribute('aria-label', 'Open staking, APY unavailable');
+      headerApr.title = 'APY unavailable';
+    }
+    updateStakeFlexCard();
+    updateProjection();
   }
 };
 
@@ -2084,6 +2105,7 @@ const updateStakeFlexCard = () => {
 
 const createStakeFlexCard = async () => {
   const data = stakeFlexValues();
+  if (data.apy == null) return null;
   const canvas = document.createElement('canvas');
   canvas.width = 1200;
   canvas.height = 630;
@@ -2162,7 +2184,7 @@ const createStakeFlexCard = async () => {
   ctx.fillText(stakeFlexApy(data.apy), 1138, 250);
   ctx.fillStyle = '#ffffff';
   ctx.font = '900 22px "DM Sans", sans-serif';
-  ctx.fillText('APY', 1138, 184);
+  ctx.fillText('POSITION APY', 1138, 184);
   ctx.textAlign = 'left';
 
   const stats = [
@@ -2194,7 +2216,7 @@ const createStakeFlexCard = async () => {
 
 const downloadStakeFlexCard = async () => {
   const blob = await createStakeFlexCard();
-  if (!blob) return notify('Could not create position card');
+  if (!blob) return notify('FLEX card needs a live position APY');
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -2252,7 +2274,7 @@ stakeFlexDialog?.addEventListener('click', (event) => { if (event.target === sta
 stakeFlexDialog?.querySelector('#stake-flex-download')?.addEventListener('click', downloadStakeFlexCard);
 stakeFlexDialog?.querySelector('#stake-flex-copy')?.addEventListener('click', async () => {
   const blob = await createStakeFlexCard();
-  if (!blob) return notify('Could not create position card');
+  if (!blob) return notify('FLEX card needs a live position APY');
   try {
     await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
     notify('Position card copied');
@@ -2265,13 +2287,14 @@ stakeFlexDialog?.querySelectorAll('#stake-flex-x, #stake-flex-tg').forEach((shar
   shareLink.addEventListener('click', async (event) => {
     event.preventDefault();
     if (!chain.state.account) return notify('Connect wallet to share your FLEX card and referral link');
+    if (stakeFlexValues().apy == null) return notify('FLEX card needs a live position APY');
 
     // A website cannot inject an attachment into another origin's composer. Open the correct
     // platform synchronously (so popup blockers allow it), then put the PNG on the clipboard for
     // a single paste. The platform URL already contains this wallet's compact referral URL.
     const shareWindow = window.open(shareLink.href, '_blank', 'noopener,noreferrer');
     const blob = await createStakeFlexCard();
-    if (!blob) return notify('Could not create position card');
+    if (!blob) return notify('FLEX card needs a live position APY');
     try {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       notify('FLEX image copied · paste it into the post');
@@ -2284,20 +2307,20 @@ stakeFlexDialog?.querySelectorAll('#stake-flex-x, #stake-flex-tg').forEach((shar
 });
 
 const REF_SHARE_TEXT = 'Mine scarce MYNE on Solana';
-// Legacy hidden calculator: both components are SOL-denominated after the reward migration.
-const projectionRates = { bullionUsd: 1500, ethUsd: 3451.72, goldUsd: 3451.72, ethApr: .084, goldApr: .10 };
 let projectionDays = 30;
-let latestProjection = { principal: 1000, eth: 0, gold: 0, ethUsd: 0, goldUsd: 0 };
-const rewardAmount = (principal, apr, days, assetUsd) => (principal * projectionRates.bullionUsd * apr * days / 365) / assetUsd;
-const compactAmount = (value, digits = 3) => Number(value).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+let latestProjection = { principal: 150, eth: null, ethUsd: null, apy: null };
+const compactAmount = (value, digits = 3) => value == null ? '—' : Number(value).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 const updateProjection = () => {
   const principal = Math.max(0, Number(calculatorAmount.value || 0));
-  const ethReward = rewardAmount(principal, projectionRates.ethApr, projectionDays, projectionRates.ethUsd);
-  const goldReward = rewardAmount(principal, projectionRates.goldApr, projectionDays, projectionRates.goldUsd);
-  const ethUsd = ethReward * projectionRates.ethUsd;
-  const goldUsd = goldReward * projectionRates.goldUsd;
-  latestProjection = { principal, eth: ethReward, gold: goldReward, ethUsd, goldUsd };
+  const apy = stakingMetricsState?.apyStandardPct;
+  const mynePerSol = getLiveMynePerSol();
+  const ethReward = Number.isFinite(apy) && apy >= 0 && mynePerSol > 0
+    ? (principal / mynePerSol) * (apy / 100) * (projectionDays / 365)
+    : null;
+  const solUsd = getSolUsd();
+  const ethUsd = ethReward != null && solUsd != null ? ethReward * solUsd : null;
+  latestProjection = { principal, eth: ethReward, ethUsd, apy: Number.isFinite(apy) ? apy : null };
   // The projection/FLEX card is optional on the current referral surface. Keep the
   // shared updater safe when that retired card is not mounted; an absent presentation
   // element must not abort boot before routing and navigation are initialized.
@@ -2310,16 +2333,16 @@ const updateProjection = () => {
     if (node) node.href = value;
   };
   setText('#projected-eth', compactAmount(ethReward));
-  setText('#projected-gold', compactAmount(goldReward));
   const cardLink = document.querySelector('#card-link');
   if (cardLink) cardLink.textContent = referralShortLink(chain.state.account);
-  setText('#projected-eth-usd', `$${Math.round(ethUsd).toLocaleString()}`);
-  setText('#projected-gold-usd', `$${Math.round(goldUsd).toLocaleString()}`);
+  setText('#projected-eth-usd', ethUsd == null ? '—' : `$${ethUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
   setText('#card-principal', principal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
   setText('#card-period', `${projectionDays} DAYS`);
   setText('#card-eth', compactAmount(ethReward));
-  setText('#card-gold', compactAmount(goldReward));
-  const shareText = `My ${projectionDays}-day MYNE staking projection: ${compactAmount(ethReward + goldReward)} SOL.`;
+  setText('#card-apy', formatApyPercent(latestProjection.apy));
+  const shareText = ethReward == null
+    ? 'MYNE staking projection is waiting for live reward and market data.'
+    : `My ${projectionDays}-day MYNE standard staking projection: ${compactAmount(ethReward)} SOL.`;
   setHref('#share-projection-x', `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(referralUrl)}`);
 };
 
@@ -2387,10 +2410,10 @@ const createProjectionCard = async () => {
   context.fillText(`${compactAmount(latestProjection.eth)} SOL`, 105, 417);
   context.fillStyle = '#73829a';
   context.font = '700 16px "DM Sans", sans-serif';
-  context.fillText('PROJECTED TRADING SOL', 635, 348);
+  context.fillText('STANDARD APY', 635, 348);
   context.fillStyle = '#e5cf87';
   context.font = '650 46px "Roboto Mono", monospace';
-  context.fillText(`${compactAmount(latestProjection.gold)} SOL`, 635, 417);
+  context.fillText(formatApyPercent(latestProjection.apy), 635, 417);
   context.fillStyle = '#8c8475';
   context.font = '600 17px "DM Sans", sans-serif';
   context.fillText(`${projectionDays} DAY PROJECTION · ESTIMATES VARY WITH PROTOCOL REVENUE`, 70, 548);
@@ -2487,11 +2510,6 @@ const createStakingStatementPdf = async () => {
   return new Blob([jpegPagePdf(bytesFromDataUrl(canvas.toDataURL('image/jpeg', .94)), canvas.width, canvas.height)], { type: 'application/pdf' });
 };
 
-// Executor-fee allowance per round, mirroring AutoCommit's `maxFeePerExecution` reserve. The
-// plan deposit must cover this on top of the wagers or the contract refuses to bet.
-const AUTO_FEE_PER_ROUND = 0.001;
-const AUTO_FEE_WEI = 1000000000000000n; // same value in wei, for bigint plan math
-
 /** The contract's one-time per-address deposit, in SOL, read from the same constant the
  *  transaction uses so the disclosure can never drift from what is actually charged. */
 /**
@@ -2503,8 +2521,8 @@ const ethNum = (n) => {
 };
 
 const mineCostLabel = (solAmount) => mineDisplayCurrency === 'usd'
-  ? `${usdcValueFor(solAmount) ?? '—'} USDC`
-  : `${ethNum(solAmount)} SOL`;
+  ? `${solAmount == null ? '—' : (usdcValueFor(solAmount) ?? '—')} USDC`
+  : `${solAmount == null ? '—' : ethNum(solAmount)} SOL`;
 
 /** Paint a composer total without the generic hover/pseudo-element currency treatment.
  *  One fixed mark slot and one fixed value row are reused in both modes, so switching units
@@ -2517,7 +2535,9 @@ const paintMineTotal = (row, solAmount) => {
   const strong = row.querySelector('.mine-total-value');
   strong?.classList.remove('mine-currency-value');
   if (strong) delete strong.dataset.usd;
-  if (value) value.textContent = usd ? (usdcValueFor(solAmount) ?? '—') : ethNum(solAmount);
+  if (value) value.textContent = solAmount == null
+    ? '—'
+    : usd ? (usdcValueFor(solAmount) ?? '—') : ethNum(solAmount);
   if (unit) unit.textContent = usd ? 'USDC' : 'SOL';
 };
 
@@ -2526,8 +2546,9 @@ const paintMineBalance = () => {
   if (!label) return;
   const balance = Number(chain.format.solIcon(chain.state.balance ?? 0n, 6));
   const minimum = mineCostLabel(chain.MIN_ETH_PER_ROUND);
+  const autoMaximum = Number(maxAutoPlanFundingLamports(chain.state.balance ?? 0n)) / 1e9;
   label.textContent = chain.state.account
-    ? `Balance ${mineCostLabel(balance)} · Min ${minimum}`
+    ? `Balance ${mineCostLabel(balance)}${autoRound ? ` · Auto available ${mineCostLabel(autoMaximum)} (90%)` : ''} · Min ${minimum}`
     : '';
 };
 
@@ -2544,29 +2565,46 @@ const updateMine = () => {
   // an empty field show a non-zero Auto total (fees + minimum), which looked like a preselected
   // charge in the simplified composer.
   const perRound = entered > 0 ? perTile * selected.size : 0;
+  let perRoundLamports = 0n;
+  try {
+    perRoundLamports = entered > 0 ? toWei(String(perTile)) * BigInt(selected.size) : 0n;
+  } catch {
+    perRoundLamports = 0n;
+  }
   // An auto plan is PREPAID: the stepper is simply how many rounds you're funding.
   //
-  // With "Max" on, derive that count from the wallet balance instead. The deposit is
-  //   perRound*n + fee*(n+1)  (see requiredDeposit), so solving for n against the spendable
-  // balance gives the most rounds the wallet can actually fund.
-  const perRoundCostEth = perRound + AUTO_FEE_PER_ROUND;
-  const spendable = Math.max(0, availableEth - GAS_RESERVE_ETH - AUTO_FEE_PER_ROUND);
-  const maxRounds = perRoundCostEth > 0 ? Math.floor(spendable / perRoundCostEth) : 0;
+  // With "Max" on, derive that count from the wallet balance instead. Each execution needs the
+  // exact stored wager plus the live rent for its BetReceipt. Auto-round
+  // may transfer at most floor(walletBalance × 90%); the remaining 10% stays available for rent
+  // and transaction fees. All budgeting remains integer lamports until presentation.
+  const receiptRent = typeof chain.state.autoPlanMaxFee === 'bigint'
+    ? chain.state.autoPlanMaxFee
+    : null;
+  const maxFundingLamports = maxAutoPlanFundingLamports(chain.state.balance ?? 0n);
+  const maxRoundsBig = receiptRent == null ? 0n : affordableAutoPlanRounds({
+    walletBalance: chain.state.balance ?? 0n,
+    amountPerPlay: perRoundLamports,
+    maxFee: receiptRent,
+  });
+  const maxRounds = maxRoundsBig > BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number.MAX_SAFE_INTEGER
+    : Number(maxRoundsBig);
   if (autoRound && fundMaxRounds) repeatRounds = Math.max(1, maxRounds);
   const fundedRounds = autoRound ? repeatRounds : 1;
-  // A first bet from an address also pays the contract's one-time ACCOUNT_DEPOSIT. Both paths
-  // already charge it on-chain (placeBet adds it to msg.value; requiredDeposit adds it to the
-  // plan), but neither used to SHOW it — so a first-timer read "0.0001" here and then saw their
-  // wallet ask for 0.0002. It is disclosed in the total and named in the note below.
+  // A direct first bet can also carry the configured one-time account deposit. Solana Auto-round
+  // deposits use their own exact `requiredDeposit` formula (wager + receipt rent per execution).
   const needsDeposit = !chain.state.hasAccount;
   const queuesNextRound = !autoRound && !bettingOpen;
+  const automatedDepositLamports = perRoundLamports > 0n && receiptRent != null
+    ? requiredDeposit({ amountPerPlay: perRoundLamports, fundRounds: fundedRounds, maxFee: receiptRent })
+    : null;
   const total = perRound > 0
-    ? (autoRound
-      ? perRound * fundedRounds + AUTO_FEE_PER_ROUND * (fundedRounds + 1)
-      : queuesNextRound
-        ? perRound + AUTO_FEE_PER_ROUND * 2
-        : perRound) + (needsDeposit ? ACCOUNT_DEPOSIT_ETH : 0)
+    ? autoRound || queuesNextRound
+      ? automatedDepositLamports == null ? null : Number(automatedDepositLamports) / 1e9
+      : perRound + (needsDeposit ? ACCOUNT_DEPOSIT_ETH : 0)
     : 0;
+  const autoFundingReady = !autoRound || (automatedDepositLamports != null
+    && automatedDepositLamports <= maxFundingLamports);
   document.querySelector('#tile-count').textContent = selected.size;
   document.querySelector('#round-count').textContent = autoRound ? repeatRounds : 1;
   syncAllButton();
@@ -2576,9 +2614,11 @@ const updateMine = () => {
   document.querySelector('#round-helper').textContent = !autoRound
     ? 'Turn on Auto-round to bet over multiple rounds'
     : fundMaxRounds
-      ? (maxRounds > 0
-        ? `${maxRounds} round${maxRounds === 1 ? '' : 's'} — all your balance funds`
-        : 'Balance too low to fund a round')
+      ? (receiptRent == null
+        ? 'Loading live receipt rent…'
+        : maxRounds > 0
+          ? `${maxRounds} round${maxRounds === 1 ? '' : 's'} · 90% max, 10% stays in wallet`
+          : '90% spendable balance cannot fund one round')
       : `Funds ${repeatRounds} round${repeatRounds === 1 ? '' : 's'} · top up anytime`;
   document.querySelector('#total-detail').textContent = autoRound
     ? `${selected.size} tile${selected.size === 1 ? '' : 's'} × ${mineCostLabel(perTile)} × ${repeatRounds} round${repeatRounds === 1 ? '' : 's'}`
@@ -2588,8 +2628,7 @@ const updateMine = () => {
     ? 'Next round'
     : 'Total deployment';
 
-  // Break out the per-round stake so the repeat cost is legible. The keeper reserve is still
-  // INCLUDED in the total (see perRoundCostEth above) — only its explanatory line was removed.
+  // Break out the exact per-round funded cost (wager + receipt rent), not just the tile wager.
   const perRoundRow = document.querySelector('#per-round-row');
   perRoundRow.hidden = !autoRound;
   // Explain the surcharge up at the input, where the number is being chosen — and say it is
@@ -2609,11 +2648,14 @@ const updateMine = () => {
     minNote.hidden = false;
   }
   if (autoRound) {
-    paintMineTotal(perRoundRow, perRound);
+    const fundedPerRound = receiptRent == null || perRoundLamports === 0n
+      ? perRoundLamports === 0n ? 0 : null
+      : Number(perRoundLamports + receiptRent) / 1e9;
+    paintMineTotal(perRoundRow, fundedPerRound);
   }
 
   const deploy = document.querySelector('#deploy');
-  const ready = protocolReady && selected.size > 0 && entered > 0;
+  const ready = protocolReady && selected.size > 0 && entered > 0 && autoFundingReady;
   // A manual action during reveal becomes a one-round keeper queue for the next open round.
   deploy.classList.toggle('ready', ready);
   // Clickable even when "not ready", so mine() can explain what's missing via a toast
@@ -2627,7 +2669,7 @@ const updateMine = () => {
     ? 'Mining becomes available after the audited Solana program is connected'
     : ready
     ? autoRound
-      ? `Fund an auto-round plan with ${mineCostLabel(total)}`
+      ? `Fund an auto-round plan with ${mineCostLabel(total)}; 10% of wallet SOL remains reserved`
       : bettingOpen
         ? `Mine this round with ${mineCostLabel(total)}`
         : `Queue a bid for the next round with ${mineCostLabel(total)}`
@@ -3150,10 +3192,11 @@ document.querySelector('#copy-projection-link').addEventListener('click', () => 
   notify('Referral link copied');
 });
 document.querySelector('#share-projection').addEventListener('click', async () => {
+  if (latestProjection.eth == null) return notify('Projection needs live APY and MYNE/SOL price data');
   const blob = await createProjectionCard();
   if (!blob) return notify('Could not create projection card');
   const file = new File([blob], 'myne-staking-projection.png', { type: 'image/png' });
-  const shareText = `My ${projectionDays}-day MYNE staking projection: ${compactAmount(latestProjection.eth + latestProjection.gold)} SOL.`;
+  const shareText = `My ${projectionDays}-day MYNE standard staking projection: ${compactAmount(latestProjection.eth)} SOL.`;
   try {
     if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
       await navigator.share({ title: 'MYNE staking projection', text: shareText, url: referralUrl, files: [file] });
@@ -3737,8 +3780,6 @@ const motherlodeSecondary = document.querySelector('.motherlode-secondary');
 const motherlodeEthValue = motherlodeSecondary.querySelector('.motherlode-eth-value');
 const motherlodeEthUsdValue = motherlodeSecondary.querySelector('.motherlode-eth-usd');
 const motherlodeUsdcNumber = motherlodeEthUsdValue.querySelector('.motherlode-usdc-value');
-const balanceLabel = document.querySelector('.amount-label small');
-let availableEth = 0;
 let lastRoundId = null;
 
 const motherlodeRolls = new WeakMap();
@@ -3915,7 +3956,6 @@ const renderChain = (state) => {
   syncSummaryHoverLabels();
   motherlodeStat.setAttribute('aria-label', `Motherlode SOL payment ${motherlodeEthText} SOL plus staking bonus ${motherlodeGldText} MYNE, burned and staked at 5× reward weight; 1 in 650 chance per round`);
 
-  availableEth = Number(chain.format.solIcon(state.balance, 6));
   paintMineBalance();
 
   // `state.unclaimed` is the UNREFINED balance — MYNE credited by claimed rounds and not yet
@@ -5297,18 +5337,22 @@ const renderPlan = (state) => {
   // The contract refuses to bet unless balance >= wager + the executor-fee reserve, so a
   // plan can be enabled yet unable to play. Say "needs top-up" rather than "0 rounds left",
   // which reads like it ended.
-  const perRoundCost = plan.amountPerPlay + AUTO_FEE_WEI;
-  const affordable = perRoundCost > 0n ? plan.balance / perRoundCost : 0n;
+  const receiptRent = typeof state.autoPlanMaxFee === 'bigint' ? state.autoPlanMaxFee : null;
+  const perRoundCost = receiptRent == null ? null : plan.amountPerPlay + receiptRent;
+  const affordable = perRoundCost != null && perRoundCost > 0n ? plan.balance / perRoundCost : null;
   const stalled = affordable === 0n;
-  const rounds = plan.unlimited ? `~${affordable}` : String(plan.playsRemaining);
+  const rounds = affordable == null
+    ? '—'
+    : plan.unlimited ? `~${affordable}` : String(plan.playsRemaining);
   box.innerHTML = `
     <div class="auto-plan-head">
       <span class="auto-plan-live${stalled ? ' stalled' : ''}"><i></i>${stalled ? 'AUTO-ROUND PAUSED' : 'AUTO-ROUND ACTIVE'}</span>
-      <b>${stalled ? 'needs top-up' : `${rounds} round${rounds === '1' ? '' : 's'} left`}</b>
+      <b>${affordable == null ? 'cost loading' : stalled ? 'needs top-up' : `${rounds} round${rounds === '1' ? '' : 's'} left`}</b>
     </div>
     <p class="auto-plan-summary">${plan.tiles.length} tile${plan.tiles.length === 1 ? '' : 's'} · ${chain.format.ethSmart(plan.amountPerPlay)} SOL per round · ${chain.format.ethSmart(plan.balance)} SOL left</p>
     <p class="auto-plan-reward-mode"><b>${autoRewardMode === 'burn' ? 'AUTO-BURN' : 'AUTO-MINE'}</b> · ${autoRewardMode === 'burn' ? 'Stake + burn your MYNE for 5× staking pool weight. 0% Claim Fee' : 'Keep your MYNE in-system and accumulating. 10% Claim Fee'}</p>
-    ${stalled ? `<p class="auto-plan-warn">Balance ${chain.format.ethSmart(plan.balance)} SOL is below the ${chain.format.ethSmart(perRoundCost)} SOL needed for one more round (wager + keeper reserve). Top up to resume, or withdraw what's left.</p>` : ''}
+    ${affordable == null ? '<p class="auto-plan-warn">Live receipt-rent quote unavailable. Round capacity is not estimated until the RPC returns it.</p>' : ''}
+    ${stalled ? `<p class="auto-plan-warn">Balance ${chain.format.ethSmart(plan.balance)} SOL is below the ${chain.format.ethSmart(perRoundCost)} SOL needed for one more round (exact wager + receipt rent). Top up to resume, or withdraw what's left.</p>` : ''}
     ${plan.autoClaim
       ? `<p class="auto-plan-note">${plan.canClaim
         ? 'SOL winnings are claimed back into the balance automatically. MYNE stays unrefined so it keeps earning dividends.'
