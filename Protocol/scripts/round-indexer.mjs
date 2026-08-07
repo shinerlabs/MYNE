@@ -17,6 +17,9 @@ import {
   archiveHash,
   buildArchiveSnapshot,
   requireRoundFeeAudit,
+  requireRoundRandomnessProof,
+  SERVER_PROVIDER_KIND,
+  SWITCHBOARD_PROVIDER_KIND,
 } from './round-archive-policy.mjs';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 import {
@@ -56,6 +59,9 @@ const referralStartSlot = Number(process.env.REFERRAL_INDEXER_START_SLOT ?? star
 const maxPages = Number(process.env.ROUND_INDEXER_MAX_PAGES || 100);
 const requireBuybackEvidence = process.env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE === '1';
 const indexerInstanceId = randomUUID();
+const SERVER_RANDOMNESS_SLOT_FLAG = 1n << 63n;
+const SERVER_RANDOMNESS_SLOT_MASK = SERVER_RANDOMNESS_SLOT_FLAG - 1n;
+const SIGNED_BIGINT_MAX = SERVER_RANDOMNESS_SLOT_MASK;
 assert.ok(Number.isInteger(intervalMs) && intervalMs >= 1000, 'ROUND_INDEXER_INTERVAL_MS must be >= 1000');
 assert.ok(Number.isInteger(referralStartSlot), 'REFERRAL_INDEXER_START_SLOT must be an integer');
 assert.ok(Number.isInteger(maxPages) && maxPages > 0, 'ROUND_INDEXER_MAX_PAGES must be positive');
@@ -189,6 +195,18 @@ function bytes(value) {
   return Buffer.from(Array.from(value || [], Number));
 }
 
+function eventHex32(value, label) {
+  const encoded = bytes(value);
+  assert.equal(encoded.length, 32, `${label} must contain exactly 32 bytes`);
+  return encoded.toString('hex');
+}
+
+function eventU64(value, label) {
+  const encoded = BigInt(asString(value));
+  assert.ok(encoded >= 0n && encoded <= ((1n << 64n) - 1n), `${label} is not a u64`);
+  return encoded;
+}
+
 async function processEvent(event, signature, slot) {
   const data = normalizeAnchorEventData(event.data);
   const eventName = normalizeAnchorEventName(event.name);
@@ -206,10 +224,88 @@ async function processEvent(event, signature, slot) {
       break;
     }
     case 'RoundRandomnessBound': {
+      const commitSlot = eventU64(data.randomnessCommitSlot, 'Switchboard commit slot');
+      assert.ok(
+        commitSlot <= SIGNED_BIGINT_MAX,
+        'Server-tagged slot cannot be indexed as a Switchboard commit slot',
+      );
       await upsert('mine_rounds', {
         round_id: asString(data.roundId),
+        randomness_provider_kind: SWITCHBOARD_PROVIDER_KIND,
         randomness_id: new PublicKey(data.randomnessAccount).toBase58(),
-        randomness_commit_slot: asString(data.randomnessCommitSlot),
+        randomness_commit_slot: commitSlot.toString(),
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
+      break;
+    }
+    case 'RoundRandomnessCommitted': {
+      const commitSlot = eventU64(data.randomnessCommitSlot, 'Switchboard commit slot');
+      assert.ok(
+        commitSlot > 0n && commitSlot <= SIGNED_BIGINT_MAX,
+        'Server-tagged slot cannot be indexed as a Switchboard commit slot',
+      );
+      await upsert('mine_rounds', {
+        round_id: asString(data.roundId),
+        randomness_provider_kind: SWITCHBOARD_PROVIDER_KIND,
+        randomness_id: new PublicKey(data.randomnessAccount).toBase58(),
+        randomness_commit_slot: commitSlot.toString(),
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
+      break;
+    }
+    case 'RoundServerCommitmentBound': {
+      const roundId = asString(data.roundId);
+      await ensureRound(roundId);
+      await upsert('mine_rounds', {
+        round_id: roundId,
+        randomness_provider_kind: SERVER_PROVIDER_KIND,
+        randomness_id: null,
+        randomness_commit_slot: null,
+        randomness_commitment_hex: eventHex32(data.commitment, 'Server commitment'),
+        randomness_commitment_signature: signature,
+        randomness_commitment_tx_slot: asString(slot),
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
+      break;
+    }
+    case 'RoundServerEntropyLocked': {
+      const roundId = asString(data.roundId);
+      const targetSlot = eventU64(data.targetSlot, 'Server target slot');
+      assert.ok(targetSlot > 0n, 'Server target slot must be positive');
+      await ensureRound(roundId);
+      await upsert('mine_rounds', {
+        round_id: roundId,
+        randomness_provider_kind: SERVER_PROVIDER_KIND,
+        randomness_id: null,
+        randomness_commit_slot: null,
+        randomness_target_slot: targetSlot.toString(),
+        randomness_lock_signature: signature,
+        randomness_lock_tx_slot: asString(slot),
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
+      break;
+    }
+    case 'RoundServerEntropyRevealed': {
+      const roundId = asString(data.roundId);
+      const targetSlot = eventU64(data.targetSlot, 'Server target slot');
+      const entropySlot = eventU64(data.entropySlot, 'Server entropy slot');
+      assert.ok(targetSlot > 0n && entropySlot >= targetSlot, 'Invalid server entropy slots');
+      const randomnessHex = eventHex32(data.randomness, 'Server randomness output');
+      await ensureRound(roundId);
+      await upsert('mine_rounds', {
+        round_id: roundId,
+        randomness_provider_kind: SERVER_PROVIDER_KIND,
+        randomness_id: null,
+        randomness_commit_slot: null,
+        randomness_commitment_hex: eventHex32(data.commitment, 'Server commitment'),
+        randomness_reveal_hex: eventHex32(data.reveal, 'Server reveal'),
+        randomness_target_slot: targetSlot.toString(),
+        randomness_entropy_slot: entropySlot.toString(),
+        randomness_entropy_hash_hex: eventHex32(data.slotHash, 'Server entropy hash'),
+        randomness_value: BigInt(`0x${randomnessHex}`).toString(),
+        randomness_hex: randomnessHex,
+        randomness_reveal_signature: signature,
+        randomness_reveal_tx_slot: asString(slot),
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -320,6 +416,58 @@ async function processEvent(event, signature, slot) {
         })?.bettor ?? null
         : null;
       const randomness = bytes(data.randomness);
+      assert.equal(randomness.length, 32, 'Round randomness output must contain 32 bytes');
+      const rawCommitSlot = eventU64(data.randomnessCommitSlot, 'Round randomness commit slot');
+      const serverRound = (rawCommitSlot & SERVER_RANDOMNESS_SLOT_FLAG) !== 0n;
+      let providerFields;
+      if (serverRound) {
+        const proofRows = await rest(
+          `mine_rounds?round_id=eq.${roundId}`
+          + '&select=randomness_provider_kind,randomness_id,randomness_commit_slot,'
+          + 'randomness_commitment_hex,randomness_reveal_hex,randomness_target_slot,'
+          + 'randomness_entropy_slot,randomness_entropy_hash_hex,'
+          + 'randomness_commitment_signature,randomness_commitment_tx_slot,'
+          + 'randomness_lock_signature,randomness_lock_tx_slot,'
+          + 'randomness_reveal_signature,randomness_reveal_tx_slot',
+        );
+        const proof = {
+          ...(proofRows?.[0] || {}),
+          round_id: roundId,
+          randomness_provider_kind: SERVER_PROVIDER_KIND,
+          randomness_id: null,
+          randomness_commit_slot: null,
+          randomness_hex: randomness.toString('hex'),
+          settlement_signature: signature,
+          settlement_slot: asString(slot),
+        };
+        requireRoundRandomnessProof(proof, {
+          programIdBytes: PROGRAM_ID.toBuffer(),
+          mintBytes: indexedConfig.mint.toBuffer(),
+        });
+        assert.equal(
+          (rawCommitSlot & SERVER_RANDOMNESS_SLOT_MASK).toString(),
+          String(proof.randomness_entropy_slot),
+          'Tagged round slot disagrees with the separately indexed entropy slot',
+        );
+        providerFields = {
+          randomness_provider_kind: SERVER_PROVIDER_KIND,
+          // The on-chain Round reuses these legacy fields internally. The
+          // index never exposes a commitment as an Explorer account or writes
+          // its high-bit-tagged u64 into PostgreSQL bigint.
+          randomness_id: null,
+          randomness_commit_slot: null,
+        };
+      } else {
+        assert.ok(
+          rawCommitSlot <= SIGNED_BIGINT_MAX,
+          'Switchboard commit slot exceeds PostgreSQL signed bigint',
+        );
+        providerFields = {
+          randomness_provider_kind: SWITCHBOARD_PROVIDER_KIND,
+          randomness_id: new PublicKey(data.randomnessAccount).toBase58(),
+          randomness_commit_slot: rawCommitSlot.toString(),
+        };
+      }
       await upsert('mine_rounds', {
         round_id: roundId,
         resolved: true,
@@ -332,10 +480,9 @@ async function processEvent(event, signature, slot) {
         pot_for_winners_wei: prize.toString(),
         bullion_for_winners_wei: asString(data.baseEmission),
         payout_mul_wad: payoutMul.toString(),
-        randomness_id: new PublicKey(data.randomnessAccount).toBase58(),
         randomness_value: BigInt(`0x${randomness.toString('hex') || '0'}`).toString(),
         randomness_hex: randomness.toString('hex'),
-        randomness_commit_slot: asString(data.randomnessCommitSlot),
+        ...providerFields,
         solo_sample: soloSample.toString(),
         total_receipts: asString(data.totalReceipts),
         settlement_signature: signature,
@@ -607,6 +754,12 @@ async function archiveReadyRounds() {
       total_receipts: chainReceiptCount,
       processed_receipts: Number(state.processedReceipts.toString()),
     };
+    if (state.settled) {
+      requireRoundRandomnessProof(indexedRound, {
+        programIdBytes: PROGRAM_ID.toBuffer(),
+        mintBytes: indexedConfig.mint.toBuffer(),
+      });
+    }
     const snapshot = buildArchiveSnapshot({
       program: PROGRAM_ID.toBase58(), round: indexedRound, bets, settlements, buybacks,
     });
@@ -623,9 +776,23 @@ async function archiveReadyRounds() {
       round_id: round.round_id,
       archive_hash: snapshotHash,
       canonical_snapshot: snapshot,
-      randomness_account: round.randomness_id,
-      randomness_commit_slot: round.randomness_commit_slot,
+      provider_kind: round.randomness_provider_kind,
+      randomness_account: round.randomness_provider_kind === SWITCHBOARD_PROVIDER_KIND
+        ? round.randomness_id : null,
+      randomness_commit_slot: round.randomness_provider_kind === SWITCHBOARD_PROVIDER_KIND
+        ? round.randomness_commit_slot : null,
       randomness_hex: round.randomness_hex,
+      commitment_hex: round.randomness_commitment_hex,
+      reveal_hex: round.randomness_reveal_hex,
+      target_slot: round.randomness_target_slot,
+      entropy_slot: round.randomness_entropy_slot,
+      entropy_hash_hex: round.randomness_entropy_hash_hex,
+      commitment_signature: round.randomness_commitment_signature,
+      commitment_tx_slot: round.randomness_commitment_tx_slot,
+      lock_signature: round.randomness_lock_signature,
+      lock_tx_slot: round.randomness_lock_tx_slot,
+      reveal_signature: round.randomness_reveal_signature,
+      reveal_tx_slot: round.randomness_reveal_tx_slot,
       settlement_signature: round.settlement_signature,
     }, 'round_id');
     let attestedState = state;

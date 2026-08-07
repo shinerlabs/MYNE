@@ -10,6 +10,10 @@ import { loadReceiptIndex } from './rounds-index.js';
 import { aggregateMiners } from './miner-aggregation.js';
 import { effectiveUnclaimedMyne } from './mining-shares.js';
 import { deriveRoundProof, randomnessEqual, randomnessHex } from './randomness-proof.js';
+import {
+  commitmentHexFromAccount, describeRandomnessRound, isServerRandomnessProgram,
+  SERVER_RANDOMNESS_PENDING,
+} from './randomness-mode.js';
 import { createReceiptNonce } from './receipt-nonce.js';
 import {
   asBn, decodeProtocolAccount, derivePda, fetchProtocolAccount, getProtocolConfig, getWritableProgram,
@@ -18,6 +22,8 @@ import {
 
 const emptyRound = (roundId) => ({
   id: BigInt(roundId), requestedAt: 0n, resolved: false, randomnessId: null,
+  randomnessMode: 'switchboard', randomnessState: 'uncommitted',
+  randomnessCommitment: null, randomnessCommitSlot: null, randomnessCommitSlotEncoded: 0n,
   randomnessValue: null, winningSquare: 255, jackpotHit: false, singleMinerRound: false,
   singleMinerWinner: null, totalWager: 0n, fee: 0n, winnerTotal: 0n,
   potForWinners: 0n, bullionForWinners: 0n, payoutMulWad: 0n,
@@ -112,6 +118,12 @@ const roundFromAccount = (roundId, account) => {
   const winnerTotal = winning < GRID ? toBig(account.tileLamports[winning]) : 0n;
   const payoutMulWad = winnerTotal > 0n ? (toBig(account.prizeLamports) * (10n ** 18n)) / winnerTotal : 0n;
   const bullionMulWad = winnerTotal > 0n ? (toBig(account.baseEmission) * (10n ** 18n)) / winnerTotal : 0n;
+  const randomnessCommitSlotEncoded = toBig(account.randomnessCommitSlot);
+  const randomnessMeta = describeRandomnessRound({
+    commitSlot: randomnessCommitSlotEncoded,
+    resolved: account.settled,
+  });
+  const boundRandomness = account.randomnessAccount?.toBase58?.() ?? null;
   return {
     ...emptyRound(roundId),
     id: toBig(account.id),
@@ -119,8 +131,17 @@ const roundFromAccount = (roundId, account) => {
     resolved: account.settled,
     randomnessValue: account.randomness,
     randomnessHex: randomnessHex(account.randomness),
-    randomnessId: account.randomnessAccount?.toBase58?.() ?? null,
-    randomnessCommitSlot: toBig(account.randomnessCommitSlot),
+    // Server commitment bytes occupy the legacy Pubkey field but are not an
+    // account. Keeping them out of randomnessId prevents accidental Explorer
+    // links while preserving that field for historical Switchboard rounds.
+    randomnessId: randomnessMeta.mode === 'server' ? null : boundRandomness,
+    randomnessMode: randomnessMeta.mode,
+    randomnessState: randomnessMeta.state,
+    randomnessCommitment: randomnessMeta.mode === 'server'
+      ? commitmentHexFromAccount(account.randomnessAccount)
+      : null,
+    randomnessCommitSlot: randomnessMeta.slot,
+    randomnessCommitSlotEncoded,
     winningSquare: winning,
     jackpotHit: account.motherlodeHit,
     singleMinerRound: account.soloMode,
@@ -221,7 +242,9 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
   const receipt = receiptPda(roundId, account, nonce);
   const { program } = await getWritableProgram();
   const configState = await getProtocolConfig();
-  const providerRandomness = !new PublicKey(configState.randomnessProgram).equals(PublicKey.default);
+  const configuredRandomnessProgram = new PublicKey(configState.randomnessProgram);
+  const providerRandomness = !configuredRandomnessProgram.equals(PublicKey.default);
+  const configuredServerMode = isServerRandomnessProgram(configuredRandomnessProgram);
   const roundState = await fetchProtocolAccount('Round', round);
   const instructions = [];
   if (!(await connection.getAccountInfo(miner, 'confirmed'))) {
@@ -240,12 +263,31 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
       config: protocolPdas.config, round, payer: authority, systemProgram: SystemProgram.programId,
     }).instruction());
   }
-  const randomnessAccount = providerRandomness ? roundState?.randomnessAccount : null;
-  if (providerRandomness && (!randomnessAccount || new PublicKey(randomnessAccount).equals(PublicKey.default))) {
-    throw new Error('This round is waiting for its uncommitted Switchboard request. Please try again shortly.');
-  }
-  if (providerRandomness && toBig(roundState.randomnessCommitSlot) > 0n) {
-    throw new Error('Betting has closed and this round randomness is already committed.');
+  let randomnessAccount = null;
+  if (roundState) {
+    const encodedSlot = toBig(roundState.randomnessCommitSlot);
+    const randomnessMeta = describeRandomnessRound({ commitSlot: encodedSlot, resolved: roundState.settled });
+    const boundRandomness = roundState.randomnessAccount;
+    const hasBoundRandomness = boundRandomness && !new PublicKey(boundRandomness).equals(PublicKey.default);
+    if (randomnessMeta.mode === 'server') {
+      if (!hasBoundRandomness) {
+        throw new Error('This round is waiting for its server randomness commitment. Please try again shortly.');
+      }
+      if (encodedSlot !== SERVER_RANDOMNESS_PENDING) {
+        throw new Error('Betting has closed and the server entropy slot is already locked.');
+      }
+      // The commitment is stored as bytes in Round; it is deliberately not an
+      // account and the optional deploy account must be omitted.
+      randomnessAccount = null;
+    } else if (hasBoundRandomness) {
+      if (encodedSlot > 0n) throw new Error('Betting has closed and this round randomness is already committed.');
+      // A previously opened Switchboard round stays executable even if the
+      // provider configured for future rounds has changed.
+      randomnessAccount = boundRandomness;
+    } else if (providerRandomness) {
+      const provider = configuredServerMode ? 'server commitment' : 'uncommitted Switchboard request';
+      throw new Error(`This round is waiting for its ${provider}. Please try again shortly.`);
+    }
   }
   instructions.push(await program.methods.deploy(asBn(roundId), asBn(nonce), amounts.map(asBn)).accounts({
     config: protocolPdas.config, miner, round, receipt, randomnessAccount, authority,

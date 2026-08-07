@@ -40,12 +40,14 @@ export const LINKS = Object.freeze({
 });
 
 export const GENERATED_PROGRAM_ID = idl.address || idl.metadata?.address || '';
+const mainnetRandomnessAllowed = PROGRAMS.randomness === SWITCHBOARD_MAINNET_PROGRAM
+  || (Boolean(PROGRAMS.protocol) && PROGRAMS.randomness === PROGRAMS.protocol);
 export const DEPLOYMENT_CONFIG_ERRORS = Object.freeze([
   ...validateDeploymentConfig({
     network: NETWORK, programs: PROGRAMS, services: SERVICES, generatedProgramId: GENERATED_PROGRAM_ID,
   }),
-  ...(NETWORK.cluster === 'mainnet-beta' && PROGRAMS.randomness !== SWITCHBOARD_MAINNET_PROGRAM
-    ? ['Mainnet frontend must pin the Switchboard mainnet program'] : []),
+  ...(NETWORK.cluster === 'mainnet-beta' && !mainnetRandomnessAllowed
+    ? ['Mainnet frontend must pin Switchboard or the MYNE server commit-reveal marker'] : []),
 ]);
 
 // Transaction modules stay fail-closed until every required instruction exists in the generated

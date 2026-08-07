@@ -69,9 +69,11 @@ function assertDeploymentMatchesConfig(config) {
   if (PROGRAMS.randomness && !new PublicKey(config.randomnessProgram).equals(new PublicKey(PROGRAMS.randomness))) {
     throw new Error('Configured randomness program does not match the on-chain protocol config');
   }
-  if (NETWORK.cluster === 'mainnet-beta'
-      && !new PublicKey(config.randomnessProgram).equals(new PublicKey(SWITCHBOARD_MAINNET_PROGRAM))) {
-    throw new Error('On-chain protocol is not locked to Switchboard mainnet randomness');
+  if (NETWORK.cluster === 'mainnet-beta') {
+    const randomnessProgram = new PublicKey(config.randomnessProgram);
+    const approved = randomnessProgram.equals(new PublicKey(SWITCHBOARD_MAINNET_PROGRAM))
+      || (PROGRAM_ID && randomnessProgram.equals(PROGRAM_ID));
+    if (!approved) throw new Error('On-chain protocol is not using an approved mainnet randomness mode');
   }
   return config;
 }
