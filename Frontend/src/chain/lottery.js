@@ -2,10 +2,11 @@ import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.j
 import bs58 from 'bs58';
 
 import { connection, getAccount } from './client.js';
-import { GRID, MIN_ROUND_DEPLOYMENT, setGenesisTime } from './config.js';
+import { GRID, MIN_ROUND_DEPLOYMENT, setGenesisTime, solanaNetwork } from './config.js';
 import { parseEther } from './units.js';
 import { intervalReward } from './round-rewards.js';
 import { roundIdsForRange } from './round-range.js';
+import { loadReceiptIndex } from './rounds-index.js';
 import {
   asBn, decodeProtocolAccount, derivePda, fetchProtocolAccount, getProtocolConfig, getWritableProgram,
   protocolPdas, protocolProgramId, sendInstructions, u64Seed,
@@ -55,6 +56,24 @@ async function decodedReceipts({ roundId = null, authority = null } = {}) {
   if (cached?.data && Date.now() - cached.at < RECEIPT_CACHE_MS) return cached.data;
   if (cached?.request) return cached.request;
   const request = (async () => {
+    const indexed = await loadReceiptIndex({ roundId, address: authority });
+    if (indexed) {
+      const decoded = [];
+      const addresses = indexed.map((row) => new PublicKey(row.receipt));
+      for (let offset = 0; offset < addresses.length; offset += 100) {
+        const chunk = addresses.slice(offset, offset + 100);
+        const infos = await connection.getMultipleAccountsInfo(chunk, 'confirmed');
+        for (let index = 0; index < chunk.length; index += 1) {
+          if (!infos[index]) continue;
+          const value = decodeProtocolAccount('BetReceipt', infos[index].data);
+          if (value) decoded.push({ publicKey: chunk[index], account: value });
+        }
+      }
+      return decoded;
+    }
+    if (solanaNetwork.cluster === 'mainnet-beta') {
+      throw new Error('The production receipt index is unavailable; refusing a program-wide account scan');
+    }
     const filters = [{ dataSize: BET_RECEIPT_ACCOUNT_SIZE }];
     if (roundId !== null) filters.push({ memcmp: { offset: 9, bytes: bs58.encode(u64Seed(roundId)) } });
     if (authority) filters.push({ memcmp: { offset: 17, bytes: new PublicKey(authority).toBase58() } });
@@ -200,6 +219,10 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
     }).instruction());
   }
   if (!(await connection.getAccountInfo(round, 'confirmed'))) {
+    const configState = await getProtocolConfig();
+    if (!new PublicKey(configState.randomnessProgram).equals(PublicKey.default)) {
+      throw new Error('This round is being prepared by the verified-randomness keeper. Please try again shortly.');
+    }
     instructions.push(await program.methods.openRound(asBn(roundId)).accounts({
       config: protocolPdas.config, round, payer: authority, systemProgram: SystemProgram.programId,
     }).instruction());
@@ -233,7 +256,31 @@ export async function claimRound(roundId) {
   invalidateReceiptCache();
   return signature;
 }
-export async function claimManyRounds(roundIds) { let signature; for (const id of roundIds) signature = await claimRound(id); return signature; }
+export async function claimManyRounds(roundIds) {
+  const account = getAccount();
+  if (!account) throw new Error('Connect a Solana wallet first');
+  const rows = await claimableReceipts(roundIds, account);
+  if (!rows.length) throw new Error('No unclaimed receipts for these rounds');
+  const authority = new PublicKey(account);
+  const { program } = await getWritableProgram();
+  const instructions = await Promise.all(rows.map(({ publicKey, account: receipt }) => (
+    program.methods.claimReceipt().accounts({
+      config: protocolPdas.config, miningPool: protocolPdas.miningPool,
+      stakePool: protocolPdas.stakePool, miner: minerPda(account),
+      stakePosition: stakePositionPda(account), round: roundPda(receipt.roundId),
+      receipt: publicKey, authority,
+    }).instruction()
+  )));
+  let signature;
+  // Four receipt settlements remain below legacy transaction account/compute
+  // limits in the measured client path. Each chunk is simulated by
+  // sendInstructions before the wallet is asked to sign.
+  for (let offset = 0; offset < instructions.length; offset += 4) {
+    signature = await sendInstructions(instructions.slice(offset, offset + 4));
+  }
+  invalidateReceiptCache();
+  return signature;
+}
 export const claimManyEthOnly = claimManyRounds;
 
 export async function withdrawUnrefined() {

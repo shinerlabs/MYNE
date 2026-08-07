@@ -171,7 +171,7 @@ export async function loadMyBetRounds(address) {
       const { data: chunk, error } = await supabase
         .from('mine_round_bets')
         .select('round_id')
-        .eq('bettor', String(address).toLowerCase())   // stored lowercase by the indexer
+        .eq('bettor', String(address))
         .order('round_id', { ascending: false })
         .range(offset, offset + PAGE - 1);
       if (error) return null;
@@ -203,6 +203,30 @@ export async function loadMyBetRounds(address) {
 export async function countMyBetRounds(address) {
   const rounds = await loadMyBetRounds(address);
   return rounds?.ids ? rounds.ids.size : null;
+}
+
+/** Exact receipt addresses for indexed reads; null means the index is unavailable. */
+export async function loadReceiptIndex({ roundId = null, address = null } = {}) {
+  if (!(await indexAvailable())) return null;
+  try {
+    const unique = new Map();
+    for (let offset = 0; ; offset += PAGE) {
+      let query = supabase
+        .from('mine_round_bets')
+        .select('receipt,round_id,bettor')
+        .order('round_id', { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (roundId !== null) query = query.eq('round_id', String(roundId));
+      if (address) query = query.eq('bettor', String(address));
+      const { data, error } = await query;
+      if (error) return null;
+      for (const row of data ?? []) unique.set(row.receipt, row);
+      if (!data || data.length < PAGE) break;
+    }
+    return [...unique.values()];
+  } catch {
+    return null;
+  }
 }
 
 /**

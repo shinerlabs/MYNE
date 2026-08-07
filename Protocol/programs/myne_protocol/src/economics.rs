@@ -103,6 +103,8 @@ pub enum MyneError {
     RandomnessCommittedTooLate,
     #[msg("The receipt has already been processed")]
     ReceiptAlreadyProcessed,
+    #[msg("The receipt must be claimed or refunded before it can close")]
+    ReceiptNotProcessed,
     #[msg("The receipt authority is invalid")]
     InvalidReceiptAuthority,
     #[msg("The requested token or SOL amount is unavailable")]
@@ -135,6 +137,20 @@ pub enum MyneError {
     InvalidRewardMode,
     #[msg("The fixed MYNE emission schedule has completed")]
     EmissionComplete,
+    #[msg("The round archive hash cannot be zero")]
+    InvalidArchiveHash,
+    #[msg("The round has already been archived")]
+    RoundAlreadyArchived,
+    #[msg("The round has not been archived")]
+    RoundNotArchived,
+    #[msg("Not every receipt has completed the cleanup lifecycle")]
+    RoundCleanupIncomplete,
+    #[msg("The buyback has already been marked complete")]
+    BuybackAlreadyCompleted,
+    #[msg("The round buyback has not completed")]
+    BuybackNotCompleted,
+    #[msg("The round still contains SOL allocated to player payouts")]
+    RoundPayoutIncomplete,
 }
 
 #[cfg(test)]

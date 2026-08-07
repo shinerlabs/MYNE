@@ -47,6 +47,82 @@
       "args": []
     },
     {
+      "name": "archive_round",
+      "docs": [
+        "Commit the canonical off-chain archive snapshot before any receipt can",
+        "be closed. The randomness authority is already the round lifecycle",
+        "authority and may attest only a non-zero content hash."
+      ],
+      "discriminator": [
+        199,
+        98,
+        75,
+        46,
+        241,
+        246,
+        3,
+        138
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "randomness_authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "archive_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "bind_round_randomness",
       "docs": [
         "Bind a Switchboard randomness account before any deployment is accepted.",
@@ -893,6 +969,143 @@
       "args": []
     },
     {
+      "name": "close_receipt",
+      "docs": [
+        "Close one already-processed receipt after the round snapshot has been",
+        "archived. Anyone may pay for cleanup, but Anchor always returns rent to",
+        "the immutable receipt beneficiary. For auto-round receipts the user's",
+        "plan reimburses the executor at creation, so the user is the economic",
+        "rent payer."
+      ],
+      "discriminator": [
+        126,
+        254,
+        244,
+        203,
+        124,
+        164,
+        134,
+        89
+      ],
+      "accounts": [
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.authority",
+                "account": "BetReceipt"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.nonce",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "writable": true
+        },
+        {
+          "name": "executor",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_round",
+      "docs": [
+        "Close a fully-drained and archived round. The instruction is",
+        "permissionless, while the rent destination is constrained to the payer",
+        "recorded when the PDA was created."
+      ],
+      "discriminator": [
+        149,
+        14,
+        81,
+        88,
+        230,
+        226,
+        234,
+        37
+      ],
+      "accounts": [
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "rent_payer",
+          "writable": true
+        },
+        {
+          "name": "executor",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "configure_auto_plan",
       "discriminator": [
         115,
@@ -1687,6 +1900,72 @@
       ]
     },
     {
+      "name": "mark_buyback_completed",
+      "docs": [
+        "The dedicated buyback signer records completion only after the swap and",
+        "burn have been confirmed. This prevents a settled round from closing",
+        "while its 2% allocation is still operationally outstanding."
+      ],
+      "discriminator": [
+        169,
+        115,
+        0,
+        85,
+        129,
+        241,
+        119,
+        61
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "buyback_authority",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "open_round",
       "discriminator": [
         66,
@@ -1903,6 +2182,88 @@
         {
           "name": "authority",
           "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund_receipt_permissionless",
+      "docs": [
+        "Permissionless refund for a round that missed its settlement deadline.",
+        "SOL and eventual receipt rent remain constrained to the receipt owner."
+      ],
+      "discriminator": [
+        195,
+        19,
+        242,
+        82,
+        227,
+        108,
+        28,
+        216
+      ],
+      "accounts": [
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.authority",
+                "account": "BetReceipt"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.nonce",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "writable": true
+        },
+        {
+          "name": "executor",
           "signer": true
         }
       ],
@@ -2388,6 +2749,210 @@
           "type": "pubkey"
         }
       ]
+    },
+    {
+      "name": "settle_receipt",
+      "docs": [
+        "Permissionless settlement for either reward mode. The beneficiary,",
+        "miner and staking position are all constrained to the immutable receipt",
+        "authority, so the executor can neither redirect SOL nor take MYNE."
+      ],
+      "discriminator": [
+        216,
+        17,
+        200,
+        111,
+        7,
+        3,
+        233,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "miner",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "receipt.authority",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "receipt.authority",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "round.id",
+                "account": "Round"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.authority",
+                "account": "BetReceipt"
+              },
+              {
+                "kind": "account",
+                "path": "receipt.nonce",
+                "account": "BetReceipt"
+              }
+            ]
+          }
+        },
+        {
+          "name": "beneficiary",
+          "writable": true
+        },
+        {
+          "name": "executor",
+          "signer": true
+        }
+      ],
+      "args": []
     },
     {
       "name": "settle_round",
@@ -3090,6 +3655,19 @@
       ]
     },
     {
+      "name": "BuybackCompleted",
+      "discriminator": [
+        254,
+        178,
+        85,
+        120,
+        54,
+        247,
+        188,
+        167
+      ]
+    },
+    {
       "name": "DeploymentCreated",
       "discriminator": [
         208,
@@ -3194,6 +3772,19 @@
       ]
     },
     {
+      "name": "ReceiptClosed",
+      "discriminator": [
+        127,
+        232,
+        161,
+        69,
+        46,
+        187,
+        159,
+        188
+      ]
+    },
+    {
       "name": "ReceiptRefunded",
       "discriminator": [
         190,
@@ -3207,6 +3798,32 @@
       ]
     },
     {
+      "name": "RoundArchived",
+      "discriminator": [
+        223,
+        197,
+        69,
+        73,
+        86,
+        142,
+        110,
+        193
+      ]
+    },
+    {
+      "name": "RoundClosed",
+      "discriminator": [
+        45,
+        243,
+        28,
+        22,
+        132,
+        70,
+        175,
+        226
+      ]
+    },
+    {
       "name": "RoundOpened",
       "discriminator": [
         99,
@@ -3217,6 +3834,19 @@
         57,
         109,
         178
+      ]
+    },
+    {
+      "name": "RoundRandomnessBound",
+      "discriminator": [
+        103,
+        111,
+        196,
+        202,
+        234,
+        148,
+        61,
+        110
       ]
     },
     {
@@ -3431,83 +4061,123 @@
     },
     {
       "code": 6026,
+      "name": "ReceiptNotProcessed",
+      "msg": "The receipt must be claimed or refunded before it can close"
+    },
+    {
+      "code": 6027,
       "name": "InvalidReceiptAuthority",
       "msg": "The receipt authority is invalid"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "InsufficientBalance",
       "msg": "The requested token or SOL amount is unavailable"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "InvalidReferrer",
       "msg": "The supplied referrer is invalid"
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "CooldownActive",
       "msg": "The staking cooldown has not completed"
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "InvalidStakeAuthority",
       "msg": "The staking position does not match this authority"
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "InvalidFeeDestination",
       "msg": "The provided fee destination does not match protocol configuration"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "LiquidityPoolNotVerified",
       "msg": "A verified Meteora liquidity pool is required before unpausing"
     },
     {
-      "code": 6033,
+      "code": 6034,
       "name": "InvalidLiquidityPool",
       "msg": "The configured liquidity pool is invalid"
     },
     {
-      "code": 6034,
+      "code": 6035,
       "name": "InvalidRound",
       "msg": "The round ID does not match this account"
     },
     {
-      "code": 6035,
+      "code": 6036,
       "name": "InvalidRoundSchedule",
       "msg": "Only the current scheduled round can be opened"
     },
     {
-      "code": 6036,
+      "code": 6037,
       "name": "AutoPlanAlreadyExecuted",
       "msg": "This automation plan already executed for the round"
     },
     {
-      "code": 6037,
+      "code": 6038,
       "name": "AutoPlanInactive",
       "msg": "This automation plan is inactive"
     },
     {
-      "code": 6038,
+      "code": 6039,
       "name": "ProductionModeLocked",
       "msg": "Production mode cannot be downgraded after mainnet randomness is selected"
     },
     {
-      "code": 6039,
+      "code": 6040,
       "name": "InvalidStakeVault",
       "msg": "The staking token account is not the canonical stake-pool vault"
     },
     {
-      "code": 6040,
+      "code": 6041,
       "name": "InvalidRewardMode",
       "msg": "The automation reward mode is invalid"
     },
     {
-      "code": 6041,
+      "code": 6042,
       "name": "EmissionComplete",
       "msg": "The fixed MYNE emission schedule has completed"
+    },
+    {
+      "code": 6043,
+      "name": "InvalidArchiveHash",
+      "msg": "The round archive hash cannot be zero"
+    },
+    {
+      "code": 6044,
+      "name": "RoundAlreadyArchived",
+      "msg": "The round has already been archived"
+    },
+    {
+      "code": 6045,
+      "name": "RoundNotArchived",
+      "msg": "The round has not been archived"
+    },
+    {
+      "code": 6046,
+      "name": "RoundCleanupIncomplete",
+      "msg": "Not every receipt has completed the cleanup lifecycle"
+    },
+    {
+      "code": 6047,
+      "name": "BuybackAlreadyCompleted",
+      "msg": "The buyback has already been marked complete"
+    },
+    {
+      "code": 6048,
+      "name": "BuybackNotCompleted",
+      "msg": "The round buyback has not completed"
+    },
+    {
+      "code": 6049,
+      "name": "RoundPayoutIncomplete",
+      "msg": "The round still contains SOL allocated to player payouts"
     }
   ],
   "types": [
@@ -3612,6 +4282,10 @@
           {
             "name": "balance_lamports",
             "type": "u64"
+          },
+          {
+            "name": "reward_mode",
+            "type": "u8"
           },
           {
             "name": "active",
@@ -3755,6 +4429,22 @@
       }
     },
     {
+      "name": "BuybackCompleted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "DeploymentCreated",
       "type": {
         "kind": "struct",
@@ -3768,12 +4458,38 @@
             "type": "pubkey"
           },
           {
+            "name": "receipt",
+            "type": "pubkey"
+          },
+          {
             "name": "nonce",
             "type": "u64"
           },
           {
             "name": "total_lamports",
             "type": "u64"
+          },
+          {
+            "name": "reward_mode",
+            "type": "u8"
+          },
+          {
+            "name": "amounts",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
+          },
+          {
+            "name": "cumulative_starts",
+            "type": {
+              "array": [
+                "u64",
+                25
+              ]
+            }
           }
         ]
       }
@@ -4160,6 +4876,26 @@
       }
     },
     {
+      "name": "ReceiptClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "ReceiptRefunded",
       "type": {
         "kind": "struct",
@@ -4195,6 +4931,14 @@
           {
             "name": "id",
             "type": "u64"
+          },
+          {
+            "name": "rent_payer",
+            "docs": [
+              "Wallet that funded this account's rent. It is the only permitted close",
+              "destination, so permissionless cleanup cannot redirect recovered SOL."
+            ],
+            "type": "pubkey"
           },
           {
             "name": "opened_at",
@@ -4294,6 +5038,88 @@
           {
             "name": "motherlode_emission",
             "type": "u64"
+          },
+          {
+            "name": "total_receipts",
+            "docs": [
+              "Receipt lifecycle counters. A round cannot close until every receipt has",
+              "been settled/refunded and subsequently closed after archival."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "processed_receipts",
+            "type": "u64"
+          },
+          {
+            "name": "closed_receipts",
+            "type": "u64"
+          },
+          {
+            "name": "buyback_completed",
+            "docs": [
+              "The buyback keeper attests completion only after the allocated SOL was",
+              "swapped through the registered pool and the purchased MYNE was burned."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "archive_hash",
+            "docs": [
+              "Hash of the canonical database snapshot committed by the randomness",
+              "authority. Non-zero means history and proof data were durably archived."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "archived_at_slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundArchived",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "archive_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "rent_payer",
+            "type": "pubkey"
           }
         ]
       }
@@ -4308,12 +5134,44 @@
             "type": "u64"
           },
           {
+            "name": "rent_payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "opened_at",
+            "type": "i64"
+          },
+          {
             "name": "betting_ends_at",
             "type": "i64"
           },
           {
             "name": "settles_at",
             "type": "i64"
+          },
+          {
+            "name": "refund_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundRandomnessBound",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "randomness_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "randomness_commit_slot",
+            "type": "u64"
           }
         ]
       }
@@ -4340,12 +5198,49 @@
             "type": "bool"
           },
           {
+            "name": "gross_deployed_lamports",
+            "type": "u64"
+          },
+          {
             "name": "prize_lamports",
             "type": "u64"
           },
           {
             "name": "motherlode_payout_lamports",
             "type": "u64"
+          },
+          {
+            "name": "base_emission",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_emission",
+            "type": "u64"
+          },
+          {
+            "name": "total_receipts",
+            "type": "u64"
+          },
+          {
+            "name": "solo_sample",
+            "type": "u64"
+          },
+          {
+            "name": "randomness_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "randomness_commit_slot",
+            "type": "u64"
+          },
+          {
+            "name": "randomness",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
@@ -4378,6 +5273,10 @@
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "active_stakers",
+            "type": "u64"
           },
           {
             "name": "total_standard",

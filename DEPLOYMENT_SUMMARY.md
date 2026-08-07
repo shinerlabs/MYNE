@@ -2,8 +2,8 @@
 
 ## Current deployment
 
-- Production site: https://myne-upph.vercel.app
-- Network: Solana devnet
+- Live site: https://www.myne.supply
+- Current public network: Solana devnet (pre-launch; keep this unchanged until Mainnet state is deployed and verified)
 - Frontend: `Frontend/` (Vite)
 - Hosting: Vercel project `myne-upph`
 - Supabase project: `tfyvarplanptbknnqzwn`
@@ -36,10 +36,13 @@ re-checks the gate before applying the buyback/burn allocation.
 
 ## Verification before devnet testing
 
+The currently deployed Devnet state predates version 5. Do not treat the public UI or the old
+deployment as validation of the new receipt lifecycle; perform a controlled migration or fresh
+version-5 rehearsal first.
+
 1. Run `pnpm install` and `pnpm --dir Frontend build`.
 2. Run the local validator and Anchor tests from `Protocol/`.
 3. Confirm the official Meteora pool registration and minimum reserves.
 4. Confirm the deployed program and mint addresses match the Vercel variables.
 5. Connect a devnet wallet, place a test bid, and verify round history, previous-round miners,
    staking rewards, referral accounting, and chat/profile flows.
-

@@ -32,9 +32,22 @@ grep -q "declare_id!(\"$PROGRAM_ID\")" programs/myne_protocol/src/lib.rs
 grep -q '"name": "settle_round_verified"' target/idl/myne_protocol.json
 grep -q '"name": "set_randomness_program"' target/idl/myne_protocol.json
 grep -q '"name": "claim_auto_burn_receipt"' target/idl/myne_protocol.json
-grep -q 'pub const CURRENT_VERSION: u8 = 4;' programs/myne_protocol/src/lib.rs
+grep -q '"name": "settle_receipt"' target/idl/myne_protocol.json
+grep -q '"name": "close_receipt"' target/idl/myne_protocol.json
+grep -q '"name": "close_round"' target/idl/myne_protocol.json
+grep -q '"name": "archive_round"' target/idl/myne_protocol.json
+grep -q '"name": "mark_buyback_completed"' target/idl/myne_protocol.json
+grep -q 'pub const CURRENT_VERSION: u8 = 5;' programs/myne_protocol/src/lib.rs
+grep -q 'RoundPayoutIncomplete' programs/myne_protocol/src/economics.rs
 grep -q "$MAINNET_SWITCHBOARD" programs/myne_protocol/src/lib.rs
 grep -q "$METEORA_DLMM" programs/myne_protocol/src/lib.rs
+test -f scripts/round-indexer.mjs
+test -f scripts/round-lifecycle-keeper.mjs
+test -f scripts/round-archive-policy.mjs
+test -f scripts/prepare-admin-fallback-ata.mjs
+test -s toolchain/agave-3.1.10-syscalls.txt
+grep -q 'mine_buyback_executions' ../supabase/migrations/20260807090000_round_index.sql
+grep -q 'ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1' docs/MAINNET_LAUNCH_RUNBOOK.md
 
 if git grep -nE '(BEGIN (OPENSSH|RSA|EC) PRIVATE KEY|PRIVATE_KEY=|SERVICE_ROLE_KEY=|api-key=[A-Za-z0-9_-]{20,})' -- \
   ':!*.lock' ':!scripts/check-mainnet-readiness.sh'; then

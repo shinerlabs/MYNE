@@ -1,5 +1,5 @@
 import { AnchorProvider, BN, BorshAccountsCoder, Program } from '@anchor-lang/core';
-import { PublicKey, Transaction } from '@solana/web3.js';
+import { ComputeBudgetProgram, PublicKey, Transaction } from '@solana/web3.js';
 
 import idl from '../generated/myne_protocol.json';
 import { PROGRAMS } from '../app-config.js';
@@ -121,7 +121,29 @@ export async function getWritableProgram() {
 export async function sendInstructions(instructions) {
   const { wallet } = await getWritableProgram();
   const latest = await connection.getLatestBlockhash('confirmed');
-  const transaction = new Transaction({ feePayer: wallet.publicKey, ...latest }).add(...instructions);
+  const simulationTransaction = new Transaction({ feePayer: wallet.publicKey, ...latest }).add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+    ...instructions,
+  );
+  const simulation = await connection.simulateTransaction(simulationTransaction, {
+    sigVerify: false,
+  });
+  if (simulation.value.err) {
+    throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+  }
+  const measuredUnits = Number(simulation.value.unitsConsumed || 200_000);
+  const computeUnits = Math.min(1_400_000, Math.max(50_000, Math.ceil(measuredUnits * 1.1)));
+  const priorityMicrolamports = Math.max(0, Math.min(
+    1_000_000,
+    Number(import.meta.env?.VITE_PRIORITY_FEE_MICROLAMPORTS || 0),
+  ));
+  const transaction = new Transaction({ feePayer: wallet.publicKey, ...latest }).add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }),
+    ...(priorityMicrolamports > 0
+      ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityMicrolamports })]
+      : []),
+    ...instructions,
+  );
   let signature;
   if (wallet.provider.signAndSendTransaction) {
     const result = await wallet.provider.signAndSendTransaction(transaction);
@@ -130,7 +152,10 @@ export async function sendInstructions(instructions) {
     const signed = await wallet.signTransaction(transaction);
     signature = await connection.sendRawTransaction(signed.serialize());
   }
-  await connection.confirmTransaction({ signature, ...latest }, 'confirmed');
+  const confirmation = await connection.confirmTransaction({ signature, ...latest }, 'confirmed');
+  if (confirmation.value.err) {
+    throw new Error(`Transaction failed after submission: ${JSON.stringify(confirmation.value.err)}`);
+  }
   return signature;
 }
 

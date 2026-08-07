@@ -4,8 +4,8 @@ import { connection, getAccount } from './client.js';
 import { parseEther } from './units.js';
 import { apyPercent } from './staking-apy.js';
 import {
-  asBn, decodeProtocolAccount, derivePda, fetchProtocolAccount, getProtocolConfig,
-  getWritableProgram, protocolPdas, protocolProgramId, sendInstructions,
+  asBn, derivePda, fetchProtocolAccount, getProtocolConfig,
+  getWritableProgram, protocolPdas, sendInstructions,
 } from './anchor-client.js';
 
 export const TIER_FLEX = 0;
@@ -17,8 +17,6 @@ const toBig = (value) => BigInt(value?.toString?.() ?? value ?? 0);
 let apySample = null;
 let lastApy = { aprPct: null, aprStatus: 'window', windowMinutes: 0, rewardPerMinuteSol: 0 };
 export const APY_WINDOW_MINUTES = 30;
-// 8-byte discriminator + the fixed StakePosition fields in state.rs.
-const STAKE_POSITION_ACCOUNT_SIZE = 105;
 const positionPda = (owner) => derivePda('stake_position', new PublicKey(owner));
 const minerPda = (owner) => derivePda('miner', new PublicKey(owner));
 const associatedToken = (owner, mint) => PublicKey.findProgramAddressSync(
@@ -120,14 +118,7 @@ export async function claimStakingRewards() {
 }
 
 export async function readStakingMetrics() {
-  const [pool, positionAccounts] = await Promise.all([
-    fetchProtocolAccount('StakePool', protocolPdas.stakePool),
-    protocolProgramId
-      ? connection.getProgramAccounts(protocolProgramId, {
-          commitment: 'confirmed', filters: [{ dataSize: STAKE_POSITION_ACCOUNT_SIZE }],
-        })
-      : [],
-  ]);
+  const pool = await fetchProtocolAccount('StakePool', protocolPdas.stakePool);
   const standard = Number(toBig(pool?.totalStandard)) / 1e9;
   const burn = Number(toBig(pool?.totalBurn)) / 1e9;
   const totalStakedPrincipal = standard + burn;
@@ -153,14 +144,7 @@ export async function readStakingMetrics() {
       apySample = { at: now, fundedSol };
     }
   }
-  const stakers = positionAccounts.reduce((count, entry) => {
-    try {
-      const position = decodeProtocolAccount('StakePosition', entry.account.data);
-      return count + (toBig(position?.rewardWeight) > 0n ? 1 : 0);
-    } catch {
-      return count;
-    }
-  }, 0);
+  const stakers = Number(toBig(pool?.activeStakers));
   return {
     totalStakedPrincipal, flexStaked: standard, burnStaked: burn,
     totalWeight,

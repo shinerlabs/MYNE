@@ -10,7 +10,6 @@ const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = web3;
 const {
   AuthorityType,
   TOKEN_PROGRAM_ID,
-  createAccount,
   createMint,
   getOrCreateAssociatedTokenAccount,
   mintTo,
@@ -78,17 +77,24 @@ const launchAccount = await getOrCreateAssociatedTokenAccount(
   mint,
   payer.publicKey,
 );
-// Anchor rejects aliasing two writable token accounts, so keep the admin fee destination
-// separate from the claimant's token account even though both are owned by the payer locally.
-const adminFeeAccount = await createAccount(
+const rogue = Keypair.generate();
+const airdrop = await provider.connection.requestAirdrop(rogue.publicKey, LAMPORTS_PER_SOL);
+await provider.connection.confirmTransaction(airdrop, 'confirmed');
+const fallbackOwner = Keypair.generate();
+const fallbackAirdrop = await provider.connection.requestAirdrop(
+  fallbackOwner.publicKey,
+  LAMPORTS_PER_SOL,
+);
+await provider.connection.confirmTransaction(fallbackAirdrop, 'confirmed');
+// The fallback path is constrained to this canonical ATA and remains distinct
+// from the claimant's token account during the local aliasing checks.
+const adminFeeAccount = (await getOrCreateAssociatedTokenAccount(
   provider.connection,
   payer,
   mint,
-  payer.publicKey,
-  Keypair.generate(),
-  undefined,
-  TOKEN_PROGRAM_ID,
-);
+  fallbackOwner.publicKey,
+  false,
+)).address;
 await mintTo(
   provider.connection,
   payer,
@@ -106,9 +112,6 @@ await setAuthority(
   config,
 );
 
-const rogue = Keypair.generate();
-const airdrop = await provider.connection.requestAirdrop(rogue.publicKey, LAMPORTS_PER_SOL);
-await provider.connection.confirmTransaction(airdrop, 'confirmed');
 const referrer = Keypair.generate();
 const referrerAirdrop = await provider.connection.requestAirdrop(referrer.publicKey, LAMPORTS_PER_SOL);
 await provider.connection.confirmTransaction(referrerAirdrop, 'confirmed');
@@ -135,7 +138,7 @@ await assert.rejects(
       randomnessProgram: PublicKey.default,
       buybackWallet: payer.publicKey,
       motherlodeWallet: payer.publicKey,
-      adminFeeWallet: payer.publicKey,
+      adminFeeWallet: fallbackOwner.publicKey,
     })
     .accounts({ ...initializeAccounts, upgradeAuthority: rogue.publicKey })
     .signers([rogue])
@@ -149,7 +152,7 @@ const initializeSignature = await program.methods
     randomnessProgram: PublicKey.default,
     buybackWallet: payer.publicKey,
     motherlodeWallet: payer.publicKey,
-    adminFeeWallet: payer.publicKey,
+    adminFeeWallet: fallbackOwner.publicKey,
   })
   .accounts({ ...initializeAccounts, upgradeAuthority: upgradeAuthority.publicKey })
   .signers(upgradeAuthoritySigners)
@@ -174,7 +177,7 @@ await program.methods
   .rpc();
 
 let state = await program.account.protocolConfig.fetch(config);
-assert.equal(state.version, 4);
+assert.equal(state.version, 5);
 assert.equal(state.paused, true);
 assert.ok(state.admin.equals(upgradeAuthority.publicKey));
 assert.ok(state.mint.equals(mint));
@@ -408,21 +411,39 @@ await program.methods
     executor: payer.publicKey,
   })
   .rpc();
+await assert.rejects(
+  program.methods
+    .settleReceipt()
+    .accounts({
+      config, miningPool, stakePool, miner: rogueMiner, stakePosition: rogueStakePosition, round,
+      receipt: receiptFor(rogue.publicKey, new BN(20)), beneficiary: loser.publicKey,
+      executor: payer.publicKey,
+    })
+    .rpc(),
+  /InvalidReceiptAuthority|receipt authority|custom program error/i,
+);
 await program.methods
-  .claimReceipt()
+  .settleReceipt()
   .accounts({
     config, miningPool, stakePool, miner: rogueMiner, stakePosition: rogueStakePosition, round,
-    receipt: receiptFor(rogue.publicKey, new BN(20)), authority: rogue.publicKey,
+    receipt: receiptFor(rogue.publicKey, new BN(20)), beneficiary: rogue.publicKey,
+    executor: payer.publicKey,
   })
-  .signers([rogue])
   .rpc();
+await assert.rejects(
+  program.methods
+    .archiveRound([...Buffer.alloc(32, 7)])
+    .accounts({ config, round, randomnessAuthority: payer.publicKey })
+    .rpc(),
+  /RoundCleanupIncomplete|cleanup incomplete|custom program error/i,
+);
 await program.methods
-  .claimReceipt()
+  .settleReceipt()
   .accounts({
     config, miningPool, stakePool, miner: loserMiner, stakePosition: loserStakePosition, round,
-    receipt: receiptFor(loser.publicKey, new BN(30)), authority: loser.publicKey,
+    receipt: receiptFor(loser.publicKey, new BN(30)), beneficiary: loser.publicKey,
+    executor: payer.publicKey,
   })
-  .signers([loser])
   .rpc();
 roundState = await program.account.round.fetch(round);
 assert.equal(roundState.settled, true);
@@ -430,6 +451,10 @@ assert.equal(roundState.winningTile, 0);
 assert.equal(roundState.soloMode, false);
 assert.equal(roundState.motherlodePayoutLamports.toString(), '0');
 assert.equal(roundState.claimedLamports.toString(), '572000000');
+assert.equal(roundState.totalReceipts.toString(), '5');
+assert.equal(roundState.processedReceipts.toString(), '5');
+assert.equal(roundState.closedReceipts.toString(), '0');
+assert.equal(roundState.buybackCompleted, true);
 const settledConfig = await program.account.protocolConfig.fetch(config);
 assert.equal(settledConfig.motherlodeLamports.toString(), '13000000');
 const autoBurnPosition = await program.account.stakePosition.fetch(stakePosition);
@@ -506,6 +531,62 @@ const stakePoolState = await program.account.stakePool.fetch(stakePool);
 assert.equal(stakePoolState.totalFundedLamports.toString(), '152000000');
 assert.equal(stakePoolState.totalClaimedLamports.toString(), '152000000');
 
+const archiveHash = [...createHash('sha256').update('local-round-0-canonical-snapshot').digest()];
+await assert.rejects(
+  program.methods
+    .closeReceipt()
+    .accounts({
+      round, receipt: receiptFor(rogue.publicKey, new BN(20)), beneficiary: rogue.publicKey,
+      executor: payer.publicKey,
+    })
+    .rpc(),
+  /RoundNotArchived|not archived|custom program error/i,
+);
+await program.methods
+  .archiveRound(archiveHash)
+  .accounts({ config, round, randomnessAuthority: payer.publicKey })
+  .rpc();
+await assert.rejects(
+  program.methods
+    .markBuybackCompleted()
+    .accounts({ config, round, buybackAuthority: rogue.publicKey })
+    .signers([rogue])
+    .rpc(),
+  /InvalidFeeDestination|fee destination|custom program error/i,
+);
+await assert.rejects(
+  program.methods
+    .closeRound()
+    .accounts({ round, rentPayer: payer.publicKey, executor: payer.publicKey })
+    .rpc(),
+  /RoundCleanupIncomplete|cleanup incomplete|custom program error/i,
+);
+const rogueBalanceBeforeRent = await provider.connection.getBalance(rogue.publicKey, 'confirmed');
+for (const [authority, nonce] of [
+  [payer.publicKey, new BN(10)],
+  [payer.publicKey, new BN(11)],
+  [payer.publicKey, new BN(0)],
+  [rogue.publicKey, new BN(20)],
+  [loser.publicKey, new BN(30)],
+]) {
+  await program.methods
+    .closeReceipt()
+    .accounts({
+      round, receipt: receiptFor(authority, nonce), beneficiary: authority, executor: payer.publicKey,
+    })
+    .rpc();
+  assert.equal(await program.account.betReceipt.fetchNullable(receiptFor(authority, nonce)), null);
+}
+const rogueBalanceAfterRent = await provider.connection.getBalance(rogue.publicKey, 'confirmed');
+assert.ok(rogueBalanceAfterRent > rogueBalanceBeforeRent, 'Permissionless close returns receipt rent to its beneficiary');
+roundState = await program.account.round.fetch(round);
+assert.equal(roundState.closedReceipts.toString(), '5');
+await program.methods
+  .closeRound()
+  .accounts({ round, rentPayer: payer.publicKey, executor: payer.publicKey })
+  .rpc();
+assert.equal(await program.account.round.fetchNullable(round), null);
+
 await program.methods
   .proposeAdmin(rogue.publicKey)
   .accounts({ config, liquidityGate: null, liquidityPool: null, baseVault: null, quoteVault: null, admin: upgradeAuthority.publicKey })
@@ -580,6 +661,9 @@ console.log(JSON.stringify({
     'receipt-based mining with multiple unbounded deployments',
     'deterministic round schedule rejects premature future rounds',
     'constant-cost split settlement and per-receipt claims',
+    'permissionless accumulate and auto-burn receipt settlement',
+    'archive-before-close lifecycle with receipt and round rent recovery',
+    'on-chain receipt processed/closed counters and buyback closure gate',
     'standard staking plus operator and mining-funded SOL rewards',
     '10% MYNE claim fee accounting and capped minting',
     'balance-capped auto-round execution without a play-count cap',

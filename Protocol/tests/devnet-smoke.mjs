@@ -31,8 +31,12 @@ const [programAccount, state, miningState, stakingState] = await Promise.all([
   program.account.stakePool.fetch(stakePool),
 ]);
 assert.ok(programAccount?.executable, 'Program is not executable on the selected cluster');
-assert.ok(state.paused, 'Devnet configuration must remain paused after initialization');
-assert.equal(state.version, 4);
+assert.equal(
+  state.version,
+  5,
+  `Devnet runs state version ${state.version}; use a reviewed migration or fresh v5 rehearsal before testing`,
+);
+assert.ok(state.paused, 'Devnet version 5 must remain paused during the pre-activation smoke test');
 assert.ok(BigInt(state.motherlodeLamports.toString()) >= 0n);
 assert.equal(state.genesisTokens.toString(), '100');
 assert.equal(state.maxTokens.toString(), '2000000');

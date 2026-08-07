@@ -20,7 +20,7 @@ pub const MINER_SEED: &[u8] = b"miner";
 pub const STAKE_POSITION_SEED: &[u8] = b"stake_position";
 pub const ROUND_SEED: &[u8] = b"round";
 pub const BET_SEED: &[u8] = b"bet";
-pub const CURRENT_VERSION: u8 = 4;
+pub const CURRENT_VERSION: u8 = 5;
 pub const MYNE_DECIMALS: u8 = 9;
 pub const GENESIS_TOKENS: u64 = 100;
 pub const MAX_TOKENS: u64 = 2_000_000;
@@ -93,6 +93,11 @@ pub mod myne_protocol {
             );
         }
         require_keys_eq!(
+            ctx.accounts.token_program.key(),
+            anchor_spl::token::ID,
+            MyneError::InvalidTokenProgram
+        );
+        require_keys_eq!(
             *ctx.accounts.mint.to_account_info().owner,
             ctx.accounts.token_program.key(),
             MyneError::InvalidTokenProgram
@@ -149,6 +154,7 @@ pub mod myne_protocol {
 
         let stake_pool = &mut ctx.accounts.stake_pool;
         stake_pool.bump = ctx.bumps.stake_pool;
+        stake_pool.active_stakers = 0;
         stake_pool.total_standard = 0;
         stake_pool.total_burn = 0;
         stake_pool.total_weight = 0;
@@ -415,6 +421,16 @@ pub mod myne_protocol {
 
     pub fn open_round(ctx: Context<OpenRound>, round_id: u64) -> Result<()> {
         require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        // Verified-randomness rounds must be opened by the configured keeper.
+        // Otherwise an arbitrary payer could create the scheduled round first,
+        // leave it unbound, and deny service for the full round window.
+        if ctx.accounts.config.randomness_program != Pubkey::default() {
+            require_keys_eq!(
+                ctx.accounts.payer.key(),
+                ctx.accounts.config.randomness_authority,
+                MyneError::InvalidRandomnessAuthority
+            );
+        }
         require!(
             ctx.accounts.config.total_emitted_base_units < max_supply_base_units()?,
             MyneError::EmissionComplete
@@ -447,6 +463,7 @@ pub mod myne_protocol {
         let round = &mut ctx.accounts.round;
         round.bump = ctx.bumps.round;
         round.id = round_id;
+        round.rent_payer = ctx.accounts.payer.key();
         round.opened_at = opened_at;
         round.betting_ends_at = betting_ends_at;
         round.settles_at = settles_at;
@@ -469,10 +486,19 @@ pub mod myne_protocol {
         round.claimed_lamports = 0;
         round.base_emission = 0;
         round.motherlode_emission = 0;
+        round.total_receipts = 0;
+        round.processed_receipts = 0;
+        round.closed_receipts = 0;
+        round.buyback_completed = false;
+        round.archive_hash = [0; 32];
+        round.archived_at_slot = 0;
         emit!(RoundOpened {
             round_id,
+            rent_payer: round.rent_payer,
+            opened_at: round.opened_at,
             betting_ends_at: round.betting_ends_at,
-            settles_at: round.settles_at
+            settles_at: round.settles_at,
+            refund_at: round.refund_at,
         });
         Ok(())
     }
@@ -525,6 +551,11 @@ pub mod myne_protocol {
         );
         ctx.accounts.round.randomness_account = ctx.accounts.randomness_account.key();
         ctx.accounts.round.randomness_commit_slot = parsed.seed_slot;
+        emit!(RoundRandomnessBound {
+            round_id,
+            randomness_account: ctx.accounts.randomness_account.key(),
+            randomness_commit_slot: parsed.seed_slot,
+        });
         Ok(())
     }
 
@@ -574,6 +605,7 @@ pub mod myne_protocol {
         }
         round.gross_deployed_lamports = checked_add(round.gross_deployed_lamports, total)?;
         round.prize_lamports = checked_add(round.prize_lamports, total)?;
+        round.total_receipts = checked_add(round.total_receipts, 1)?;
         ctx.accounts.miner.lifetime_deployed_lamports =
             checked_add(ctx.accounts.miner.lifetime_deployed_lamports, total)?;
         invoke(
@@ -587,8 +619,12 @@ pub mod myne_protocol {
         emit!(DeploymentCreated {
             round_id,
             authority: ctx.accounts.authority.key(),
+            receipt: receipt.key(),
             nonce,
-            total_lamports: total
+            total_lamports: total,
+            reward_mode: AUTO_REWARD_ACCUMULATE,
+            amounts,
+            cumulative_starts: receipt.cumulative_starts,
         });
         Ok(())
     }
@@ -636,6 +672,7 @@ pub mod myne_protocol {
             authority: plan.authority,
             per_round_lamports: per_round,
             balance_lamports: plan.balance_lamports,
+            reward_mode,
             active: true
         });
         Ok(())
@@ -663,6 +700,7 @@ pub mod myne_protocol {
             authority: ctx.accounts.authority.key(),
             per_round_lamports: per_round,
             balance_lamports: ctx.accounts.auto_plan.balance_lamports,
+            reward_mode,
             active
         });
         Ok(())
@@ -767,6 +805,7 @@ pub mod myne_protocol {
         ctx.accounts.round.gross_deployed_lamports =
             checked_add(ctx.accounts.round.gross_deployed_lamports, total)?;
         ctx.accounts.round.prize_lamports = checked_add(ctx.accounts.round.prize_lamports, total)?;
+        ctx.accounts.round.total_receipts = checked_add(ctx.accounts.round.total_receipts, 1)?;
         ctx.accounts.miner.lifetime_deployed_lamports =
             checked_add(ctx.accounts.miner.lifetime_deployed_lamports, total)?;
         move_lamports(
@@ -797,6 +836,16 @@ pub mod myne_protocol {
             nonce,
             total_lamports: total,
             balance_lamports: ctx.accounts.auto_plan.balance_lamports
+        });
+        emit!(DeploymentCreated {
+            round_id,
+            authority: ctx.accounts.auto_plan.authority,
+            receipt: receipt.key(),
+            nonce,
+            total_lamports: total,
+            reward_mode: ctx.accounts.auto_plan.reward_mode,
+            amounts,
+            cumulative_starts: receipt.cumulative_starts,
         });
         Ok(())
     }
@@ -1091,6 +1140,8 @@ pub mod myne_protocol {
                 checked_add(ctx.accounts.miner.lifetime_myne_claimed, myne_reward)?;
         }
         ctx.accounts.receipt.claimed = true;
+        ctx.accounts.round.processed_receipts =
+            checked_add(ctx.accounts.round.processed_receipts, 1)?;
         emit!(ReceiptClaimed {
             round_id: ctx.accounts.round.id,
             authority: ctx.accounts.authority.key(),
@@ -1153,6 +1204,84 @@ pub mod myne_protocol {
         ctx.accounts.miner.lifetime_myne_claimed =
             checked_add(ctx.accounts.miner.lifetime_myne_claimed, burned)?;
         ctx.accounts.receipt.claimed = true;
+        ctx.accounts.round.processed_receipts =
+            checked_add(ctx.accounts.round.processed_receipts, 1)?;
+        emit!(ReceiptClaimed {
+            round_id: ctx.accounts.round.id,
+            authority: ctx.accounts.beneficiary.key(),
+            nonce: ctx.accounts.receipt.nonce,
+            sol_lamports: rewards.sol_lamports,
+            myne_base_units: rewards.myne_base_units,
+            motherlode_base_units: rewards.motherlode_base_units,
+        });
+        Ok(())
+    }
+
+    /// Permissionless settlement for either reward mode. The beneficiary,
+    /// miner and staking position are all constrained to the immutable receipt
+    /// authority, so the executor can neither redirect SOL nor take MYNE.
+    pub fn settle_receipt(ctx: Context<SettleReceipt>) -> Result<()> {
+        require!(ctx.accounts.round.settled, MyneError::RoundNotReady);
+        require!(
+            !ctx.accounts.receipt.claimed && !ctx.accounts.receipt.refunded,
+            MyneError::ReceiptAlreadyProcessed
+        );
+        require!(
+            ctx.accounts.receipt.round_id == ctx.accounts.round.id,
+            MyneError::InvalidRound
+        );
+        checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
+        checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
+        let rewards = receipt_rewards(&ctx.accounts.round, &ctx.accounts.receipt)?;
+        if rewards.sol_lamports > 0 {
+            move_lamports(
+                &ctx.accounts.round.to_account_info(),
+                &ctx.accounts.beneficiary.to_account_info(),
+                rewards.sol_lamports,
+            )?;
+            ctx.accounts.round.claimed_lamports =
+                checked_add(ctx.accounts.round.claimed_lamports, rewards.sol_lamports)?;
+            ctx.accounts.miner.lifetime_sol_claimed = checked_add(
+                ctx.accounts.miner.lifetime_sol_claimed,
+                rewards.sol_lamports,
+            )?;
+        }
+        if ctx.accounts.receipt.reward_mode == AUTO_REWARD_ACCUMULATE {
+            if rewards.myne_base_units > 0 {
+                ctx.accounts.miner.unclaimed_myne =
+                    checked_add(ctx.accounts.miner.unclaimed_myne, rewards.myne_base_units)?;
+                ctx.accounts.mining_pool.total_unclaimed = checked_add(
+                    ctx.accounts.mining_pool.total_unclaimed,
+                    rewards.myne_base_units,
+                )?;
+                distribute_mining_rewards(&mut ctx.accounts.mining_pool, 0)?;
+            }
+            add_virtual_burn(
+                &mut ctx.accounts.config,
+                &mut ctx.accounts.stake_pool,
+                &mut ctx.accounts.stake_position,
+                rewards.motherlode_base_units,
+            )?;
+        } else {
+            require!(
+                ctx.accounts.receipt.reward_mode == AUTO_REWARD_BURN,
+                MyneError::InvalidRewardMode
+            );
+            let burned = checked_add(rewards.myne_base_units, rewards.motherlode_base_units)?;
+            add_virtual_burn(
+                &mut ctx.accounts.config,
+                &mut ctx.accounts.stake_pool,
+                &mut ctx.accounts.stake_position,
+                burned,
+            )?;
+            ctx.accounts.miner.lifetime_myne_claimed = checked_add(
+                ctx.accounts.miner.lifetime_myne_claimed,
+                rewards.myne_base_units,
+            )?;
+        }
+        ctx.accounts.receipt.claimed = true;
+        ctx.accounts.round.processed_receipts =
+            checked_add(ctx.accounts.round.processed_receipts, 1)?;
         emit!(ReceiptClaimed {
             round_id: ctx.accounts.round.id,
             authority: ctx.accounts.beneficiary.key(),
@@ -1202,11 +1331,170 @@ pub mod myne_protocol {
             .checked_sub(ctx.accounts.receipt.total_lamports)
             .ok_or(MyneError::ArithmeticOverflow)?;
         ctx.accounts.receipt.refunded = true;
+        ctx.accounts.round.processed_receipts =
+            checked_add(ctx.accounts.round.processed_receipts, 1)?;
         emit!(ReceiptRefunded {
             round_id: ctx.accounts.round.id,
             authority: ctx.accounts.authority.key(),
             nonce: ctx.accounts.receipt.nonce,
             lamports: ctx.accounts.receipt.total_lamports
+        });
+        Ok(())
+    }
+
+    /// Permissionless refund for a round that missed its settlement deadline.
+    /// SOL and eventual receipt rent remain constrained to the receipt owner.
+    pub fn refund_receipt_permissionless(ctx: Context<RefundReceiptPermissionless>) -> Result<()> {
+        require!(
+            !ctx.accounts.round.settled
+                && Clock::get()?.unix_timestamp >= ctx.accounts.round.refund_at,
+            MyneError::RoundNotReady
+        );
+        require!(
+            !ctx.accounts.receipt.claimed && !ctx.accounts.receipt.refunded,
+            MyneError::ReceiptAlreadyProcessed
+        );
+        move_lamports(
+            &ctx.accounts.round.to_account_info(),
+            &ctx.accounts.beneficiary.to_account_info(),
+            ctx.accounts.receipt.total_lamports,
+        )?;
+        for (index, amount) in ctx.accounts.receipt.amounts.iter().enumerate() {
+            ctx.accounts.round.tile_lamports[index] = ctx.accounts.round.tile_lamports[index]
+                .checked_sub(*amount)
+                .ok_or(MyneError::ArithmeticOverflow)?;
+        }
+        ctx.accounts.round.gross_deployed_lamports = ctx
+            .accounts
+            .round
+            .gross_deployed_lamports
+            .checked_sub(ctx.accounts.receipt.total_lamports)
+            .ok_or(MyneError::ArithmeticOverflow)?;
+        ctx.accounts.round.prize_lamports = ctx
+            .accounts
+            .round
+            .prize_lamports
+            .checked_sub(ctx.accounts.receipt.total_lamports)
+            .ok_or(MyneError::ArithmeticOverflow)?;
+        ctx.accounts.receipt.refunded = true;
+        ctx.accounts.round.processed_receipts =
+            checked_add(ctx.accounts.round.processed_receipts, 1)?;
+        emit!(ReceiptRefunded {
+            round_id: ctx.accounts.round.id,
+            authority: ctx.accounts.beneficiary.key(),
+            nonce: ctx.accounts.receipt.nonce,
+            lamports: ctx.accounts.receipt.total_lamports,
+        });
+        Ok(())
+    }
+
+    /// The dedicated buyback signer records completion only after the swap and
+    /// burn have been confirmed. This prevents a settled round from closing
+    /// while its 2% allocation is still operationally outstanding.
+    pub fn mark_buyback_completed(ctx: Context<MarkBuybackCompleted>) -> Result<()> {
+        require!(ctx.accounts.round.settled, MyneError::RoundNotReady);
+        require!(
+            !ctx.accounts.round.buyback_completed,
+            MyneError::BuybackAlreadyCompleted
+        );
+        ctx.accounts.round.buyback_completed = true;
+        emit!(BuybackCompleted {
+            round_id: ctx.accounts.round.id,
+            authority: ctx.accounts.buyback_authority.key(),
+        });
+        Ok(())
+    }
+
+    /// Commit the canonical off-chain archive snapshot before any receipt can
+    /// be closed. The randomness authority is already the round lifecycle
+    /// authority and may attest only a non-zero content hash.
+    pub fn archive_round(ctx: Context<ArchiveRound>, archive_hash: [u8; 32]) -> Result<()> {
+        require!(archive_hash != [0; 32], MyneError::InvalidArchiveHash);
+        require!(
+            ctx.accounts.round.settled
+                || Clock::get()?.unix_timestamp >= ctx.accounts.round.refund_at,
+            MyneError::RoundNotReady
+        );
+        require!(
+            ctx.accounts.round.archived_at_slot == 0,
+            MyneError::RoundAlreadyArchived
+        );
+        require!(
+            ctx.accounts.round.processed_receipts == ctx.accounts.round.total_receipts,
+            MyneError::RoundCleanupIncomplete
+        );
+        ctx.accounts.round.archive_hash = archive_hash;
+        ctx.accounts.round.archived_at_slot = Clock::get()?.slot;
+        emit!(RoundArchived {
+            round_id: ctx.accounts.round.id,
+            archive_hash,
+            slot: ctx.accounts.round.archived_at_slot,
+        });
+        Ok(())
+    }
+
+    /// Close one already-processed receipt after the round snapshot has been
+    /// archived. Anyone may pay for cleanup, but Anchor always returns rent to
+    /// the immutable receipt beneficiary. For auto-round receipts the user's
+    /// plan reimburses the executor at creation, so the user is the economic
+    /// rent payer.
+    pub fn close_receipt(ctx: Context<CloseReceipt>) -> Result<()> {
+        require!(
+            ctx.accounts.round.archived_at_slot > 0,
+            MyneError::RoundNotArchived
+        );
+        require!(
+            ctx.accounts.receipt.claimed || ctx.accounts.receipt.refunded,
+            MyneError::ReceiptNotProcessed
+        );
+        ctx.accounts.round.closed_receipts = checked_add(ctx.accounts.round.closed_receipts, 1)?;
+        emit!(ReceiptClosed {
+            round_id: ctx.accounts.round.id,
+            authority: ctx.accounts.beneficiary.key(),
+            nonce: ctx.accounts.receipt.nonce,
+        });
+        Ok(())
+    }
+
+    /// Close a fully-drained and archived round. The instruction is
+    /// permissionless, while the rent destination is constrained to the payer
+    /// recorded when the PDA was created.
+    pub fn close_round(ctx: Context<CloseRound>) -> Result<()> {
+        require!(
+            ctx.accounts.round.archived_at_slot > 0,
+            MyneError::RoundNotArchived
+        );
+        require!(
+            ctx.accounts.round.processed_receipts == ctx.accounts.round.total_receipts
+                && ctx.accounts.round.closed_receipts == ctx.accounts.round.total_receipts,
+            MyneError::RoundCleanupIncomplete
+        );
+        if ctx.accounts.round.settled {
+            require!(
+                ctx.accounts.round.buyback_completed,
+                MyneError::BuybackNotCompleted
+            );
+            // The round account must contain rent only when it closes. This
+            // explicit economic invariant prevents a future reward-math or
+            // keeper regression from returning unclaimed player SOL to the
+            // round creator as though it were account rent.
+            let total_player_payout = checked_add(
+                ctx.accounts.round.prize_lamports,
+                ctx.accounts.round.motherlode_payout_lamports,
+            )?;
+            require!(
+                ctx.accounts.round.claimed_lamports == total_player_payout,
+                MyneError::RoundPayoutIncomplete
+            );
+        } else {
+            require!(
+                Clock::get()?.unix_timestamp >= ctx.accounts.round.refund_at,
+                MyneError::RoundNotReady
+            );
+        }
+        emit!(RoundClosed {
+            round_id: ctx.accounts.round.id,
+            rent_payer: ctx.accounts.rent_payer.key(),
         });
         Ok(())
     }
@@ -1243,6 +1531,7 @@ pub mod myne_protocol {
             ctx.accounts.token_program.key(),
         )?;
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
+        let was_inactive = ctx.accounts.stake_position.reward_weight == 0;
         token_interface::transfer_checked(
             CpiContext::new(
                 ctx.accounts.token_program.key(),
@@ -1264,6 +1553,10 @@ pub mod myne_protocol {
             checked_add(ctx.accounts.stake_pool.total_standard, amount)?;
         ctx.accounts.stake_pool.total_weight =
             checked_add(ctx.accounts.stake_pool.total_weight, amount)?;
+        if was_inactive {
+            ctx.accounts.stake_pool.active_stakers =
+                checked_add(ctx.accounts.stake_pool.active_stakers, 1)?;
+        }
         fund_stake_rewards(&mut ctx.accounts.stake_pool, 0)?;
         emit!(StakeChanged {
             authority: ctx.accounts.authority.key(),
@@ -1277,6 +1570,7 @@ pub mod myne_protocol {
         require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         require!(amount > 0, MyneError::InsufficientBalance);
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
+        let was_inactive = ctx.accounts.stake_position.reward_weight == 0;
         token_interface::burn(
             CpiContext::new(
                 ctx.accounts.token_program.key(),
@@ -1299,6 +1593,10 @@ pub mod myne_protocol {
             checked_add(ctx.accounts.stake_pool.total_burn, amount)?;
         ctx.accounts.stake_pool.total_weight =
             checked_add(ctx.accounts.stake_pool.total_weight, weight)?;
+        if was_inactive {
+            ctx.accounts.stake_pool.active_stakers =
+                checked_add(ctx.accounts.stake_pool.active_stakers, 1)?;
+        }
         fund_stake_rewards(&mut ctx.accounts.stake_pool, 0)?;
         emit!(StakeChanged {
             authority: ctx.accounts.authority.key(),
@@ -1330,6 +1628,14 @@ pub mod myne_protocol {
             .reward_weight
             .checked_sub(amount)
             .ok_or(MyneError::ArithmeticOverflow)?;
+        if ctx.accounts.stake_position.reward_weight == 0 {
+            ctx.accounts.stake_pool.active_stakers = ctx
+                .accounts
+                .stake_pool
+                .active_stakers
+                .checked_sub(1)
+                .ok_or(MyneError::ArithmeticOverflow)?;
+        }
         ctx.accounts.stake_position.cooldown_amount = amount;
         ctx.accounts.stake_position.cooldown_unlock_at = Clock::get()?
             .unix_timestamp
@@ -1416,6 +1722,13 @@ pub mod myne_protocol {
 
     pub fn claim_myne(ctx: Context<ClaimMyne>) -> Result<()> {
         require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        assert_canonical_token_account(
+            ctx.accounts.admin_fee_tokens.key(),
+            ctx.accounts.config.admin_fee_wallet,
+            ctx.accounts.mint.key(),
+            ctx.accounts.token_program.key(),
+            MyneError::InvalidFeeDestination,
+        )?;
         checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
         let gross = ctx.accounts.miner.unclaimed_myne;
         require!(gross > 0, MyneError::InsufficientBalance);
@@ -1632,6 +1945,7 @@ fn add_virtual_burn(
     if amount == 0 {
         return Ok(());
     }
+    let was_inactive = stake_position.reward_weight == 0;
     let weight = amount
         .checked_mul(BURN_WEIGHT_MULTIPLIER)
         .ok_or(MyneError::ArithmeticOverflow)?;
@@ -1639,6 +1953,9 @@ fn add_virtual_burn(
     stake_position.reward_weight = checked_add(stake_position.reward_weight, weight)?;
     stake_pool.total_burn = checked_add(stake_pool.total_burn, amount)?;
     stake_pool.total_weight = checked_add(stake_pool.total_weight, weight)?;
+    if was_inactive {
+        stake_pool.active_stakers = checked_add(stake_pool.active_stakers, 1)?;
+    }
     config.virtual_burn_base_units = checked_add(config.virtual_burn_base_units, amount)?;
     fund_stake_rewards(stake_pool, 0)
 }
@@ -1717,11 +2034,27 @@ fn assert_canonical_stake_vault(
     mint: Pubkey,
     token_program: Pubkey,
 ) -> Result<()> {
+    assert_canonical_token_account(
+        vault,
+        stake_pool,
+        mint,
+        token_program,
+        MyneError::InvalidStakeVault,
+    )
+}
+
+fn assert_canonical_token_account(
+    account: Pubkey,
+    authority: Pubkey,
+    mint: Pubkey,
+    token_program: Pubkey,
+    error_code: MyneError,
+) -> Result<()> {
     let (expected, _) = Pubkey::find_program_address(
-        &[stake_pool.as_ref(), token_program.as_ref(), mint.as_ref()],
+        &[authority.as_ref(), token_program.as_ref(), mint.as_ref()],
         &ASSOCIATED_TOKEN_PROGRAM,
     );
-    require_keys_eq!(vault, expected, MyneError::InvalidStakeVault);
+    require_keys_eq!(account, expected, error_code);
     Ok(())
 }
 
@@ -1798,6 +2131,24 @@ mod motherlode_tests {
             mul_div(prize, 20_000_000, 100_000_000).unwrap(),
             352_000_000
         );
+    }
+
+    #[test]
+    fn five_miners_two_winners_split_the_entire_post_fee_prize_exactly() {
+        // Five miners deploy 2 SOL. Two miners are on the winning tile with
+        // 90% and 10% of that tile respectively; the other three lose. The
+        // two winners split all 1.76 SOL remaining after the 12% round fee.
+        let gross: u64 = 2_000_000_000;
+        let fee = checked_bps(gross, MINING_PROTOCOL_FEE_BPS).unwrap();
+        let prize = gross.checked_sub(fee).unwrap();
+        let winning_total = 100_000_000;
+        let first = proportional_interval_share(prize, 0, 90_000_000, winning_total).unwrap();
+        let second =
+            proportional_interval_share(prize, 90_000_000, 10_000_000, winning_total).unwrap();
+
+        assert_eq!(first, 1_584_000_000);
+        assert_eq!(second, 176_000_000);
+        assert_eq!(first + second, prize);
     }
 
     #[test]
@@ -1891,6 +2242,11 @@ fn settle_round_core(
     )?;
     fund_stake_rewards(stake_pool, staking_fee)?;
     move_lamports(&round.to_account_info(), buyback_wallet, buyback_fee)?;
+    // Devnet intentionally exercises the protocol without a liquidity
+    // pool. Mainnet remains blocked until the buyback signer confirms the
+    // actual swap and burn for this allocation.
+    round.buyback_completed =
+        buyback_fee == 0 || !liquidity_gate_required(config.randomness_program);
     emit!(BuybackAllocation {
         round_id: round.id,
         wallet: *buyback_wallet.key,
@@ -1946,8 +2302,16 @@ fn settle_round_core(
         winning_tile: round.winning_tile,
         solo_mode: round.solo_mode,
         motherlode_hit: round.motherlode_hit,
+        gross_deployed_lamports: round.gross_deployed_lamports,
         prize_lamports: round.prize_lamports,
         motherlode_payout_lamports: round.motherlode_payout_lamports,
+        base_emission: round.base_emission,
+        motherlode_emission: round.motherlode_emission,
+        total_receipts: round.total_receipts,
+        solo_sample: round.solo_sample,
+        randomness_account: round.randomness_account,
+        randomness_commit_slot: round.randomness_commit_slot,
+        randomness: round.randomness,
     });
     Ok(())
 }
@@ -2362,15 +2726,15 @@ pub struct SettleRoundVerified<'info> {
 #[derive(Accounts)]
 pub struct ClaimReceipt<'info> {
     #[account(mut, seeds=[CONFIG_SEED], bump=config.bump)]
-    pub config: Account<'info, ProtocolConfig>,
+    pub config: Box<Account<'info, ProtocolConfig>>,
     #[account(mut, seeds=[MINING_POOL_SEED], bump=mining_pool.bump)]
     pub mining_pool: Box<Account<'info, MiningPool>>,
     #[account(mut, seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
     pub stake_pool: Box<Account<'info, StakePool>>,
     #[account(mut, seeds=[MINER_SEED, authority.key().as_ref()], bump=miner.bump, has_one=authority)]
-    pub miner: Account<'info, Miner>,
+    pub miner: Box<Account<'info, Miner>>,
     #[account(mut, seeds=[STAKE_POSITION_SEED, authority.key().as_ref()], bump=stake_position.bump, has_one=authority)]
-    pub stake_position: Account<'info, StakePosition>,
+    pub stake_position: Box<Account<'info, StakePosition>>,
     #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
     pub round: Box<Account<'info, Round>>,
     #[account(mut, seeds=[BET_SEED, &round.id.to_le_bytes(), authority.key().as_ref(), &receipt.nonce.to_le_bytes()], bump=receipt.bump)]
@@ -2381,20 +2745,41 @@ pub struct ClaimReceipt<'info> {
 #[derive(Accounts)]
 pub struct ClaimAutoBurnReceipt<'info> {
     #[account(mut, seeds=[CONFIG_SEED], bump=config.bump)]
-    pub config: Account<'info, ProtocolConfig>,
+    pub config: Box<Account<'info, ProtocolConfig>>,
     #[account(mut, seeds=[MINING_POOL_SEED], bump=mining_pool.bump)]
     pub mining_pool: Box<Account<'info, MiningPool>>,
     #[account(mut, seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
     pub stake_pool: Box<Account<'info, StakePool>>,
     #[account(mut, seeds=[MINER_SEED, receipt.authority.as_ref()], bump=miner.bump, constraint=miner.authority == receipt.authority @ MyneError::InvalidReceiptAuthority)]
-    pub miner: Account<'info, Miner>,
+    pub miner: Box<Account<'info, Miner>>,
     #[account(mut, seeds=[STAKE_POSITION_SEED, receipt.authority.as_ref()], bump=stake_position.bump, constraint=stake_position.authority == receipt.authority @ MyneError::InvalidReceiptAuthority)]
-    pub stake_position: Account<'info, StakePosition>,
+    pub stake_position: Box<Account<'info, StakePosition>>,
     #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
     pub round: Box<Account<'info, Round>>,
     #[account(mut, seeds=[BET_SEED, &round.id.to_le_bytes(), receipt.authority.as_ref(), &receipt.nonce.to_le_bytes()], bump=receipt.bump)]
     pub receipt: Box<Account<'info, BetReceipt>>,
     /// CHECK: Must be the immutable receipt owner; receives SOL only.
+    #[account(mut, constraint=beneficiary.key() == receipt.authority @ MyneError::InvalidReceiptAuthority)]
+    pub beneficiary: UncheckedAccount<'info>,
+    pub executor: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct SettleReceipt<'info> {
+    #[account(mut, seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Box<Account<'info, ProtocolConfig>>,
+    #[account(mut, seeds=[MINING_POOL_SEED], bump=mining_pool.bump)]
+    pub mining_pool: Box<Account<'info, MiningPool>>,
+    #[account(mut, seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
+    pub stake_pool: Box<Account<'info, StakePool>>,
+    #[account(mut, seeds=[MINER_SEED, receipt.authority.as_ref()], bump=miner.bump, constraint=miner.authority == receipt.authority @ MyneError::InvalidReceiptAuthority)]
+    pub miner: Box<Account<'info, Miner>>,
+    #[account(mut, seeds=[STAKE_POSITION_SEED, receipt.authority.as_ref()], bump=stake_position.bump, constraint=stake_position.authority == receipt.authority @ MyneError::InvalidReceiptAuthority)]
+    pub stake_position: Box<Account<'info, StakePosition>>,
+    #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(mut, seeds=[BET_SEED, &round.id.to_le_bytes(), receipt.authority.as_ref(), &receipt.nonce.to_le_bytes()], bump=receipt.bump)]
+    pub receipt: Box<Account<'info, BetReceipt>>,
+    /// CHECK: Immutable receipt owner; the only destination for SOL rewards.
     #[account(mut, constraint=beneficiary.key() == receipt.authority @ MyneError::InvalidReceiptAuthority)]
     pub beneficiary: UncheckedAccount<'info>,
     pub executor: Signer<'info>,
@@ -2407,6 +2792,65 @@ pub struct RefundReceipt<'info> {
     pub receipt: Box<Account<'info, BetReceipt>>,
     #[account(mut)]
     pub authority: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct RefundReceiptPermissionless<'info> {
+    #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(mut, seeds=[BET_SEED, &round.id.to_le_bytes(), receipt.authority.as_ref(), &receipt.nonce.to_le_bytes()], bump=receipt.bump)]
+    pub receipt: Box<Account<'info, BetReceipt>>,
+    /// CHECK: Immutable receipt owner; the only refund destination.
+    #[account(mut, constraint=beneficiary.key() == receipt.authority @ MyneError::InvalidReceiptAuthority)]
+    pub beneficiary: UncheckedAccount<'info>,
+    pub executor: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct MarkBuybackCompleted<'info> {
+    #[account(seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(address=config.buyback_wallet @ MyneError::InvalidFeeDestination)]
+    pub buyback_authority: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct ArchiveRound<'info> {
+    #[account(seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(address=config.randomness_authority @ MyneError::InvalidRandomnessAuthority)]
+    pub randomness_authority: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct CloseReceipt<'info> {
+    #[account(mut, seeds=[ROUND_SEED, &round.id.to_le_bytes()], bump=round.bump)]
+    pub round: Box<Account<'info, Round>>,
+    #[account(
+        mut,
+        close=beneficiary,
+        seeds=[BET_SEED, &round.id.to_le_bytes(), receipt.authority.as_ref(), &receipt.nonce.to_le_bytes()],
+        bump=receipt.bump
+    )]
+    pub receipt: Box<Account<'info, BetReceipt>>,
+    /// CHECK: Constrained to the immutable receipt owner and receives rent only.
+    #[account(mut, constraint=beneficiary.key() == receipt.authority @ MyneError::InvalidReceiptAuthority)]
+    pub beneficiary: UncheckedAccount<'info>,
+    pub executor: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct CloseRound<'info> {
+    #[account(
+        mut,
+        close=rent_payer,
+        seeds=[ROUND_SEED, &round.id.to_le_bytes()],
+        bump=round.bump
+    )]
+    pub round: Box<Account<'info, Round>>,
+    /// CHECK: Constrained to the payer recorded at round creation; receives rent only.
+    #[account(mut, constraint=rent_payer.key() == round.rent_payer @ MyneError::InvalidFeeDestination)]
+    pub rent_payer: UncheckedAccount<'info>,
+    pub executor: Signer<'info>,
 }
 #[derive(Accounts)]
 pub struct FundStakingRewards<'info> {
@@ -2527,21 +2971,35 @@ pub struct MinerRegistered {
 #[event]
 pub struct RoundOpened {
     pub round_id: u64,
+    pub rent_payer: Pubkey,
+    pub opened_at: i64,
     pub betting_ends_at: i64,
     pub settles_at: i64,
+    pub refund_at: i64,
+}
+#[event]
+pub struct RoundRandomnessBound {
+    pub round_id: u64,
+    pub randomness_account: Pubkey,
+    pub randomness_commit_slot: u64,
 }
 #[event]
 pub struct DeploymentCreated {
     pub round_id: u64,
     pub authority: Pubkey,
+    pub receipt: Pubkey,
     pub nonce: u64,
     pub total_lamports: u64,
+    pub reward_mode: u8,
+    pub amounts: [u64; TILE_COUNT],
+    pub cumulative_starts: [u64; TILE_COUNT],
 }
 #[event]
 pub struct AutoPlanConfigured {
     pub authority: Pubkey,
     pub per_round_lamports: u64,
     pub balance_lamports: u64,
+    pub reward_mode: u8,
     pub active: bool,
 }
 #[event]
@@ -2570,8 +3028,16 @@ pub struct RoundSettled {
     pub winning_tile: u8,
     pub solo_mode: bool,
     pub motherlode_hit: bool,
+    pub gross_deployed_lamports: u64,
     pub prize_lamports: u64,
     pub motherlode_payout_lamports: u64,
+    pub base_emission: u64,
+    pub motherlode_emission: u64,
+    pub total_receipts: u64,
+    pub solo_sample: u64,
+    pub randomness_account: Pubkey,
+    pub randomness_commit_slot: u64,
+    pub randomness: [u8; 32],
 }
 #[event]
 pub struct BuybackAllocation {
@@ -2594,6 +3060,28 @@ pub struct ReceiptRefunded {
     pub authority: Pubkey,
     pub nonce: u64,
     pub lamports: u64,
+}
+#[event]
+pub struct BuybackCompleted {
+    pub round_id: u64,
+    pub authority: Pubkey,
+}
+#[event]
+pub struct RoundArchived {
+    pub round_id: u64,
+    pub archive_hash: [u8; 32],
+    pub slot: u64,
+}
+#[event]
+pub struct ReceiptClosed {
+    pub round_id: u64,
+    pub authority: Pubkey,
+    pub nonce: u64,
+}
+#[event]
+pub struct RoundClosed {
+    pub round_id: u64,
+    pub rent_payer: Pubkey,
 }
 #[event]
 pub struct StakingRewardsFunded {

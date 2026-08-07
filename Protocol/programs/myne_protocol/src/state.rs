@@ -16,6 +16,7 @@ pub struct MiningPool {
 #[derive(InitSpace)]
 pub struct StakePool {
     pub bump: u8,
+    pub active_stakers: u64,
     pub total_standard: u64,
     pub total_burn: u64,
     pub total_weight: u64,
@@ -57,6 +58,9 @@ pub struct StakePosition {
 pub struct Round {
     pub bump: u8,
     pub id: u64,
+    /// Wallet that funded this account's rent. It is the only permitted close
+    /// destination, so permissionless cleanup cannot redirect recovered SOL.
+    pub rent_payer: Pubkey,
     pub opened_at: i64,
     pub betting_ends_at: i64,
     pub settles_at: i64,
@@ -79,6 +83,18 @@ pub struct Round {
     pub claimed_lamports: u64,
     pub base_emission: u64,
     pub motherlode_emission: u64,
+    /// Receipt lifecycle counters. A round cannot close until every receipt has
+    /// been settled/refunded and subsequently closed after archival.
+    pub total_receipts: u64,
+    pub processed_receipts: u64,
+    pub closed_receipts: u64,
+    /// The buyback keeper attests completion only after the allocated SOL was
+    /// swapped through the registered pool and the purchased MYNE was burned.
+    pub buyback_completed: bool,
+    /// Hash of the canonical database snapshot committed by the randomness
+    /// authority. Non-zero means history and proof data were durably archived.
+    pub archive_hash: [u8; 32],
+    pub archived_at_slot: u64,
 }
 
 #[account]

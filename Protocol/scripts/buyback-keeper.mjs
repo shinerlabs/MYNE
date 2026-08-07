@@ -25,6 +25,7 @@ const {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  ComputeBudgetProgram,
   Transaction,
   VersionedTransaction,
   sendAndConfirmTransaction,
@@ -58,6 +59,49 @@ const lamports = (sol) => Math.max(0, Math.floor(Number(sol) * LAMPORTS_PER_SOL)
 const envBool = (name, fallback) => process.env[name] == null ? fallback : process.env[name] === '1';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const statePath = process.env.BUYBACK_STATE_PATH || '';
+const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function base58Encode(bytes) {
+  let value = 0n;
+  for (const byte of bytes) value = (value << 8n) + BigInt(byte);
+  let encoded = '';
+  while (value > 0n) {
+    encoded = BASE58[Number(value % 58n)] + encoded;
+    value /= 58n;
+  }
+  let leading = 0;
+  while (leading < bytes.length && bytes[leading] === 0) leading += 1;
+  return `${'1'.repeat(leading)}${encoded}`;
+}
+
+async function upsertBuybackEvidence(roundId, executions) {
+  if (!executions.length) return;
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/mine_buyback_executions?on_conflict=round_id,sequence`,
+    {
+      method: 'POST',
+      headers: {
+        apikey: serviceRole,
+        Authorization: `Bearer ${serviceRole}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify(executions.map((entry, sequence) => ({
+        round_id: roundId,
+        sequence,
+        spend_lamports: entry.spendLamports,
+        expected_output_base_units: entry.expectedOutputBaseUnits,
+        burned_base_units: entry.burnedBaseUnits,
+        swap_signature: entry.swapSignature,
+        burn_signature: entry.burnSignature,
+      }))),
+    },
+  );
+  const text = await response.text();
+  assert.ok(response.ok, `Buyback evidence index failed (${response.status}): ${text}`);
+}
 
 async function loadState() {
   if (!statePath) return { rounds: {} };
@@ -160,14 +204,32 @@ async function buildBurnTransaction(mint, ata, beforeBaseUnits) {
   const instruction = createBurnCheckedInstruction(
     ata, mint, payer.publicKey, delta, mintInfo.decimals, [], TOKEN_PROGRAM_ID,
   );
-  const transaction = new Transaction().add(instruction);
   const { blockhash } = await provider.connection.getLatestBlockhash('confirmed');
-  transaction.recentBlockhash = blockhash;
-  transaction.feePayer = payer.publicKey;
-  const simulation = await provider.connection.simulateTransaction(transaction, [payer]);
+  const simulationTransaction = new Transaction({
+    feePayer: payer.publicKey, recentBlockhash: blockhash,
+  }).add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), instruction);
+  const simulation = await provider.connection.simulateTransaction(simulationTransaction, [payer]);
   assert.equal(simulation.value.err, null, `MYNE burn simulation failed: ${JSON.stringify(simulation.value.err)}`);
+  const measured = Math.max(50_000, Number(simulation.value.unitsConsumed || 200_000));
+  const priority = Math.min(
+    1_000_000,
+    readInteger(process.env.KEEPER_PRIORITY_MICROLAMPORTS || '0', 'KEEPER_PRIORITY_MICROLAMPORTS'),
+  );
+  const transaction = new Transaction({ feePayer: payer.publicKey, recentBlockhash: blockhash }).add(
+    ComputeBudgetProgram.setComputeUnitLimit({
+      units: Math.min(1_400_000, Math.ceil(measured * 1.1)),
+    }),
+    ...(priority > 0
+      ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority })]
+      : []),
+    instruction,
+  );
   transaction.sign(payer);
-  return { delta, raw: Buffer.from(transaction.serialize()).toString('base64') };
+  return {
+    delta,
+    raw: Buffer.from(transaction.serialize()).toString('base64'),
+    signature: base58Encode(transaction.signature),
+  };
 }
 
 async function sendSavedTransaction(rawBase64) {
@@ -175,18 +237,47 @@ async function sendSavedTransaction(rawBase64) {
     maxRetries: 3,
     skipPreflight: false,
   });
-  await provider.connection.confirmTransaction(signature, 'confirmed');
+  const confirmation = await provider.connection.confirmTransaction(signature, 'confirmed');
+  assert.equal(confirmation.value.err, null, `Saved buyback transaction failed: ${JSON.stringify(confirmation.value.err)}`);
   return signature;
+}
+
+async function markRoundBuybackComplete(roundAddress, roundState) {
+  if (roundState.buybackCompleted) return null;
+  const instruction = await program.methods.markBuybackCompleted().accounts({
+    config,
+    round: roundAddress,
+    buybackAuthority: payer.publicKey,
+  }).instruction();
+  const simulationTx = new Transaction().add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+    instruction,
+  );
+  const latest = await provider.connection.getLatestBlockhash('confirmed');
+  simulationTx.recentBlockhash = latest.blockhash;
+  simulationTx.feePayer = payer.publicKey;
+  const simulation = await provider.connection.simulateTransaction(simulationTx, [payer]);
+  assert.equal(simulation.value.err, null, `Buyback completion simulation failed: ${JSON.stringify(simulation.value.err)}`);
+  const measured = Math.max(50_000, Number(simulation.value.unitsConsumed || 200_000));
+  const transaction = new Transaction().add(
+    ComputeBudgetProgram.setComputeUnitLimit({ units: Math.min(1_400_000, Math.ceil(measured * 1.1)) }),
+    instruction,
+  );
+  return sendAndConfirmTransaction(provider.connection, transaction, [payer], { commitment: 'confirmed' });
 }
 
 function roundJournal(state, roundId) {
   const raw = state.rounds[roundId];
   if (typeof raw === 'string' || typeof raw === 'number') {
-    return { processedLamports: String(raw), pending: null };
+    return { processedLamports: String(raw), pending: null, executions: [] };
   }
   return raw && typeof raw === 'object'
-    ? { processedLamports: String(raw.processedLamports || '0'), pending: raw.pending || null }
-    : { processedLamports: '0', pending: null };
+    ? {
+      processedLamports: String(raw.processedLamports || '0'),
+      pending: raw.pending || null,
+      executions: Array.isArray(raw.executions) ? raw.executions : [],
+    }
+    : { processedLamports: '0', pending: null, executions: [] };
 }
 
 async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
@@ -198,7 +289,8 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
   if (pending.phase === 'swap-ready') {
     if (current <= before) {
       try {
-        pending.swapSignature = await sendSavedTransaction(pending.swapRaw);
+        const submitted = await sendSavedTransaction(pending.swapRaw);
+        assert.equal(submitted, pending.swapSignature, 'Submitted swap signature changed');
       } catch (error) {
         current = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
         if (current <= before) {
@@ -222,13 +314,15 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
     const burn = await buildBurnTransaction(mint, ata, before);
     pending.burnBaseUnits = burn.delta.toString();
     pending.burnRaw = burn.raw;
+    pending.burnSignature = burn.signature;
     pending.phase = 'burn-ready';
     state.rounds[roundKey] = journal;
     await saveState(state);
   }
   if (current > before) {
     try {
-      pending.burnSignature = await sendSavedTransaction(pending.burnRaw);
+      const submitted = await sendSavedTransaction(pending.burnRaw);
+      assert.equal(submitted, pending.burnSignature, 'Submitted burn signature changed');
     } catch (error) {
       // A crash can occur after the exact burn landed but before the journal
       // was updated. Treat the saved transaction as complete only when the
@@ -246,6 +340,13 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
   assert.ok(after <= before, 'Burn transaction did not remove the purchased MYNE');
   journal.processedLamports = (BigInt(journal.processedLamports) + BigInt(pending.spendLamports)).toString();
   const completed = { ...pending };
+  journal.executions.push({
+    spendLamports: completed.spendLamports,
+    expectedOutputBaseUnits: completed.expectedOutputBaseUnits,
+    burnedBaseUnits: completed.burnBaseUnits,
+    swapSignature: completed.swapSignature,
+    burnSignature: completed.burnSignature,
+  });
   journal.pending = null;
   state.rounds[roundKey] = journal;
   await saveState(state);
@@ -261,6 +362,8 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
 export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   if (!dryRun) assertLiveAuthorization();
   if (!dryRun) assert.ok(statePath, 'Set BUYBACK_STATE_PATH to a durable keeper state file before live mode');
+  if (!dryRun) assert.match(supabaseUrl, /^https:\/\//, 'SUPABASE_URL must use HTTPS in live mode');
+  if (!dryRun) assert.ok(serviceRole, 'SUPABASE_SERVICE_ROLE_KEY is required in live mode');
   const configState = await program.account.protocolConfig.fetch(config);
   // Devnet intentionally runs without Meteora liquidity. The protocol still
   // accounts for the 2% allocation on-chain, but there is no swap to execute
@@ -304,23 +407,46 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   if (journal.pending) {
     assert.ok(!dryRun, 'A live pending buyback cannot be recovered in dry-run mode');
     assert.ok(await provider.connection.getAccountInfo(ata, 'confirmed'), 'Pending buyback MYNE account is missing');
-    return recoverPendingBuyback({ state, roundKey, journal, mint, ata });
+    const recovered = await recoverPendingBuyback({ state, roundKey, journal, mint, ata });
+    if (!recovered.skipped) await upsertBuybackEvidence(roundKey, journal.executions);
+    if (!recovered.skipped && BigInt(journal.processedLamports) >= allocation) {
+      recovered.completionSignature = await markRoundBuybackComplete(roundAddress, roundState);
+      if (process.env.MYNE_ROUND_ID == null) {
+        state.nextRound = Number(roundId + 1n);
+        await saveState(state);
+      }
+    }
+    return recovered;
   }
   const previous = BigInt(journal.processedLamports);
+  const evidencedLamports = journal.executions.reduce(
+    (sum, entry) => sum + BigInt(entry.spendLamports), 0n,
+  );
+  if (!dryRun) {
+    assert.equal(
+      evidencedLamports,
+      previous,
+      'Durable buyback journal is missing transaction evidence; refuse completion',
+    );
+    await upsertBuybackEvidence(roundKey, journal.executions);
+  }
   const remainingAllocation = allocation > previous ? allocation - previous : 0n;
   if (remainingAllocation === 0n) {
+    const completionSignature = dryRun ? null : await markRoundBuybackComplete(roundAddress, roundState);
     if (!dryRun && process.env.MYNE_ROUND_ID == null) {
       state.nextRound = Number(roundId + 1n);
       await saveState(state);
     }
-    return { skipped: true, reason: 'round-already-processed', round: roundId.toString() };
+    return { skipped: true, reason: 'round-already-processed', round: roundId.toString(), completionSignature };
   }
   assert.ok(remainingAllocation <= BigInt(Number.MAX_SAFE_INTEGER), 'Round buyback exceeds safe keeper amount');
   const poolAddress = gateState.pool;
   const reserve = lamports(process.env.KEEPER_RESERVE_SOL || '0.25');
   const maxSpend = Math.min(lamports(process.env.MAX_BUYBACK_SOL || '0.25'), Number(remainingAllocation));
   const balance = await provider.connection.getBalance(payer.publicKey, 'confirmed');
-  const minimum = lamports(process.env.MIN_BUYBACK_SOL || '0.01');
+  // The protocol minimum round produces a 0.001 SOL buyback allocation, so a
+  // 0.01 SOL keeper floor would strand otherwise valid rounds forever.
+  const minimum = lamports(process.env.MIN_BUYBACK_SOL || '0.0001');
   const spendPlan = calculateSpend({
     balanceLamports: balance,
     reserveLamports: reserve,
@@ -340,23 +466,28 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const swapSimulation = await provider.connection.simulateTransaction(swap);
   assert.equal(swapSimulation.value.err, null, `Meteora swap simulation failed: ${JSON.stringify(swapSimulation.value.err)}`);
   swap.sign([payer]);
+  const swapSignature = base58Encode(swap.signatures[0]);
   journal.pending = {
     phase: 'swap-ready',
     spendLamports: String(spend),
     beforeBaseUnits: before.toString(),
     expectedOutputBaseUnits: checked.outputBaseUnits,
     swapRaw: Buffer.from(swap.serialize()).toString('base64'),
-    swapSignature: null,
+    swapSignature,
     burnRaw: null,
     burnSignature: null,
   };
   state.rounds[roundKey] = journal;
   await saveState(state);
   const recovered = await recoverPendingBuyback({ state, roundKey, journal, mint: configState.mint, ata: ensuredAta });
+  if (!recovered.skipped) await upsertBuybackEvidence(roundKey, journal.executions);
   Object.assign(result, recovered);
-  if (BigInt(journal.processedLamports) >= allocation && process.env.MYNE_ROUND_ID == null) {
-    state.nextRound = Number(roundId + 1n);
-    await saveState(state);
+  if (BigInt(journal.processedLamports) >= allocation) {
+    result.completionSignature = await markRoundBuybackComplete(roundAddress, roundState);
+    if (process.env.MYNE_ROUND_ID == null) {
+      state.nextRound = Number(roundId + 1n);
+      await saveState(state);
+    }
   }
   return result;
 }

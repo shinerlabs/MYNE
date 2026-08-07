@@ -88,22 +88,19 @@ export function mountSocial(host) {
     const previous = lastAccount;
     lastAccount = key;
 
-    // Devnet/testnet stays open for testing. Mainnet requires five mined rounds before chat.
-    let chatAllowed = true;
-    let chatGate = '';
-    if (host.chatRequiresMinedRounds) {
-      if (!account) {
-        chatAllowed = false;
-        chatGate = 'Connect your wallet to chat on mainnet.';
-      } else {
-        const mined = await host.getMinedRoundCount?.(account);
-        chatAllowed = Number.isFinite(mined) && mined >= 5;
-        if (!chatAllowed) chatGate = mined == null
-          ? 'Your mined-round history could not be verified yet.'
-          : `Mine ${Math.max(0, 5 - mined)} more round${5 - mined === 1 ? '' : 's'} to unlock chat.`;
-      }
+    // Every chat message is wallet-authenticated on every cluster so moderation can identify
+    // and block the sender. Once the production mining gate is enabled, five mined rounds are
+    // required in addition to the wallet connection.
+    let chatAllowed = Boolean(account);
+    let chatGate = account ? '' : 'Connect your wallet to chat.';
+    if (account && host.chatRequiresMinedRounds) {
+      const mined = await host.getMinedRoundCount?.(account);
+      chatAllowed = Number.isFinite(mined) && mined >= 5;
+      if (!chatAllowed) chatGate = mined == null
+        ? 'Your mined-round history could not be verified yet.'
+        : `Mine ${Math.max(0, 5 - mined)} more round${5 - mined === 1 ? '' : 's'} to unlock chat.`;
     }
-    setChatComposeEnabled(chatAllowed, chatAllowed ? undefined : 'Chat locked', chatGate);
+    setChatComposeEnabled(chatAllowed, chatAllowed ? undefined : 'Connect to chat', chatGate);
 
     if (!account) {
       // Only a REAL disconnect drops the session (previous held an address).

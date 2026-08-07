@@ -31,7 +31,7 @@ export const SERVICES = Object.freeze({
 
 export const LINKS = Object.freeze({
   telegram: ENV.VITE_TELEGRAM_URL || '',
-  x: ENV.VITE_X_URL || '',
+  x: ENV.VITE_X_URL || 'https://x.com/myne_solana',
 });
 
 export const DEPLOYMENT_CONFIG_ERRORS = Object.freeze([

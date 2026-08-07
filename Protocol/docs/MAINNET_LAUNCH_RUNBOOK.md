@@ -1,77 +1,67 @@
 # Mainnet launch runbook
 
-This is an ordered launch procedure, not an automatic deployment script. Every wallet address,
-mint, pool, vault, oracle account, and transaction must be reviewed before signing. The artifact
-preflight is read-only:
+This is an ordered, controlled launch procedure—not an automatic deployment script. Stop on any mismatch. The read-only artifact preflight is:
 
 ```bash
 ./scripts/check-mainnet-readiness.sh
 ```
 
-State layout version 4 adds hard-issuance tracking and automation reward mode. Mainnet must use a
-fresh version-4 initialization. An older Devnet version-3 config is not a Mainnet migration source
-and must not be copied or reused.
+Mainnet must initialize fresh version-5 state. The existing version-3 Devnet state is not a Mainnet migration source.
 
-## 1. Prepare isolated production authorities
+## 1. Prepare exactly three funded roles
 
-Use fresh, backed-up production keys. Do not reuse the Devnet wallet, Devnet mint, or local demo
-wallets. Record these addresses before funding anything:
+1. **Admin role:** deployer, upgrade authority, protocol admin, fallback referral-fee owner and reserved Motherlode layout address. Keep this key hardware-backed/offline except for reviewed administration.
+2. **Randomness role:** Switchboard authority, round rent payer, archive attestor, indexer and lifecycle keeper.
+3. **Buyback role:** receives only the 2% allocations, performs the registered-pool swaps and burns, and marks completion.
 
-- upgrade authority;
-- protocol admin;
-- Switchboard randomness authority/keeper;
-- buyback keeper wallet;
-- reserved Motherlode layout address (no funds are transferred there; use the admin address);
-- fallback referral-fee wallet.
+Use separate service credentials for Supabase/RPC. They are not funded Solana roles and must never enter the repository.
 
-The project uses a single administrator by product decision, but the operational fee and keeper
-keys should still be separate from the upgrade key.
+## 2. Freeze and independently review the artifact
 
-## 2. Build and verify the exact artifact
+Run all checks, record the Git commit and SBF hash, then stop rebuilding. Give the exact source and artifact to an unaffiliated Solana reviewer using `INDEPENDENT_SECURITY_REVIEW_SCOPE.md`. Resolve every critical/high finding and repeat the full suite after any change.
 
-Run the artifact preflight, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
-`cargo test`, the Frontend test suite, and the buyback policy tests. Record the binary SHA-256
-printed by the preflight. Do not rebuild after recording it.
+## 3. Deploy while inactive
 
-## 3. Deploy the upgradeable program
+Deploy the recorded `.so` to the fixed program ID. Verify ProgramData, executable owner and upgrade authority. Create a 9-decimal mint with exactly 100 MYNE, no freeze authority and the config PDA as mint authority. Initialize paused with Switchboard Mainnet and the three reviewed role addresses.
 
-Deploy the recorded `.so` to the fixed program address and verify the on-chain program data and
-upgrade authority. The program must remain paused; do not initialize or unpause until the mint,
-oracle, and pool checks below are complete.
+Run `pnpm prepare:admin-ata` with the explicit confirmation value after the mint/config exist. Verify that this creates exactly the canonical MYNE associated token account owned by the admin fallback role.
 
-## 4. Create and initialize the Mainnet mint
+## 4. Start the production index before protocol activity
 
-Create a new 9-decimal MYNE mint with no freeze authority. Initialize the protocol with:
+Apply `supabase/migrations/20260807090000_round_index.sql`. Run the event indexer from a recorded start slot with finalized reads and service-role credentials. Run the lifecycle keeper with the same randomness role. Set:
 
-- `randomness_program = SWITCHBOARD_MAINNET_PROGRAM`;
-- a non-default, controlled randomness authority;
-- the production buyback and fallback referral-fee destinations. The legacy Motherlode address
-  field is reserved for account-layout compatibility; Motherlode SOL remains in the config PDA.
+```text
+ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1
+RANDOMNESS_RETENTION_SECONDS=86400
+```
 
-Transfer mint authority to the protocol config PDA as part of initialization. Confirm the initial
-supply and all account relationships from RPC before proceeding.
+Supervise both processes with durable logs, restart policy and alerts. Confirm no production `getProgramAccounts` scan is made.
 
-## 5. Create and verify the Meteora pool
+Switchboard also creates an auxiliary lookup table for each randomness request. `closeIx()` closes
+the randomness account after the verification window, but later LUT rent recovery requires the
+ephemeral request signer after Solana's lookup-table cooldown. Retain those ephemeral signers only
+in the production secret manager and add the audited post-cooldown `closeLutIx()` operation; never
+write their private keys to the repository or an ordinary keeper journal.
 
-Create the official MYNE/SOL DLMM pool with the chosen initial liquidity and fee tier. Independently
-verify the pool owner, MYNE vault, WSOL vault, vault mints, and minimum reserves. Only then submit
-`initialize_liquidity_gate` with the exact pool and vault addresses.
+## 5. Create and register the official Meteora pool
 
-## 6. Verify randomness and keeper paths
+Create the MYNE/WSOL DLMM pool. Independently verify the Meteora program owner, pool address, both reserve PDAs, mint order and reserve thresholds. Register that exact gate while paused. The gate is immutable for this initialization and is checked again at every settlement.
 
-Run a controlled Switchboard request/commit/bind/reveal/settle rehearsal against the Mainnet
-provider configuration. Confirm that the winner is not knowable before the betting window closes,
-that stale/replayed randomness is rejected, and that settlement requires the registered pool.
+## 6. Rehearse randomness and buyback while paused/controlled
 
-## 7. Activate once
+Run the exact Switchboard create/commit/open/bind/reveal/settle flow with measured compute. Confirm wrong owner/binding, stale reveal, duplicate settlement and missed-reveal paths fail safely. Run the buyback keeper in dry-run mode, then authorize one tiny direct-pool canary. Verify swap and burn signatures appear in `mine_buyback_executions`.
 
-After all checks pass, submit the single `set_paused(false)` transaction with the registered gate
-and vault accounts. This is the activation latch for mining, staking, referrals, emissions, and
-buyback accounting. Save the transaction signature and config snapshot.
+## 7. Activate once and observe one complete round
 
-## 8. Operate and monitor
+Only after all gates pass, submit `set_paused(false)` with the exact pool and reserve accounts. Save the config snapshot and activation signature. Observe one complete low-volume round through:
 
-Run the round keeper and buyback keeper from supervised infrastructure with durable state,
-restricted keys, balance alerts, slippage limits, retry handling, and an incident pause procedure.
-Do not advertise or fund public participation until at least one complete round, claim, staking
-distribution, referral fallback, buyback/burn, and Motherlode path has been independently verified.
+1. receipt creation;
+2. Switchboard settlement;
+3. permissionless accumulated and auto-burn reward processing;
+4. 2% swap/burn and indexed evidence;
+5. deterministic archive commitment;
+6. receipt closure with rent returned to users;
+7. round closure with rent returned to the randomness role;
+8. delayed Switchboard randomness closure.
+
+If any counter, payout invariant, archive hash or evidence total disagrees, pause and investigate. Do not advertise until this sequence and the independent review are signed off.

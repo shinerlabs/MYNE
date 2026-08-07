@@ -2,7 +2,7 @@ import {
   supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, CHAT_TOPIC, HISTORY_LIMIT,
   REACTIONS, shortWallet, fetchJson,
 } from './config.js';
-import { getSession, getGuestId, ensureSession, authedFetchJson } from './session.js';
+import { getSession, ensureSession, authedFetchJson } from './session.js';
 import { encodeImageBody, decodeImageBody, mountStickerPicker } from './stickers.js';
 import { buildAvatar, bindProfileHover, getMyProfile, profileDisplayName } from './profile.js';
 
@@ -74,7 +74,7 @@ export const setChatComposeEnabled = (enabled, placeholder, gateMessage = 'Conne
   chatSendButtonEl?.classList.toggle('chat-ready', enabled);
   if (chatHintEl) {
     chatHintEl.textContent = enabled
-      ? (getSession() ? 'Stickers · Enter send · Shift+Enter newline' : 'Guest chat · connect to set your profile')
+      ? 'Wallet chat · Enter send · Shift+Enter newline'
       : 'Chat unavailable';
   }
   const emptyCopy = document.querySelector('#chat-empty p');
@@ -604,8 +604,6 @@ export async function loadChatHistory() {
     const strong = document.createElement('strong');
     strong.textContent = 'No messages yet';
     const p = document.createElement('p');
-    // Guest chat is intentionally open on devnet/testnet. Keep the empty state aligned with
-    // the composer so visitors are not told to connect before they can send a first message.
     p.textContent = chatCanSend
       ? 'Say hello to the miners.'
       : 'Connect your wallet and say hello to the miners.';
@@ -656,9 +654,11 @@ async function sendChatMessage() {
   if (chatSendButtonEl) chatSendButtonEl.disabled = true;
 
   try {
-    const session = host.getAccount() ? await ensureSession() : null;
-    const headers = { 'Content-Type': 'application/json', 'X-Guest-Id': getGuestId() };
-    if (session?.token) headers.Authorization = `Bearer ${session.token}`;
+    const session = await ensureSession();
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.token}`,
+    };
     setChatComposeEnabled(true, 'Send a message…');
 
     const { res, data } = await fetchJson(`${FUNCTIONS_URL}/chat-send`, {
@@ -675,8 +675,8 @@ async function sendChatMessage() {
     // server's copy immediately so sending feels instant on a slow socket.
     appendChatMessage(data.message ?? {
       body: outboundBody,
-      walletAddress: session?.walletAddress || null,
-      displayName: session ? profileDisplayName() : 'Guest',
+      walletAddress: session.walletAddress,
+      displayName: profileDisplayName(),
       avatarUrl: getMyProfile()?.avatarUrl || null,
       createdAt: new Date().toISOString(),
     });
@@ -756,9 +756,7 @@ export function mountChat(hostAdapter, handlers = {}) {
 
   stickers = mountStickerPicker({
     notify: host.notify,
-    // Devnet/testnet chat is intentionally open. Guests may choose a sticker and send it
-    // through the same chat-send function; mainnet keeps sticker sending wallet-gated.
-    requireWallet: host.chatRequiresMinedRounds ? host.requireWallet : () => true,
+    requireWallet: host.requireWallet,
     focusInput: () => chatInputEl?.focus(),
   });
 

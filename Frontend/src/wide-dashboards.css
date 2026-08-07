@@ -1,0 +1,120 @@
+/* Stake and Referrals share one wide, two-column desktop system. This file is imported last so
+   old route experiments in style.css cannot narrow or reposition these pages. */
+body[data-route="stake"] .staking-shell.page-view.active,
+body[data-route="referrals"] .feature-shell.page-view.active {
+  display: block !important;
+  width: min(1320px, calc(100vw - 48px)) !important;
+  max-width: 1320px !important;
+  height: auto !important;
+  margin-inline: auto !important;
+}
+
+.staking-dashboard,
+.referrals-dashboard {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.referrals-dashboard {
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+}
+
+.staking-dashboard-column,
+.referrals-column { min-width: 0; }
+
+.staking-overview,
+.staking-actions,
+.referrals-primary,
+.referrals-secondary {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-hero {
+  grid-template-columns: 1fr;
+  gap: 22px;
+  margin: 0;
+  padding: 28px 30px;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-logo {
+  width: 82px;
+  height: 82px;
+}
+
+body[data-route="stake"] .staking-dashboard #stake-claimable-eth {
+  font-size: clamp(48px, 5vw, 68px);
+}
+
+body[data-route="stake"] .staking-dashboard .staking-position-strip {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+body[data-route="stake"] .staking-dashboard .staking-layout {
+  display: block;
+  margin: 0;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-composer { min-height: 100%; }
+body[data-route="stake"] .staking-dashboard .staking-calculator { margin: 0; }
+body[data-route="referrals"] .referral-command { margin: 0; }
+
+body[data-route="referrals"] .referral-link-block,
+body[data-route="referrals"] .referral-performance,
+body[data-route="referrals"] .my-referrals,
+body[data-route="referrals"] .referral-leaderboard { margin: 0; }
+
+body[data-route="referrals"] .referral-performance {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+body[data-route="referrals"] .referral-table-head,
+body[data-route="referrals"] .referral-list { min-width: 0; }
+
+body[data-route="referrals"] .referral-table-head,
+body[data-route="referrals"] .referral-row {
+  grid-template-columns: .42fr minmax(100px, 1.3fr) .75fr .65fr .85fr .85fr .42fr;
+  gap: 7px;
+}
+
+@media (max-width: 900px) {
+  body[data-route="stake"] .staking-shell.page-view.active,
+  body[data-route="referrals"] .feature-shell.page-view.active {
+    width: min(100% - 24px, 720px) !important;
+    max-width: 720px !important;
+  }
+
+  .staking-dashboard,
+  .referrals-dashboard { grid-template-columns: 1fr; }
+
+  body[data-route="referrals"] .referral-table-head,
+  body[data-route="referrals"] .referral-list { min-width: 700px; }
+
+  body[data-route="referrals"] .referrals-secondary { overflow-x: auto; }
+}
+
+@media (max-width: 560px) {
+  body[data-route="stake"] .staking-shell.page-view.active,
+  body[data-route="referrals"] .feature-shell.page-view.active {
+    width: calc(100vw - 20px) !important;
+    max-width: none !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-hero { padding: 22px 20px; }
+  body[data-route="stake"] .staking-dashboard .staking-position-strip { grid-template-columns: 1fr 1fr; }
+  body[data-route="referrals"] .feature-shell[data-page="referrals"] .referral-performance {
+    grid-template-columns: 1fr !important;
+  }
+
+  body[data-route="referrals"] .referral-metrics {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  body[data-route="referrals"] .referral-metrics article:last-child {
+    grid-column: 1 / -1;
+  }
+}

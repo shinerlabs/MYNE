@@ -1,0 +1,436 @@
+/**
+ * Durable Solana event indexer and round-archive attestor.
+ *
+ * The chain is authoritative. Supabase stores a rebuildable, read-only history
+ * before temporary receipt/round PDAs are closed. Live mode requires the
+ * randomness keeper key because only that configured signer may attest the
+ * canonical archive hash on-chain.
+ */
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import anchor from '@anchor-lang/core';
+import {
+  ComputeBudgetProgram, PublicKey, Transaction, sendAndConfirmTransaction,
+} from '@solana/web3.js';
+import { archiveHash, buildArchiveSnapshot } from './round-archive-policy.mjs';
+
+const { AnchorProvider, EventParser, Program, setProvider } = anchor;
+const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
+  || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
+const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
+const provider = AnchorProvider.env();
+setProvider(provider);
+const payer = provider.wallet.payer;
+assert.ok(payer, 'A file-backed randomness/indexer wallet is required');
+const program = new Program(idl, provider);
+const parser = new EventParser(PROGRAM_ID, program.coder);
+const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+assert.match(supabaseUrl, /^https:\/\//, 'SUPABASE_URL must use HTTPS');
+assert.ok(serviceRole, 'SUPABASE_SERVICE_ROLE_KEY is required and must remain server-side');
+
+const INDEXER_ID = `${PROGRAM_ID.toBase58()}:${provider.connection.rpcEndpoint}`;
+const intervalMs = Number(process.env.ROUND_INDEXER_INTERVAL_MS || 3000);
+const startSlot = Number(process.env.ROUND_INDEXER_START_SLOT ?? -1);
+const maxPages = Number(process.env.ROUND_INDEXER_MAX_PAGES || 100);
+const requireBuybackEvidence = process.env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE === '1';
+assert.ok(Number.isInteger(intervalMs) && intervalMs >= 1000, 'ROUND_INDEXER_INTERVAL_MS must be >= 1000');
+assert.ok(Number.isInteger(maxPages) && maxPages > 0, 'ROUND_INDEXER_MAX_PAGES must be positive');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const asString = (value) => value?.toString?.() ?? String(value ?? 0);
+const u64Seed = (value) => {
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64LE(BigInt(asString(value)));
+  return buffer;
+};
+const receiptPda = (roundId, authority, nonce) => PublicKey.findProgramAddressSync([
+  Buffer.from('bet'), u64Seed(roundId), new PublicKey(authority).toBuffer(), u64Seed(nonce),
+], PROGRAM_ID)[0];
+const roundPda = (roundId) => PublicKey.findProgramAddressSync([
+  Buffer.from('round'), u64Seed(roundId),
+], PROGRAM_ID)[0];
+
+async function rest(path, { method = 'GET', body, prefer } = {}) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    method,
+    headers: {
+      apikey: serviceRole,
+      Authorization: `Bearer ${serviceRole}`,
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(prefer ? { Prefer: prefer } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const text = await response.text();
+  assert.ok(response.ok, `Supabase ${method} ${path} failed (${response.status}): ${text}`);
+  return text ? JSON.parse(text) : null;
+}
+
+const upsert = (table, rows, conflict) => rest(
+  `${table}?on_conflict=${encodeURIComponent(conflict)}`,
+  { method: 'POST', body: Array.isArray(rows) ? rows : [rows], prefer: 'resolution=merge-duplicates,return=minimal' },
+);
+
+async function ensureRound(roundId) {
+  await upsert('mine_rounds', { round_id: asString(roundId), updated_at: new Date().toISOString() }, 'round_id');
+}
+
+async function sendMeasured(instructions) {
+  const latest = await provider.connection.getLatestBlockhash('confirmed');
+  const simulationTransaction = new Transaction({
+    feePayer: payer.publicKey,
+    recentBlockhash: latest.blockhash,
+  }).add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...instructions);
+  const simulation = await provider.connection.simulateTransaction(simulationTransaction, [payer]);
+  assert.equal(
+    simulation.value.err,
+    null,
+    `Archive simulation failed: ${JSON.stringify(simulation.value.err)}\n${(simulation.value.logs || []).join('\n')}`,
+  );
+  const measured = Math.max(50_000, Number(simulation.value.unitsConsumed || 200_000));
+  const priority = Math.max(
+    0,
+    Math.min(1_000_000, Number(process.env.KEEPER_PRIORITY_MICROLAMPORTS || 0)),
+  );
+  const transaction = new Transaction().add(
+    ComputeBudgetProgram.setComputeUnitLimit({
+      units: Math.min(1_400_000, Math.ceil(measured * 1.1)),
+    }),
+    ...(priority > 0
+      ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority })]
+      : []),
+    ...instructions,
+  );
+  return sendAndConfirmTransaction(provider.connection, transaction, [payer], {
+    commitment: 'confirmed', skipPreflight: false,
+  });
+}
+
+function bytes(value) {
+  return Buffer.from(Array.from(value || [], Number));
+}
+
+async function processEvent(event, signature, slot) {
+  const data = event.data;
+  switch (event.name) {
+    case 'RoundOpened': {
+      await upsert('mine_rounds', {
+        round_id: asString(data.roundId),
+        rent_payer: new PublicKey(data.rentPayer).toBase58(),
+        opened_at: asString(data.openedAt),
+        betting_ends_at: asString(data.bettingEndsAt),
+        settles_at: asString(data.settlesAt),
+        refund_at: asString(data.refundAt),
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
+      break;
+    }
+    case 'RoundRandomnessBound': {
+      await upsert('mine_rounds', {
+        round_id: asString(data.roundId),
+        randomness_id: new PublicKey(data.randomnessAccount).toBase58(),
+        randomness_commit_slot: asString(data.randomnessCommitSlot),
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
+      break;
+    }
+    case 'DeploymentCreated': {
+      const roundId = asString(data.roundId);
+      await ensureRound(roundId);
+      const receipt = new PublicKey(data.receipt).toBase58();
+      const rows = data.amounts.map((amount, square) => ({
+        round_id: roundId,
+        receipt,
+        // Base58 public keys are case-sensitive. Store the canonical address;
+        // lowercasing changes the key and breaks indexed identity lookups.
+        bettor: new PublicKey(data.authority).toBase58(),
+        rent_payer: new PublicKey(data.rentPayer).toBase58(),
+        nonce: asString(data.nonce),
+        square,
+        amount_wei: asString(amount),
+        cumulative_start_wei: asString(data.cumulativeStarts[square]),
+        reward_mode: Number(data.rewardMode),
+        deployment_signature: signature,
+        deployment_slot: slot,
+      })).filter((row) => BigInt(row.amount_wei) > 0n);
+      if (rows.length) await upsert('mine_round_bets', rows, 'round_id,receipt,square');
+      break;
+    }
+    case 'AutoPlanConfigured': {
+      await upsert('mine_auto_plans', {
+        authority: new PublicKey(data.authority).toBase58(),
+        active: Boolean(data.active),
+        reward_mode: Number(data.rewardMode),
+        per_round_lamports: asString(data.perRoundLamports),
+        balance_lamports: asString(data.balanceLamports),
+        updated_slot: slot,
+        updated_at: new Date().toISOString(),
+      }, 'authority');
+      break;
+    }
+    case 'AutoPlanFunded': {
+      await upsert('mine_auto_plans', {
+        authority: new PublicKey(data.authority).toBase58(),
+        balance_lamports: asString(data.balanceLamports),
+        updated_slot: slot,
+        updated_at: new Date().toISOString(),
+      }, 'authority');
+      break;
+    }
+    case 'AutoPlanCancelled': {
+      await upsert('mine_auto_plans', {
+        authority: new PublicKey(data.authority).toBase58(),
+        active: false,
+        balance_lamports: '0',
+        updated_slot: slot,
+        updated_at: new Date().toISOString(),
+      }, 'authority');
+      break;
+    }
+    case 'AutoPlanExecuted': {
+      await upsert('mine_auto_plans', {
+        authority: new PublicKey(data.authority).toBase58(),
+        balance_lamports: asString(data.balanceLamports),
+        last_round: asString(data.roundId),
+        next_nonce: (BigInt(asString(data.nonce)) + 1n).toString(),
+        updated_slot: slot,
+        updated_at: new Date().toISOString(),
+      }, 'authority');
+      break;
+    }
+    case 'RoundSettled': {
+      const roundId = asString(data.roundId);
+      await ensureRound(roundId);
+      const bets = await rest(`mine_round_bets?round_id=eq.${roundId}&select=bettor,receipt,square,amount_wei,cumulative_start_wei`);
+      const winningSquare = Number(data.winningTile);
+      const winners = (bets || []).filter((bet) => Number(bet.square) === winningSquare);
+      const winnerTotal = winners.reduce((sum, bet) => sum + BigInt(bet.amount_wei), 0n);
+      const prize = BigInt(asString(data.prizeLamports));
+      const payoutMul = winnerTotal > 0n ? (prize * 1_000_000_000_000_000_000n) / winnerTotal : 0n;
+      const soloSample = BigInt(asString(data.soloSample));
+      const soloWinner = data.soloMode
+        ? winners.find((bet) => {
+          const start = BigInt(bet.cumulative_start_wei);
+          return soloSample >= start && soloSample < start + BigInt(bet.amount_wei);
+        })?.bettor ?? null
+        : null;
+      const randomness = bytes(data.randomness);
+      await upsert('mine_rounds', {
+        round_id: roundId,
+        resolved: true,
+        winning_square: winningSquare,
+        jackpot_hit: Boolean(data.motherlodeHit),
+        single_miner_round: Boolean(data.soloMode),
+        winner: soloWinner,
+        total_wager_wei: asString(data.grossDeployedLamports),
+        winner_total_wei: winnerTotal.toString(),
+        pot_for_winners_wei: prize.toString(),
+        bullion_for_winners_wei: asString(data.baseEmission),
+        payout_mul_wad: payoutMul.toString(),
+        randomness_id: new PublicKey(data.randomnessAccount).toBase58(),
+        randomness_value: BigInt(`0x${randomness.toString('hex') || '0'}`).toString(),
+        randomness_hex: randomness.toString('hex'),
+        randomness_commit_slot: asString(data.randomnessCommitSlot),
+        solo_sample: soloSample.toString(),
+        total_receipts: asString(data.totalReceipts),
+        settlement_signature: signature,
+        settlement_slot: slot,
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
+      break;
+    }
+    case 'ReceiptClaimed':
+    case 'ReceiptRefunded':
+    case 'ReceiptClosed': {
+      const roundId = asString(data.roundId);
+      const authority = new PublicKey(data.authority).toBase58();
+      const nonce = asString(data.nonce);
+      await upsert('mine_receipt_settlements', {
+        round_id: roundId,
+        receipt: receiptPda(roundId, authority, nonce).toBase58(),
+        authority,
+        nonce,
+        status: event.name === 'ReceiptClaimed' ? 'claimed' : event.name === 'ReceiptRefunded' ? 'refunded' : 'closed',
+        sol_lamports: asString(data.solLamports || data.lamports || 0),
+        myne_base_units: asString(data.myneBaseUnits || 0),
+        motherlode_base_units: asString(data.motherlodeBaseUnits || 0),
+        signature,
+        slot,
+        updated_at: new Date().toISOString(),
+      }, 'round_id,receipt,status');
+      const statusFilter = event.name === 'ReceiptClosed' ? 'closed' : 'claimed,refunded';
+      const rows = await rest(`mine_receipt_settlements?round_id=eq.${roundId}&status=in.(${statusFilter})&select=receipt`);
+      await rest(`mine_rounds?round_id=eq.${roundId}`, {
+        method: 'PATCH',
+        body: event.name === 'ReceiptClosed'
+          ? { closed_receipts: new Set((rows || []).map((row) => row.receipt)).size, updated_at: new Date().toISOString() }
+          : { processed_receipts: new Set((rows || []).map((row) => row.receipt)).size, updated_at: new Date().toISOString() },
+        prefer: 'return=minimal',
+      });
+      break;
+    }
+    case 'BuybackCompleted': {
+      await rest(`mine_rounds?round_id=eq.${asString(data.roundId)}`, {
+        method: 'PATCH', body: { buyback_completed: true, updated_at: new Date().toISOString() }, prefer: 'return=minimal',
+      });
+      break;
+    }
+    case 'RoundArchived': {
+      await upsert('mine_rounds', {
+        round_id: asString(data.roundId),
+        archive_hash: bytes(data.archiveHash).toString('hex'),
+        archive_slot: asString(data.slot),
+        archived_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
+      break;
+    }
+    case 'RoundClosed': {
+      await rest(`mine_rounds?round_id=eq.${asString(data.roundId)}`, {
+        method: 'PATCH', body: { closed_signature: signature, closed_slot: slot, updated_at: new Date().toISOString() }, prefer: 'return=minimal',
+      });
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+async function state() {
+  const rows = await rest(`mine_indexer_state?id=eq.${encodeURIComponent(INDEXER_ID)}&select=*`);
+  return rows?.[0] ?? null;
+}
+
+async function signaturesSince(previous) {
+  const gathered = [];
+  let before;
+  for (let page = 0; page < maxPages; page += 1) {
+    const rows = await provider.connection.getSignaturesForAddress(PROGRAM_ID, {
+      limit: 1000,
+      ...(before ? { before } : {}),
+      ...(previous ? { until: previous } : {}),
+    }, 'finalized');
+    if (!rows.length) break;
+    gathered.push(...rows.filter((row) => row.err == null && (previous || row.slot >= startSlot)));
+    before = rows.at(-1).signature;
+    if (rows.length < 1000 || (!previous && rows.at(-1).slot < startSlot)) break;
+    assert.notEqual(page, maxPages - 1, 'Indexer page limit reached; raise ROUND_INDEXER_MAX_PAGES before continuing');
+  }
+  return gathered.reverse();
+}
+
+async function indexTransactions() {
+  const cursor = await state();
+  if (!cursor) assert.ok(startSlot >= 0, 'Set ROUND_INDEXER_START_SLOT for the first production backfill');
+  const rows = await signaturesSince(cursor?.newest_signature || null);
+  for (const row of rows) {
+    const transaction = await provider.connection.getTransaction(row.signature, {
+      commitment: 'finalized', maxSupportedTransactionVersion: 0,
+    });
+    assert.ok(
+      transaction?.meta?.logMessages,
+      `Finalized transaction ${row.signature} is temporarily unavailable; cursor not advanced`,
+    );
+    for (const event of parser.parseLogs(transaction.meta.logMessages)) {
+      await processEvent(event, row.signature, row.slot);
+    }
+    await upsert('mine_indexer_state', {
+      id: INDEXER_ID,
+      newest_signature: row.signature,
+      newest_slot: row.slot,
+      updated_at: new Date().toISOString(),
+    }, 'id');
+  }
+  return rows.length;
+}
+
+async function archiveReadyRounds() {
+  const rounds = await rest('mine_rounds?archive_hash=is.null&select=*&order=round_id.asc&limit=20');
+  let archived = 0;
+  for (const round of rounds || []) {
+    if (!round.resolved && (!round.refund_at || Number(round.refund_at) > Math.floor(Date.now() / 1000))) continue;
+    const address = roundPda(round.round_id);
+    const state = await program.account.round.fetchNullable(address);
+    if (!state) continue;
+    if (Number(state.processedReceipts.toString()) !== Number(state.totalReceipts.toString())) continue;
+    const bets = await rest(`mine_round_bets?round_id=eq.${round.round_id}&select=*&order=receipt.asc,square.asc`);
+    const receiptCount = new Set((bets || []).map((bet) => bet.receipt)).size;
+    const chainReceiptCount = Number(state.totalReceipts.toString());
+    if (receiptCount !== chainReceiptCount) continue;
+    const settlements = await rest(`mine_receipt_settlements?round_id=eq.${round.round_id}&status=in.(claimed,refunded)&select=*&order=receipt.asc`);
+    const settlementCount = new Set((settlements || []).map((entry) => entry.receipt)).size;
+    if (settlementCount !== chainReceiptCount) continue;
+    if (state.settled && !state.buybackCompleted) continue;
+    const buybacks = await rest(`mine_buyback_executions?round_id=eq.${round.round_id}&select=*&order=sequence.asc`);
+    if (requireBuybackEvidence && state.settled) {
+      const allocation = (BigInt(state.grossDeployedLamports.toString()) * 200n) / 10_000n;
+      const evidenced = (buybacks || []).reduce(
+        (sum, entry) => sum + BigInt(entry.spend_lamports), 0n,
+      );
+      if (evidenced !== allocation) continue;
+    }
+    const indexedRound = {
+      ...round,
+      total_receipts: chainReceiptCount,
+      processed_receipts: Number(state.processedReceipts.toString()),
+    };
+    const snapshot = buildArchiveSnapshot({
+      program: PROGRAM_ID.toBase58(), round: indexedRound, bets, settlements, buybacks,
+    });
+    const snapshotHash = archiveHash(snapshot);
+    await upsert('mine_round_proofs', {
+      round_id: round.round_id,
+      archive_hash: snapshotHash,
+      canonical_snapshot: snapshot,
+      randomness_account: round.randomness_id,
+      randomness_commit_slot: round.randomness_commit_slot,
+      randomness_hex: round.randomness_hex,
+      settlement_signature: round.settlement_signature,
+    }, 'round_id');
+    if (Number(state.archivedAtSlot.toString()) === 0) {
+      const instruction = await program.methods.archiveRound([...Buffer.from(snapshotHash, 'hex')]).accounts({
+        config: PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID)[0],
+        round: address,
+        randomnessAuthority: payer.publicKey,
+      }).instruction();
+      const signature = await sendMeasured([instruction]);
+      await rest(`mine_round_proofs?round_id=eq.${round.round_id}`, {
+        method: 'PATCH', body: { archived_signature: signature }, prefer: 'return=minimal',
+      });
+    }
+    await rest(`mine_rounds?round_id=eq.${round.round_id}`, {
+      method: 'PATCH',
+      body: {
+        archive_hash: snapshotHash,
+        total_receipts: chainReceiptCount,
+        processed_receipts: Number(state.processedReceipts.toString()),
+        buyback_completed: Boolean(state.buybackCompleted),
+        archived_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      prefer: 'return=minimal',
+    });
+    archived += 1;
+  }
+  return archived;
+}
+
+export async function indexerTick() {
+  const indexed = await indexTransactions();
+  const archived = await archiveReadyRounds();
+  return { indexed, archived };
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const once = process.argv.includes('--once');
+  do {
+    try {
+      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer', ...(await indexerTick()) }));
+    } catch (error) {
+      console.error(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer-error', message: String(error) }));
+      if (process.env.FAIL_FAST === '1') process.exitCode = 1;
+    }
+    if (!once) await sleep(intervalMs);
+  } while (!once);
+}

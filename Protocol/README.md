@@ -55,6 +55,17 @@ Run `./scripts/check-devnet-readiness.sh` before a deployment. The detailed sequ
 conditions are in [`docs/DEVNET_TESTING.md`](docs/DEVNET_TESTING.md), and the current security scope
 is recorded in [`docs/REVIEW_2026-08-05.md`](docs/REVIEW_2026-08-05.md).
 
+Production lifecycle services are deliberately separated from the randomness-critical reveal
+transaction:
+
+- `round:indexer` records finalized events and commits deterministic archive proofs;
+- `round:lifecycle` batches permissionless settlements/refunds and closes archived PDAs;
+- `buyback:keeper` performs and indexes direct Meteora swap/burn evidence;
+- `prepare:admin-ata` creates the one canonical fallback fee token account after mint creation.
+
+These services use indexed addresses and exact on-chain revalidation; they do not scan every
+program-owned account in production.
+
 ## Mainnet-candidate boundary
 
 The checked-in code is a deployment candidate, not an authorization to launch. Production uses
