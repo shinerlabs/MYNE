@@ -43,7 +43,7 @@
     "devnet:switchboard-round": "node scripts/switchboard-round-keeper.mjs"
   },
   "dependencies": {
-    "@anchor-lang/core": "1.0.2",
+    "@anchor-lang/core": "1.1.2",
     "@metaplex-foundation/mpl-token-metadata": "3.4.0",
     "@metaplex-foundation/umi": "1.5.1",
     "@metaplex-foundation/umi-bundle-defaults": "1.5.1",
