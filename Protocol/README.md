@@ -25,7 +25,7 @@ rounding rule that assigns fee dust to that direct payment.
 - Anchor CLI 1.0.2
 - Anchor crates 1.0.2
 - Solana/Agave 3.x
-- Rust stable supported by that Anchor release
+- Rust 1.97.1 (pinned in `rust-toolchain.toml`)
 
 Official Anchor installation currently recommends AVM. Once the toolchain is installed:
 

@@ -1,4 +1,4 @@
-import { AnchorProvider, BN, BorshAccountsCoder, Program } from '@anchor-lang/core';
+import * as anchorNamespace from '@anchor-lang/core';
 import { ComputeBudgetProgram, PublicKey, Transaction } from '@solana/web3.js';
 
 import idl from '../generated/myne_protocol.json' with { type: 'json' };
@@ -8,6 +8,11 @@ import {
   assertConfiguredCluster, connection, getAccount, getProvider,
 } from './client.js';
 import { capabilitiesFromIdl } from './protocol-capabilities.js';
+
+// Node resolves @anchor-lang/core through its CommonJS entrypoint while Vite resolves its ESM
+// entrypoint. Normalize both module shapes instead of relying on Node's inferred CJS exports.
+const anchor = Reflect.get(anchorNamespace, 'default') ?? anchorNamespace;
+const { AnchorProvider, BN, BorshAccountsCoder, Program } = anchor;
 
 const PROGRAM_ID = PROGRAMS.protocol ? new PublicKey(PROGRAMS.protocol) : null;
 const coder = new BorshAccountsCoder(idl);

@@ -829,19 +829,19 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
     max-width: 1780px !important;
     height: calc(100dvh - var(--premine-banner-h, 0px) - 76px - 24px - 8px) !important;
     min-height: 0 !important;
-    grid-template-columns: clamp(220px, 18vw, 300px) minmax(480px, 1fr) clamp(400px, 29vw, 500px) !important;
+    grid-template-columns: clamp(240px, 20vw, 360px) minmax(480px, 1fr) clamp(400px, 29vw, 500px) !important;
     grid-template-areas: "social board controls" !important;
     grid-template-rows: minmax(0, 1fr) !important;
     align-items: stretch !important;
     gap: 12px !important;
-    margin: 8px auto 0 !important;
+    margin: 8px 18px 0 !important;
     overflow: hidden !important;
   }
 
   body[data-route="mine"] .workspace.page-view.active.chat-hidden {
     width: min(1780px, calc(100vw - 36px)) !important;
-    grid-template-columns: clamp(220px, 18vw, 300px) minmax(480px, 1fr) clamp(400px, 29vw, 500px) !important;
-    margin: 8px auto 0 !important;
+    grid-template-columns: clamp(240px, 20vw, 360px) minmax(480px, 1fr) clamp(400px, 29vw, 500px) !important;
+    margin: 8px 18px 0 !important;
   }
 
   /* Collapsing Social must not reflow or resize the mining board. Keep its now-empty track in the
@@ -2844,8 +2844,8 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
     z-index: 70 !important;
     top: calc(84px + var(--premine-banner-h, 0px)) !important;
     bottom: 24px !important;
-    left: 7px !important;
-    width: min(360px, calc(100vw - 14px)) !important;
+    left: 18px !important;
+    width: min(420px, calc(100vw - 36px)) !important;
     height: auto !important;
     min-height: 0 !important;
     display: flex !important;

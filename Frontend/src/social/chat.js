@@ -2,7 +2,7 @@ import {
   supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, CHAT_TOPIC, HISTORY_LIMIT,
   REACTIONS, shortWallet, fetchJson,
 } from './config.js';
-import { getSession, ensureSession, authedFetchJson } from './session.js';
+import { getSession, authedFetchJson } from './session.js';
 import { encodeImageBody, decodeImageBody, mountStickerPicker } from './stickers.js';
 import { buildAvatar, bindProfileHover, getMyProfile, profileDisplayName } from './profile.js';
 
@@ -213,10 +213,9 @@ async function toggleReaction(messageId, emoji) {
   }
 
   try {
-    const session = await ensureSession();
-    const { res, data } = await fetchJson(`${FUNCTIONS_URL}/chat-react`, {
+    const { res, data } = await authedFetchJson(`${FUNCTIONS_URL}/chat-react`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messageId: mid, emoji }),
     });
     if (!res.ok) throw new Error(data.error || 'Reaction failed');
@@ -627,16 +626,11 @@ async function sendChatMessage() {
   if (chatSendButtonEl) chatSendButtonEl.disabled = true;
 
   try {
-    const session = await ensureSession();
-    const headers = {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${session.token}`,
-    };
     setChatComposeEnabled(true, 'Send a message…');
 
-    const { res, data } = await fetchJson(`${FUNCTIONS_URL}/chat-send`, {
+    const { res, data, session } = await authedFetchJson(`${FUNCTIONS_URL}/chat-send`, {
       method: 'POST',
-      headers,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body: outboundBody }),
     });
     if (!res.ok) {

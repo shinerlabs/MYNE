@@ -105,7 +105,7 @@ test('desktop Stake keeps rewards primary and bounds the transaction rail', () =
   assert.match(fitStyles, /\.staking-dashboard \.eth-claim-actions \{[\s\S]*align-self:\s*center !important/);
   assert.match(fitStyles, /body\[data-route="stake"\] \.stake-composer \.unstake-policy \{[\s\S]*display:\s*grid !important/);
   assert.match(fitStyles, /#claim-stake-rewards:disabled \{[\s\S]*background:\s*var\(--surface-control\) !important/);
-  assert.match(source, /7\.2% of all mining volume is distributed to stakers in SOL from an 8% gross staking allocation\./);
+  assert.doesNotMatch(source, /<p class="staking-hero-subtitle">/);
 });
 
 test('desktop Stake stays top-aligned inside its restrained 1440px frame', () => {
@@ -193,7 +193,8 @@ test('desktop Mine uses a stable viewport frame and a bounded control rail', () 
 });
 
 test('collapsing Social preserves Mine board and control tracks', () => {
-  assert.match(fitStyles, /\.workspace\.page-view\.active\.chat-hidden \{[\s\S]*grid-template-columns:\s*clamp\(220px, 18vw, 300px\) minmax\(480px, 1fr\) clamp\(400px, 29vw, 500px\) !important/);
+  assert.match(fitStyles, /\.workspace\.page-view\.active\.chat-hidden \{[\s\S]*grid-template-columns:\s*clamp\(240px, 20vw, 360px\) minmax\(480px, 1fr\) clamp\(400px, 29vw, 500px\) !important/);
+  assert.match(fitStyles, /\.workspace\.page-view\.active\.chat-hidden \{[\s\S]*margin:\s*8px 18px 0 !important/);
   assert.match(fitStyles, /grid-template-areas:\s*"social board controls" !important/);
   assert.match(fitStyles, /\.workspace\.page-view\.active > \.board-panel \{[\s\S]*grid-column:\s*2 !important/);
   assert.match(fitStyles, /\.workspace\.page-view\.active > \.control-column \{[\s\S]*grid-column:\s*3 !important/);

@@ -14,7 +14,7 @@ if [[ -n "$tracked_artifacts" ]]; then
   exit 1
 fi
 
-secret_regex="(BEGIN (OPENSSH|RSA|EC|DSA) PRIVATE KEY|api-key=[A-Za-z0-9_-]{20,}|(PRIVATE_KEY|SERVICE_ROLE_KEY|SECRET_ACCESS_KEY|HELIUS_API_KEY)[A-Z0-9_]*[[:space:]]*=[[:space:]]*['\"]?[A-Za-z0-9+/_=-]{20,})"
+secret_regex="(BEGIN (OPENSSH|RSA|EC|DSA) PRIVATE KEY|api-key=[A-Za-z0-9_-]{20,}|((SUPABASE_)?SERVICE_ROLE_KEY|PRIVATE_KEY|SECRET_ACCESS_KEY|HELIUS_API_KEY)[A-Z0-9_]*['\"]?[[:space:]]*[:=][[:space:]]*['\"]?[A-Za-z0-9+/_=-]{20,})"
 set +e
 secret_matches="$(git grep -nEI "$secret_regex" -- \
   ':!*.lock' \

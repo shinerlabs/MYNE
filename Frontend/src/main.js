@@ -326,7 +326,7 @@ document.querySelector('#app').innerHTML = `
   </main>
 
   <main class="feature-shell staking-shell page-view" data-page="stake">
-    <header class="feature-hero route-header staking-hero"><div><span class="eyebrow">SOL REWARDS</span><h1>Stake.</h1><p class="staking-hero-subtitle">7.2% of all mining volume is distributed to stakers in SOL from an 8% gross staking allocation.</p></div></header>
+    <header class="feature-hero route-header staking-hero"><div><span class="eyebrow">SOL REWARDS</span><h1>Stake.</h1></div></header>
     <section class="feature-metrics staking-metrics"><article class="staking-yield-metric"><span>STAKING APY</span><strong id="metric-apr">—</strong><small>LAST 30 MINUTES · NON-COMPOUNDING EST.</small></article><article><span>TOTAL STAKED</span><strong><img src="/myne-mark-ui.png" alt=""/> <b id="metric-staked">—</b></strong></article><article><span>SOL REWARDS POOL</span><strong class="staking-sol-pool">${solIcon()} <b id="metric-pool">—</b></strong></article><article><span>STAKERS</span><strong id="metric-stakers">—</strong></article></section>
     <div class="staking-dashboard" data-mobile-view="overview">
       <nav class="dashboard-view-tabs stake-dashboard-tabs" role="tablist" aria-label="Staking dashboard view">

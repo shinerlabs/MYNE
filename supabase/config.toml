@@ -1,0 +1,23 @@
+# MYNE uses signed Solana wallet sessions rather than Supabase Auth JWTs. These endpoints are
+# reachable without a GoTrue JWT, then enforce origin, nonce, signature, session epoch, wallet
+# ownership, bans and rate limits inside the Edge Function handlers.
+[functions.solana-nonce]
+verify_jwt = false
+
+[functions.solana-verify]
+verify_jwt = false
+
+[functions.chat-send]
+verify_jwt = false
+
+[functions.chat-react]
+verify_jwt = false
+
+[functions.chat-reactions]
+verify_jwt = false
+
+[functions.chat-delete]
+verify_jwt = false
+
+[functions.profile-update]
+verify_jwt = false
