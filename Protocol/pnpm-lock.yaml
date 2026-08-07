@@ -33,6 +33,9 @@ importers:
       '@switchboard-xyz/on-demand':
         specifier: 3.10.3
         version: 3.10.3(bufferutil@4.1.0)(debug@4.4.3)(fastestsmallesttextencoderdecoder@1.0.22)(typescript@7.0.2)(utf-8-validate@6.0.6)
+      bigint-buffer:
+        specifier: link:vendor/bigint-buffer
+        version: link:vendor/bigint-buffer
 
 packages:
 
