@@ -18,6 +18,8 @@ test -f target/deploy/myne_protocol-keypair.json
 test -f target/idl/myne_protocol.json
 test -f ../Frontend/src/generated/myne_protocol.json
 test "$(solana-keygen pubkey target/deploy/myne_protocol-keypair.json)" = "$PROGRAM_ID"
+grep -q '^\[workspace\.metadata\.cli\]$' Cargo.toml
+grep -q '^solana = "3\.1\.10"$' Cargo.toml
 test -x scripts/build-mainnet.sh
 grep -q 'anchor build --no-idl -- --features production -- --locked' scripts/build-mainnet.sh
 grep -q 'anchor idl build -o target/idl/myne_protocol.json -- --locked --features production' scripts/build-mainnet.sh

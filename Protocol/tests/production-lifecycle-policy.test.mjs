@@ -83,12 +83,14 @@ test('MYNE metadata creation is fixed, hosted, simulated, and explicitly submitt
 });
 
 test('Mainnet artifact provenance requires the production feature in the binary', async () => {
-  const [build, manifest, preflight, workflow] = await Promise.all([
+  const [workspace, build, manifest, preflight, workflow] = await Promise.all([
+    readFile(new URL('../Cargo.toml', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/build-mainnet.sh', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/release-artifact-manifest.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../scripts/check-mainnet-readiness.sh', import.meta.url), 'utf8'),
     readFile(new URL('../../.github/workflows/protocol-safety.yml', import.meta.url), 'utf8'),
   ]);
+  assert.match(workspace, /\[workspace\.metadata\.cli\][\s\S]*solana = "3\.1\.10"/);
   assert.match(build, /anchor build --no-idl -- --features production -- --locked/);
   assert.match(build, /anchor idl build -o target\/idl\/myne_protocol\.json -- --locked --features production/);
   assert.ok(

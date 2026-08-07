@@ -2,6 +2,12 @@
 members = ["programs/*"]
 resolver = "2"
 
+# Solana's SDK is split across crates with different package versions, so the
+# verified-build CLI cannot safely infer the intended Agave toolchain from the
+# first matching Cargo.lock entry. Pin the exact production CLI explicitly.
+[workspace.metadata.cli]
+solana = "3.1.10"
+
 [workspace.dependencies]
 anchor-lang = "=1.0.2"
 anchor-spl = { version = "=1.0.2", features = ["token"] }
