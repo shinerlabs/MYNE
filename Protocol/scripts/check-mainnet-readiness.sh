@@ -12,6 +12,7 @@ cd "$ROOT_DIR"
 PROGRAM_ID="D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e"
 MAINNET_SWITCHBOARD="SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv"
 METEORA_DLMM="LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
+METEORA_DAMM_V2="cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
 
 test -f target/deploy/myne_protocol.so
 test -f target/deploy/myne_protocol-keypair.json
@@ -53,6 +54,7 @@ instructions = {entry['name']: entry for entry in target.get('instructions', [])
 assert 'migrate_fee_schedule_v6' in instructions, 'IDL is missing migrate_fee_schedule_v6'
 assert 'record_round_randomness_commit' in instructions, 'IDL is missing record_round_randomness_commit'
 assert 'rotate_operational_wallets' in instructions, 'IDL is missing rotate_operational_wallets'
+assert 'migrate_prelaunch_mint' in instructions, 'IDL is missing migrate_prelaunch_mint'
 for instruction_name in ('deploy', 'execute_auto_plan'):
     account_names = {account['name'] for account in instructions[instruction_name]['accounts']}
     assert 'randomness_account' in account_names, f'{instruction_name} is missing randomness_account'
@@ -62,6 +64,9 @@ for instruction_name in ('settle_round', 'settle_round_verified'):
 events = {entry['name'] for entry in target.get('events', [])}
 assert 'RoundFeesDistributed' in events, 'IDL is missing RoundFeesDistributed'
 assert 'ClaimFeeRoutedV2' in events, 'IDL is missing ClaimFeeRoutedV2'
+assert 'PrelaunchMintMigrated' in events, 'IDL is missing PrelaunchMintMigrated'
+accounts = {entry['name'] for entry in target.get('accounts', [])}
+assert 'PrelaunchMintMigration' in accounts, 'IDL is missing PrelaunchMintMigration'
 types = {entry['name']: entry for entry in target.get('types', [])}
 fee_fields = {
     field['name']
@@ -92,6 +97,7 @@ grep -q "declare_id!(\"$PROGRAM_ID\")" programs/myne_protocol/src/lib.rs
 grep -q '"name": "settle_round_verified"' target/idl/myne_protocol.json
 grep -q '"name": "record_round_randomness_commit"' target/idl/myne_protocol.json
 grep -q '"name": "rotate_operational_wallets"' target/idl/myne_protocol.json
+grep -q '"name": "migrate_prelaunch_mint"' target/idl/myne_protocol.json
 grep -q '"name": "set_randomness_program"' target/idl/myne_protocol.json
 grep -q '"name": "claim_auto_burn_receipt"' target/idl/myne_protocol.json
 grep -q '"name": "settle_receipt"' target/idl/myne_protocol.json
@@ -101,10 +107,13 @@ grep -q '"name": "archive_round"' target/idl/myne_protocol.json
 grep -q '"name": "mark_buyback_completed"' target/idl/myne_protocol.json
 grep -q '"name": "migrate_fee_schedule_v6"' target/idl/myne_protocol.json
 grep -q '"name": "ClaimFeeRoutedV2"' target/idl/myne_protocol.json
+grep -q '"name": "PrelaunchMintMigrated"' target/idl/myne_protocol.json
 grep -q 'pub const CURRENT_VERSION: u8 = 6;' programs/myne_protocol/src/lib.rs
 grep -q 'RoundPayoutIncomplete' programs/myne_protocol/src/economics.rs
 grep -q "$MAINNET_SWITCHBOARD" programs/myne_protocol/src/lib.rs
 grep -q "$METEORA_DLMM" programs/myne_protocol/src/lib.rs
+grep -q "$METEORA_DAMM_V2" programs/myne_protocol/src/lib.rs
+grep -q 'LEGACY_PRELAUNCH_MINT' programs/myne_protocol/src/lib.rs
 test -f scripts/round-indexer.mjs
 test -f scripts/round-lifecycle-keeper.mjs
 test -f scripts/round-archive-policy.mjs
@@ -113,12 +122,15 @@ test -f scripts/derive-mainnet-addresses.mjs
 test -f scripts/provision-chat-admin.mjs
 test -f scripts/create-mainnet-mint.mjs
 test -f scripts/create-mainnet-token-metadata.mjs
+test -f scripts/migrate-mainnet-prelaunch-mint.mjs
 test -f scripts/migrate-fee-schedule-v6.mjs
 test -f scripts/mainnet-liquidity-policy.mjs
 test -f scripts/mainnet-register-liquidity-gate.mjs
 test -f scripts/mainnet-activate.mjs
 test -f scripts/refund-mainnet-deployer.mjs
 grep -q 'LB_PAIR_ACCOUNT_LEN = 904' scripts/mainnet-liquidity-policy.mjs
+grep -q 'DAMM_V2_POOL_ACCOUNT_LEN = 1_112' scripts/mainnet-liquidity-policy.mjs
+grep -q "$METEORA_DAMM_V2" scripts/mainnet-liquidity-policy.mjs
 grep -q 'SUBMIT_MAINNET_LIQUIDITY_GATE' scripts/mainnet-register-liquidity-gate.mjs
 grep -q 'CONFIRM_INDEPENDENT_SECURITY_REVIEW' scripts/mainnet-activate.mjs
 grep -q 'SUBMIT_MAINNET_ACTIVATE' scripts/mainnet-activate.mjs
@@ -130,6 +142,10 @@ grep -q 'simulateTransaction' scripts/create-mainnet-mint.mjs
 grep -q 'CONFIRM_MAINNET_TOKEN_METADATA' scripts/create-mainnet-token-metadata.mjs
 grep -q 'SUBMIT_MAINNET_TOKEN_METADATA' scripts/create-mainnet-token-metadata.mjs
 grep -q 'simulateTransaction' scripts/create-mainnet-token-metadata.mjs
+grep -q 'SUBMIT_MAINNET_MINT_MIGRATION' scripts/migrate-mainnet-prelaunch-mint.mjs
+grep -q 'fetchMetadataFromSeeds' scripts/migrate-mainnet-prelaunch-mint.mjs
+grep -q 'createSetAuthorityInstruction' scripts/migrate-mainnet-prelaunch-mint.mjs
+grep -q 'simulateTransaction' scripts/migrate-mainnet-prelaunch-mint.mjs
 test -f ../Frontend/public/token-metadata.json
 test -f ../Frontend/public/myne-token-icon.svg
 test -f ../Frontend/public/myne-token-icon-1024.png
@@ -214,4 +230,5 @@ echo "Program: $PROGRAM_ID"
 echo "Binary SHA-256: $(shasum -a 256 target/deploy/myne_protocol.so | awk '{print $1}')"
 echo "Mainnet Switchboard: $MAINNET_SWITCHBOARD"
 echo "Meteora DLMM: $METEORA_DLMM"
+echo "Meteora DAMM v2: $METEORA_DAMM_V2"
 echo "No deployment or wallet transaction was performed."

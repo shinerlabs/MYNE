@@ -11,7 +11,7 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import { SOLANA_MAINNET_GENESIS_HASH, SWITCHBOARD_MAINNET_PROGRAM } from './production-network-policy.mjs';
-import { inspectMeteoraPool, METEORA_DLMM_PROGRAM } from './mainnet-liquidity-policy.mjs';
+import { inspectMeteoraPool } from './mainnet-liquidity-policy.mjs';
 
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const COMPUTE_UNIT_LIMIT = 220_000;
@@ -70,9 +70,8 @@ assert.equal(
 );
 assert.equal(gate.verified, true, 'Liquidity gate is not verified');
 assert.ok(gate.pool.equals(reviewedPool), 'Registered pool differs from the reviewed pool');
-assert.ok(gate.poolProgram.equals(METEORA_DLMM_PROGRAM), 'Registered pool program differs');
-
 const poolState = await inspectMeteoraPool(connection, reviewedPool, mint);
+assert.ok(gate.poolProgram.equals(poolState.poolProgram), 'Registered pool program differs');
 assert.ok(gate.myneVault.equals(poolState.myneVault), 'Registered MYNE vault differs');
 assert.ok(gate.solVault.equals(poolState.solVault), 'Registered SOL vault differs');
 assert.ok(poolState.myneAmount >= BigInt(gate.minMyneBaseUnits.toString()), 'MYNE liquidity is below gate minimum');
@@ -93,8 +92,8 @@ const activateInstruction = await program.methods.setPaused(false).accounts({
   config,
   liquidityGate,
   liquidityPool: reviewedPool,
-  baseVault: poolState.reserveX,
-  quoteVault: poolState.reserveY,
+  baseVault: poolState.myneVault,
+  quoteVault: poolState.solVault,
   admin: payer.publicKey,
 }).instruction();
 const latest = await connection.getLatestBlockhash('finalized');
@@ -153,4 +152,3 @@ assert.equal(confirmation.value.err, null, 'Mainnet activation failed confirmati
 const activeConfig = await program.account.protocolConfig.fetch(config, 'finalized');
 assert.equal(activeConfig.paused, false, 'Protocol did not become active');
 console.log(JSON.stringify({ ...preview, simulationOnly: false, submitted: true, signature }, null, 2));
-

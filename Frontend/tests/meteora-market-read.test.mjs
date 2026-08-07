@@ -4,19 +4,32 @@ import test from 'node:test';
 import { PublicKey } from '@solana/web3.js';
 
 import {
+  decodeMeteoraDammV2Pool,
   decodeMeteoraLbPair,
   decodeMeteoraPoolSnapshot,
   decodeTokenReserve,
+  METEORA_DAMM_V2_POOL_ACCOUNT_LEN,
   METEORA_LB_PAIR_ACCOUNT_LEN,
 } from '../src/chain/swap.js';
 
 const LB_PAIR_DISCRIMINATOR = Uint8Array.from([33, 11, 49, 98, 181, 101, 177, 13]);
 const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const DLMM_PROGRAM = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
+const DAMM_V2_PROGRAM = new PublicKey('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG');
 const WSOL = new PublicKey('So11111111111111111111111111111111111111112');
 const key = (byte) => new PublicKey(Uint8Array.from({ length: 32 }, () => byte));
 const myneMint = key(2);
-const myneVault = key(3);
-const solVault = key(4);
+const poolAddress = key(5);
+const dlmmVault = (mint) => PublicKey.findProgramAddressSync(
+  [poolAddress.toBuffer(), mint.toBuffer()],
+  DLMM_PROGRAM,
+)[0];
+const dammVault = (mint) => PublicKey.findProgramAddressSync(
+  [Buffer.from('token_vault'), mint.toBuffer(), poolAddress.toBuffer()],
+  DAMM_V2_PROGRAM,
+)[0];
+const myneVault = dlmmVault(myneMint);
+const solVault = dlmmVault(WSOL);
 
 const writeKey = (data, offset, value) => data.set(new PublicKey(value).toBytes(), offset);
 
@@ -44,6 +57,39 @@ function lbPair({
   return data;
 }
 
+function writeU128(data, offset, value) {
+  const view = new DataView(data.buffer);
+  const amount = BigInt(value);
+  view.setBigUint64(offset, amount & ((1n << 64n) - 1n), true);
+  view.setBigUint64(offset + 8, amount >> 64n, true);
+}
+
+function dammPool({
+  sqrtPrice = 2n << 64n,
+  status = 0,
+  poolType = 0,
+  activationType = 0,
+  activationPoint = 0n,
+  tokenXMint = myneMint,
+  tokenYMint = WSOL,
+  reserveX = dammVault(tokenXMint),
+  reserveY = dammVault(tokenYMint),
+} = {}) {
+  const data = new Uint8Array(METEORA_DAMM_V2_POOL_ACCOUNT_LEN);
+  const view = new DataView(data.buffer);
+  data.set(Uint8Array.from([241, 154, 109, 4, 17, 177, 109, 188]), 0);
+  writeKey(data, 168, tokenXMint);
+  writeKey(data, 200, tokenYMint);
+  writeKey(data, 232, reserveX);
+  writeKey(data, 264, reserveY);
+  writeU128(data, 456, sqrtPrice);
+  view.setBigUint64(472, activationPoint, true);
+  data[480] = activationType;
+  data[481] = status;
+  data[485] = poolType;
+  return data;
+}
+
 function tokenAccount(mint, amount, { owner = TOKEN_PROGRAM, state = 1, length = 165 } = {}) {
   const data = new Uint8Array(length);
   if (length >= 32) writeKey(data, 0, mint);
@@ -53,6 +99,8 @@ function tokenAccount(mint, amount, { owner = TOKEN_PROGRAM, state = 1, length =
 }
 
 const expected = (overrides = {}) => ({
+  poolAddress,
+  poolProgram: DLMM_PROGRAM,
   myneMint,
   myneVault,
   solVault,
@@ -80,6 +128,52 @@ test('decodes the documented LbPair offsets and active-bin price', () => {
   assert.equal(decoded.reserveX, myneVault.toBase58());
   assert.equal(decoded.reserveY, solVault.toBase58());
   assert.equal(decoded.tokenYPerTokenX, Math.pow(1 + 17 / 10_000, -321));
+});
+
+test('decodes the pinned DAMM v2 Pool layout and Q64.64 price', () => {
+  const decoded = decodeMeteoraDammV2Pool(dammPool({
+    sqrtPrice: 3n << 64n,
+    poolType: 1,
+    activationType: 1,
+    activationPoint: 123n,
+  }));
+  assert.equal(decoded.tokenXMint, myneMint.toBase58());
+  assert.equal(decoded.tokenYMint, WSOL.toBase58());
+  assert.equal(decoded.reserveX, dammVault(myneMint).toBase58());
+  assert.equal(decoded.reserveY, dammVault(WSOL).toBase58());
+  assert.equal(decoded.tokenYPerTokenX, 9);
+  assert.equal(decoded.poolType, 1);
+  assert.equal(decoded.activationType, 1);
+  assert.equal(decoded.activationPoint, 123n);
+});
+
+test('orients both DAMM v2 mint orders to the same MYNE-per-SOL quote', () => {
+  const forwardMyneVault = dammVault(myneMint);
+  const forwardSolVault = dammVault(WSOL);
+  const forward = decodeMeteoraPoolSnapshot({
+    poolData: dammPool(),
+    myneVaultInfo: tokenAccount(myneMint, 5_000n),
+    solVaultInfo: tokenAccount(WSOL, 2_000n),
+  }, expected({
+    poolProgram: DAMM_V2_PROGRAM,
+    myneVault: forwardMyneVault,
+    solVault: forwardSolVault,
+  }));
+  const reverse = decodeMeteoraPoolSnapshot({
+    poolData: dammPool({
+      sqrtPrice: 1n << 63n,
+      tokenXMint: WSOL,
+      tokenYMint: myneMint,
+    }),
+    myneVaultInfo: tokenAccount(myneMint, 5_000n),
+    solVaultInfo: tokenAccount(WSOL, 2_000n),
+  }, expected({
+    poolProgram: DAMM_V2_PROGRAM,
+    myneVault: forwardMyneVault,
+    solVault: forwardSolVault,
+  }));
+  assert.equal(forward.mynePerSol, 0.25);
+  assert.equal(reverse.mynePerSol, 0.25);
 });
 
 test('orients MYNE/WSOL and WSOL/MYNE pools to the same MYNE-per-SOL quote', () => {
@@ -111,6 +205,10 @@ test('rejects malformed lengths, the wrong discriminator, disabled pools and inv
     () => decodeMeteoraLbPair(lbPair({ activeId: 2_147_483_647, binStep: 65_535 })),
     /outside the supported range/,
   );
+  assert.throws(() => decodeMeteoraDammV2Pool(new Uint8Array(1_111)), /unsupported length/);
+  assert.throws(() => decodeMeteoraDammV2Pool(dammPool({ status: 1 })), /not enabled/);
+  assert.throws(() => decodeMeteoraDammV2Pool(dammPool({ poolType: 2 })), /type is unsupported/);
+  assert.throws(() => decodeMeteoraDammV2Pool(dammPool({ sqrtPrice: 0n })), /outside the supported range/);
 });
 
 test('rejects unrelated mints or a reserve key moved from its documented offset', () => {

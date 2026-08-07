@@ -223,6 +223,10 @@ pub enum MyneError {
     MigrationRequiresPause,
     #[msg("The v5 mining pool must have no unclaimed balances before migration")]
     MiningPoolMigrationRequiresEmpty,
+    #[msg("The pre-launch mint migration does not match the one approved recovery path")]
+    InvalidPrelaunchMintMigration,
+    #[msg("The protocol has activity or liabilities and can no longer use the pre-launch mint migration")]
+    PrelaunchStateNotEmpty,
     #[msg("The unclaimed mining-reward share accounting is inconsistent")]
     InvalidMiningPoolAccounting,
     #[msg("The mining reward is below the unclaimed-share precision")]

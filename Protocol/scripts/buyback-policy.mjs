@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 
 export const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const METEORA_DLMM_LABEL = 'Meteora DLMM';
+export const METEORA_DAMM_V2_LABEL = 'Meteora DAMM v2';
+export const METEORA_DLMM_PROGRAM_TEXT = 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo';
+export const METEORA_DAMM_V2_PROGRAM_TEXT = 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG';
 export const OFFICIAL_JUPITER_HOSTS = Object.freeze(['lite-api.jup.ag', 'api.jup.ag']);
 
 export function validateJupiterEndpoint(value, { expectedPath, allowCustom = false } = {}) {
@@ -28,7 +31,24 @@ export function calculateSpend({ balanceLamports, reserveLamports, maxSpendLampo
   };
 }
 
-export function validateDirectMeteoraQuote(quote, { poolAddress, inputLamports, outputMint, maxPriceImpactPct = 5 }) {
+export function meteoraRouteForProgram(poolProgram) {
+  const value = String(poolProgram);
+  if (value === METEORA_DLMM_PROGRAM_TEXT) {
+    return Object.freeze({ program: value, label: METEORA_DLMM_LABEL, kind: 'dlmm' });
+  }
+  if (value === METEORA_DAMM_V2_PROGRAM_TEXT) {
+    return Object.freeze({ program: value, label: METEORA_DAMM_V2_LABEL, kind: 'damm-v2' });
+  }
+  throw new Error(`Unsupported registered Meteora program: ${value}`);
+}
+
+export function validateDirectMeteoraQuote(quote, {
+  poolAddress,
+  inputLamports,
+  outputMint,
+  expectedAmmLabel,
+  maxPriceImpactPct = 5,
+}) {
   assert.equal(quote.inputMint, NATIVE_SOL_MINT, 'Quote input is not native SOL');
   assert.equal(quote.outputMint, outputMint, 'Quote output is not MYNE');
   assert.equal(String(quote.inAmount), String(inputLamports), 'Quote input amount changed unexpectedly');
@@ -36,7 +56,11 @@ export function validateDirectMeteoraQuote(quote, { poolAddress, inputLamports, 
   assert.ok(Array.isArray(quote.routePlan) && quote.routePlan.length === 1, 'Buyback must use one direct route');
   const step = quote.routePlan[0];
   assert.equal(step.swapInfo?.ammKey, poolAddress, 'Quote does not use the registered Meteora pool');
-  assert.equal(step.swapInfo?.label, METEORA_DLMM_LABEL, 'Quote route is not Meteora DLMM');
+  assert.ok(
+    expectedAmmLabel === METEORA_DLMM_LABEL || expectedAmmLabel === METEORA_DAMM_V2_LABEL,
+    'Expected Meteora route label is unsupported',
+  );
+  assert.equal(step.swapInfo?.label, expectedAmmLabel, `Quote route is not ${expectedAmmLabel}`);
   const priceImpactPct = Number(quote.priceImpactPct);
   assert.ok(Number.isFinite(priceImpactPct) && priceImpactPct <= maxPriceImpactPct, `Price impact exceeds ${maxPriceImpactPct}%`);
   return {

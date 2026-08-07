@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   calculateSpend,
+  METEORA_DAMM_V2_LABEL,
+  METEORA_DAMM_V2_PROGRAM_TEXT,
   METEORA_DLMM_LABEL,
+  METEORA_DLMM_PROGRAM_TEXT,
   NATIVE_SOL_MINT,
+  meteoraRouteForProgram,
   validateJupiterEndpoint,
   validateDirectMeteoraQuote,
 } from '../scripts/buyback-policy.mjs';
@@ -57,7 +61,12 @@ test('buyback accepts only a direct route through the registered Meteora pool', 
     outAmount: '123456789',
     priceImpactPct: '0.12',
     routePlan: [{ swapInfo: { ammKey: poolAddress, label: METEORA_DLMM_LABEL } }],
-  }, { poolAddress, inputLamports: 10000000, outputMint: 'Myne111111111111111111111111111111111111111' });
+  }, {
+    poolAddress,
+    inputLamports: 10000000,
+    outputMint: 'Myne111111111111111111111111111111111111111',
+    expectedAmmLabel: METEORA_DLMM_LABEL,
+  });
   assert.equal(checked.outputBaseUnits, '123456789');
   assert.throws(() => validateDirectMeteoraQuote({
     inputMint: NATIVE_SOL_MINT,
@@ -65,5 +74,45 @@ test('buyback accepts only a direct route through the registered Meteora pool', 
     inAmount: '10000000',
     outAmount: '123456789',
     routePlan: [{ swapInfo: { ammKey: 'OtherPool', label: METEORA_DLMM_LABEL } }],
-  }, { poolAddress, inputLamports: 10000000, outputMint: 'Myne111111111111111111111111111111111111111' }));
+  }, {
+    poolAddress,
+    inputLamports: 10000000,
+    outputMint: 'Myne111111111111111111111111111111111111111',
+    expectedAmmLabel: METEORA_DLMM_LABEL,
+  }));
+});
+
+test('buyback binds Jupiter routing to the exact registered Meteora program', () => {
+  assert.deepEqual(meteoraRouteForProgram(METEORA_DLMM_PROGRAM_TEXT), {
+    program: METEORA_DLMM_PROGRAM_TEXT,
+    label: METEORA_DLMM_LABEL,
+    kind: 'dlmm',
+  });
+  assert.deepEqual(meteoraRouteForProgram(METEORA_DAMM_V2_PROGRAM_TEXT), {
+    program: METEORA_DAMM_V2_PROGRAM_TEXT,
+    label: METEORA_DAMM_V2_LABEL,
+    kind: 'damm-v2',
+  });
+  assert.throws(() => meteoraRouteForProgram('11111111111111111111111111111111'), /Unsupported/);
+
+  const quote = {
+    inputMint: NATIVE_SOL_MINT,
+    outputMint: 'Myne111111111111111111111111111111111111111',
+    inAmount: '10000000',
+    outAmount: '123456789',
+    priceImpactPct: '0.12',
+    routePlan: [{ swapInfo: { ammKey: poolAddress, label: METEORA_DAMM_V2_LABEL } }],
+  };
+  assert.doesNotThrow(() => validateDirectMeteoraQuote(quote, {
+    poolAddress,
+    inputLamports: 10000000,
+    outputMint: quote.outputMint,
+    expectedAmmLabel: METEORA_DAMM_V2_LABEL,
+  }));
+  assert.throws(() => validateDirectMeteoraQuote(quote, {
+    poolAddress,
+    inputLamports: 10000000,
+    outputMint: quote.outputMint,
+    expectedAmmLabel: METEORA_DLMM_LABEL,
+  }), /Meteora DLMM/);
 });

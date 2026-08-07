@@ -1230,7 +1230,7 @@ const renderTransparencyAddresses = async () => {
     { group: 'FEE CUSTODY', label: 'Staking rewards vault', address: protocolPdas.stakePool, note: 'Receives the net 7.2% staker allocation in SOL' },
     { group: 'ACCOUNTING', label: 'Mining rewards ledger', address: protocolPdas.miningPool, note: 'Tracks unclaimed MYNE and the 9% passive claim-fee distribution' },
     { group: 'LIQUIDITY', label: 'Liquidity gate', address: protocolPdas.liquidityGate, note: 'Locks Mainnet activation to the verified Meteora MYNE/SOL pool' },
-    { group: 'LIQUIDITY', label: 'Meteora pool', address: gate?.pool, note: 'Official MYNE/WSOL DLMM pool registered on-chain' },
+    { group: 'LIQUIDITY', label: 'Meteora pool', address: gate?.pool, note: 'Official MYNE/WSOL Meteora pool registered and verified on-chain' },
     { group: 'INTEGRATIONS', label: 'Switchboard program', address: config?.randomnessProgram || PROGRAMS.randomness, note: 'Pinned randomness provider program for this deployment' },
   ];
   let previousGroup = '';

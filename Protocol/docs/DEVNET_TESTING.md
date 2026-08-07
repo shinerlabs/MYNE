@@ -25,7 +25,8 @@ pnpm run devnet:register-liquidity
 ```
 
 The registration script is fail-closed if the exact account is absent, is not owned by the
-canonical Meteora DLMM program, or its MYNE/WSOL vault balances are below threshold. It does not
+canonical Meteora DAMM v2 or DLMM program selected for that pool, or its MYNE/WSOL vault balances
+are below threshold. It does not
 create a pool or move funds. Activation and every verified round settlement re-check the exact
 pool, vault addresses, mints and balances before moving the 1% buyback/burn allocation. If the
 account or reserves are invalid, activation or settlement fails closed.

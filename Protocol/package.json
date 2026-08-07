@@ -15,6 +15,7 @@
     "prepare:mainnet-mint": "node scripts/create-mainnet-mint.mjs",
     "prepare:mainnet-metadata": "node scripts/create-mainnet-token-metadata.mjs",
     "initialize:mainnet": "node scripts/mainnet-initialize.mjs",
+    "migrate:mainnet-mint": "node scripts/migrate-mainnet-prelaunch-mint.mjs",
     "mainnet:register-liquidity": "node scripts/mainnet-register-liquidity-gate.mjs",
     "mainnet:activate": "node scripts/mainnet-activate.mjs",
     "mainnet:refund-deployer": "node scripts/refund-mainnet-deployer.mjs",

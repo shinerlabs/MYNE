@@ -128,9 +128,13 @@ test('Mainnet liquidity registration decodes Meteora and is simulation-first', a
   ]);
   assert.match(policy, /LB_PAIR_ACCOUNT_LEN = 904/);
   assert.match(policy, /LB_PAIR_DISCRIMINATOR/);
+  assert.match(policy, /DAMM_V2_POOL_ACCOUNT_LEN = 1_112/);
+  assert.match(policy, /METEORA_DAMM_V2_PROGRAM/);
+  assert.match(policy, /decodeMeteoraDammV2Pool/);
   assert.match(policy, /reserveX/);
   assert.match(policy, /reserveY/);
   assert.match(register, /inspectMeteoraPool/);
+  assert.match(register, /poolState\.poolProgram/);
   assert.match(register, /CONFIRM_METEORA_MYNE_VAULT/);
   assert.match(register, /CONFIRM_METEORA_SOL_VAULT/);
   assert.match(register, /simulateTransaction/);
@@ -140,7 +144,28 @@ test('Mainnet liquidity registration decodes Meteora and is simulation-first', a
   assert.match(activate, /CONFIRM_INDEPENDENT_SECURITY_REVIEW/);
   assert.match(activate, /simulateTransaction/);
   assert.match(activate, /SUBMIT_MAINNET_ACTIVATE/);
+  assert.match(activate, /baseVault: poolState\.myneVault/);
+  assert.match(activate, /quoteVault: poolState\.solVault/);
   assert.match(activate, /activeConfig\.paused, false/);
+});
+
+test('pre-launch mint recovery is single-use, metadata-gated and simulation-first', async () => {
+  const [program, migration] = await Promise.all([
+    readFile(new URL('../programs/myne_protocol/src/lib.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/migrate-mainnet-prelaunch-mint.mjs', import.meta.url), 'utf8'),
+  ]);
+  assert.match(program, /LEGACY_PRELAUNCH_MINT/);
+  assert.match(program, /pub fn migrate_prelaunch_mint/);
+  assert.match(program, /PrelaunchStateNotEmpty/);
+  assert.match(program, /previous_mint\.reload\(\)/);
+  assert.match(program, /PrelaunchMintMigrated/);
+  assert.match(migration, /CONFIRM_DEPRECATE_PREVIOUS_MINT/);
+  assert.match(migration, /fetchMetadataFromSeeds/);
+  assert.match(migration, /TokenStandard\.Fungible/);
+  assert.match(migration, /createSetAuthorityInstruction/);
+  assert.match(migration, /simulateTransaction/);
+  assert.match(migration, /SUBMIT_MAINNET_MINT_MIGRATION !== newMint\.toBase58\(\)/);
+  assert.match(migration, /retiredMint\.mintAuthority, null/);
 });
 
 test('Mainnet deployer refund preserves the reviewed transaction-fee reserve', async () => {

@@ -12,7 +12,7 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import { SOLANA_MAINNET_GENESIS_HASH, SWITCHBOARD_MAINNET_PROGRAM } from './production-network-policy.mjs';
-import { inspectMeteoraPool, METEORA_DLMM_PROGRAM } from './mainnet-liquidity-policy.mjs';
+import { inspectMeteoraPool } from './mainnet-liquidity-policy.mjs';
 
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const COMPUTE_UNIT_LIMIT = 260_000;
@@ -85,7 +85,7 @@ async function verifyGate() {
   const gate = await program.account.liquidityGate.fetch(liquidityGate, 'finalized');
   assert.equal(gate.verified, true, 'Liquidity gate is not verified');
   assert.ok(gate.pool.equals(pool), 'Registered pool differs');
-  assert.ok(gate.poolProgram.equals(METEORA_DLMM_PROGRAM), 'Registered pool program differs');
+  assert.ok(gate.poolProgram.equals(poolState.poolProgram), 'Registered pool program differs');
   assert.ok(gate.myneVault.equals(poolState.myneVault), 'Registered MYNE vault differs');
   assert.ok(gate.solVault.equals(poolState.solVault), 'Registered SOL vault differs');
   assert.equal(gate.minSolLamports.toString(), minSolLamports.toString(), 'Registered SOL minimum differs');
@@ -110,7 +110,7 @@ if (existingGate) {
 const gateInstruction = await program.methods
   .initializeLiquidityGate(
     pool,
-    METEORA_DLMM_PROGRAM,
+    poolState.poolProgram,
     new anchor.BN(minSolLamports.toString()),
     new anchor.BN(minMyneBaseUnits.toString()),
   )
@@ -118,8 +118,8 @@ const gateInstruction = await program.methods
     config,
     liquidityGate,
     pool,
-    baseVault: poolState.reserveX,
-    quoteVault: poolState.reserveY,
+    baseVault: poolState.myneVault,
+    quoteVault: poolState.solVault,
     admin: payer.publicKey,
     systemProgram: SystemProgram.programId,
   })
@@ -151,7 +151,8 @@ const preview = {
   simulationOnly: process.env.SUBMIT_MAINNET_LIQUIDITY_GATE !== pool.toBase58(),
   liquidityGate: liquidityGate.toBase58(),
   pool: pool.toBase58(),
-  poolProgram: METEORA_DLMM_PROGRAM.toBase58(),
+  poolProgram: poolState.poolProgram.toBase58(),
+  poolKind: poolState.poolKind,
   tokenXMint: poolState.tokenXMint.toBase58(),
   tokenYMint: poolState.tokenYMint.toBase58(),
   reserveX: poolState.reserveX.toBase58(),
@@ -186,4 +187,3 @@ const confirmation = await connection.confirmTransaction({
 assert.equal(confirmation.value.err, null, 'Liquidity-gate registration failed confirmation');
 await verifyGate();
 console.log(JSON.stringify({ ...preview, simulationOnly: false, submitted: true, signature }, null, 2));
-

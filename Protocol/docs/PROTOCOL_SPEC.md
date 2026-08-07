@@ -101,14 +101,17 @@ the same tracked balance instead of becoming operator revenue.
 ## Launch liquidity gate
 
 Initialization always leaves the protocol paused. On Mainnet, before the admin can unpause it, a
-separate `LiquidityGate` PDA must be initialized with the exact official Meteora pool address and
-its owner program. The gate records the declared minimum SOL and MYNE thresholds and prevents
+separate `LiquidityGate` PDA must be initialized with the exact official Meteora DAMM v2 or DLMM
+pool address and its owner program. The program parses that pool type's exact discriminator and
+layout, derives its canonical vault PDAs, verifies MYNE/WSOL orientation and active/enabled state,
+and records the declared minimum SOL and MYNE thresholds. This prevents
 miners or other users from substituting a competing pool before emissions begin. Devnet's
 Switchboard provider mode deliberately bypasses this gate so mining and staking can be tested
 without liquidity; the buyback keeper skips swaps until a pool is registered. The `config.paused`
 flag remains the single activation latch: one successful unpause starts rounds, mining, staking,
 referrals, emissions, and buyback accounting together. Mainnet unpause and settlement re-check
-the exact registered pool and vault reserves.
+the exact registered pool and vault reserves. The gate accepts neither arbitrary DEX programs nor
+an unregistered Meteora pool.
 `claim_myne` also respects the pause flag, so an emergency pause cannot leave a token-minting
 escape hatch.
 

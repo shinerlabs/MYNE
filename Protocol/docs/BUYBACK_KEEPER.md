@@ -16,7 +16,8 @@ pool-specific swap accounts, price movement, and slippage must be handled by the
 3. Read the latest settled round and reconcile the emitted 1% allocation against that round's
    gross deployment and `RoundFeesDistributed` evidence.
 4. Preserve a SOL reserve and cap each buyback amount.
-5. Request a direct Jupiter quote restricted to `Meteora DLMM`.
+5. Select `Meteora DAMM v2` or `Meteora DLMM` from the exact pool program stored in the on-chain
+   gate, then request a direct Jupiter quote restricted to that one venue.
 6. Reject the quote unless it uses exactly the registered pool address, native SOL as input,
    and MYNE as output.
 7. Decompile the serialized swap transaction, require the buyback wallet as its only signer, reject
@@ -29,7 +30,8 @@ pool-specific swap accounts, price movement, and slippage must be handled by the
    both signatures. Partial failures can safely resume without spending a completed round twice.
 
 Jupiter is used only as the transaction/quote builder; the route is constrained to the registered
-Meteora DLMM pool. This avoids embedding a fragile pool-specific CPI in the protocol while still
+Meteora pool and exact registered pool program. This avoids embedding a fragile pool-specific CPI
+in the protocol while still
 ensuring buybacks cannot silently route through another venue.
 
 ## Safety defaults

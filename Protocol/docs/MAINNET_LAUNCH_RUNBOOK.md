@@ -100,11 +100,12 @@ CLI version and command syntax before funding a Mainnet deployment.
 
 ## 3. Deploy while inactive
 
-Deploy the recorded Docker-verified version-6 `.so` to the fixed program ID. Verify ProgramData,
-upgrade authority and deployed bytecode hash. Create the canonical legacy SPL mint with 9 decimals,
-the deployer temporarily acting as mint authority and no freeze authority. Mint exactly 100 MYNE to
-the reviewed launch account. Do not transfer mint authority yet: the Metaplex metadata instruction
-must be signed by the current mint authority.
+Deploy or upgrade to the recorded Docker-verified version-6 `.so` at the fixed program ID. Verify
+ProgramData, upgrade authority and deployed bytecode hash. Keep the existing pre-launch protocol
+paused. Create a fresh legacy SPL mint with 9 decimals, the reviewed admin temporarily acting as
+mint authority and no freeze authority. Mint exactly 100 MYNE to the configured admin-fee/liquidity
+wallet. Do not transfer mint authority yet: the Metaplex metadata instruction must be signed by the
+current mint authority.
 
 Generate the mint keypair outside the repository and record its public address. Run the guarded
 atomic mint preparation first without `SUBMIT_MAINNET_MINT`; it verifies the Mainnet genesis hash,
@@ -153,10 +154,32 @@ symbol, URI, update authority and `TokenStandard::Fungible`. Metadata update aut
 from SPL mint authority; retain it only until all permanent URLs are independently verified, then
 make a separate documented immutability decision.
 
-After metadata exists, transfer SPL mint authority to the config PDA and initialize paused with
-Switchboard Mainnet and the three reviewed role addresses. Fetch the mint and config back: verify
-exactly 100 MYNE supply, 9 decimals, no freeze authority, config PDA mint authority, version 6 and
-every configured address before proceeding. This read-back is a hard stop: the production-feature
+For the existing abandoned pre-launch configuration, do not initialize a second config. Instead,
+run the guarded one-time migration first without `SUBMIT_MAINNET_MINT_MIGRATION`. It rechecks the
+canonical Metaplex PDA, name `MYNE`, symbol `MYNE`, URI, fungible token standard and zero seller fee;
+proves mining and staking are unused; verifies all 100 MYNE are in the configured admin-fee wallet;
+and simulates one atomic transaction that transfers the new mint authority to the config PDA,
+revokes the old mint authority and records the old/new pair:
+
+```bash
+MAINNET_RPC_URL=<reviewed Mainnet RPC> \
+ANCHOR_WALLET=<reviewed protocol-admin keypair path> \
+MAINNET_MINT_ADDRESS=<reviewed fresh mint> \
+MAINNET_LIQUIDITY_WALLET=<configured admin-fee/liquidity wallet> \
+CONFIRM_SOLANA_GENESIS_HASH=5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d \
+CONFIRM_MAINNET_CONFIG=<printed config PDA> \
+CONFIRM_PRELAUNCH_MINT_MIGRATION=<printed migration PDA> \
+CONFIRM_DEPRECATE_PREVIOUS_MINT=2NtsuCtsXCU1f5dwGcNPyBLnKx5tRHsCFfUt6py3dwWS \
+CONFIRM_MAINNET_MINT=<reviewed fresh mint> \
+CONFIRM_LIQUIDITY_DESTINATION=<configured admin-fee/liquidity wallet> \
+pnpm migrate:mainnet-mint
+```
+
+Review the entire simulation and only then repeat with
+`SUBMIT_MAINNET_MINT_MIGRATION=<reviewed fresh mint>`. Fetch both mints, the migration PDA and config
+back. Verify the retired mint authority is `None`, the new mint authority/config mint are the config
+PDA, the supply remains exactly 100 MYNE, the protocol remains paused, and the old CA is publicly
+labelled deprecated rather than hidden. This read-back is a hard stop: the production-feature
 binary rejects every randomness mode except Switchboard Mainnet and always enforces the production liquidity gate.
 Production keepers independently refuse a cluster/provider mismatch, and the administrator must
 still refuse to proceed on any disagreement.
@@ -216,12 +239,18 @@ in the production secret manager and add a separately reviewed post-cooldown `cl
 operation; never
 write their private keys to the repository or an ordinary keeper journal.
 
-## 5. Create and register the official Meteora pool
+## 5. Create and register the selected official Meteora pool
 
-Create the MYNE/WSOL DLMM pool. Independently verify the Meteora program owner, pool address, both reserve PDAs, mint order and reserve thresholds. Register that exact gate while paused. The gate is immutable for this initialization and is checked again at every settlement.
+Create either a MYNE/WSOL DAMM v2 pool or a MYNE/WSOL DLMM pool through Meteora. Independently
+verify the exact official owner program, pool address, discriminator/layout, both vault PDAs, mint
+order, activation state and reserve thresholds. Register that exact gate while paused. The gate is
+immutable for this initialization and is checked again at every settlement. “Any Meteora pool”
+means either supported official pool type supplied for review; it never means an arbitrary program
+or an unverified pool address.
 
 Run `pnpm mainnet:register-liquidity` first without `SUBMIT_MAINNET_LIQUIDITY_GATE`. The guarded
-script decodes the 904-byte Meteora LbPair directly on-chain, derives both reserve accounts,
+script detects the exact official owner, decodes either the 1,112-byte DAMM v2 Pool or 904-byte DLMM
+LbPair directly on-chain, derives both vault accounts,
 verifies the MYNE/WSOL mint order and reserve balances, simulates the transaction and prints the
 exact submission confirmation. Repeat only after independently reviewing every printed address and
 threshold.
@@ -240,7 +269,7 @@ authorize one tiny direct-pool canary. Verify swap and burn signatures appear in
 ## 7. Activate once and observe one complete round
 
 Only after all gates pass, run `pnpm mainnet:activate` without its submission flag. The activation
-script repeats the on-chain LbPair/reserve checks, simulates `set_paused(false)`, and requires exact
+script repeats the exact DAMM v2/DLMM pool and vault checks, simulates `set_paused(false)`, and requires exact
 acknowledgements for production service health and the independent security review. Repeat with the
 printed `SUBMIT_MAINNET_ACTIVATE` value only when those statements are true. Save the config
 snapshot and activation signature. Observe one complete low-volume round through:

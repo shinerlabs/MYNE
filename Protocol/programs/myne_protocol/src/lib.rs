@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke, program_option::COption, system_instruction};
+use anchor_spl::token::{self as legacy_token, SetAuthority};
 use anchor_spl::token_interface::{
     self, Burn, Mint, MintTo, TokenAccount, TokenInterface, TransferChecked,
 };
@@ -16,6 +17,7 @@ pub const CONFIG_SEED: &[u8] = b"config";
 pub const MINING_POOL_SEED: &[u8] = b"mining_pool";
 pub const STAKE_POOL_SEED: &[u8] = b"stake_pool";
 pub const LIQUIDITY_GATE_SEED: &[u8] = b"liquidity_gate";
+pub const PRELAUNCH_MINT_MIGRATION_SEED: &[u8] = b"prelaunch_mint_migration";
 pub const MINER_SEED: &[u8] = b"miner";
 pub const STAKE_POSITION_SEED: &[u8] = b"stake_position";
 pub const ROUND_SEED: &[u8] = b"round";
@@ -56,14 +58,45 @@ pub const SWITCHBOARD_DEVNET_PROGRAM: Pubkey =
     pubkey!("Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2");
 pub const SWITCHBOARD_MAINNET_PROGRAM: Pubkey =
     pubkey!("SBondMDrcV3K4kxZR1HNVT7osZxAHVHgYXL5Ze1oMUv");
+/// The abandoned pre-launch mint is pinned in the production artifact so the
+/// one-time migration cannot be reused to replace a live MYNE market later.
+pub const LEGACY_PRELAUNCH_MINT: Pubkey = pubkey!("2NtsuCtsXCU1f5dwGcNPyBLnKx5tRHsCFfUt6py3dwWS");
 /// Meteora's canonical DLMM program. Mainnet/devnet activation must use this
 /// program; accepting an arbitrary owner would allow an unrelated account to
 /// satisfy the liquidity gate.
 pub const METEORA_DLMM_PROGRAM: Pubkey = pubkey!("LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo");
+/// Meteora's canonical DAMM v2 constant-product program. The gate supports
+/// either this program or DLMM, while rejecting every caller-supplied owner.
+pub const METEORA_DAMM_V2_PROGRAM: Pubkey = pubkey!("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
 /// Anchor account discriminator for Meteora DLMM's `LbPair` account. Owner
 /// validation alone is insufficient because the DLMM program owns several
 /// unrelated account types.
 const METEORA_LB_PAIR_DISCRIMINATOR: [u8; 8] = [33, 11, 49, 98, 181, 101, 177, 13];
+const METEORA_LB_PAIR_SIZE: usize = 904;
+const METEORA_LB_PAIR_STATUS_OFFSET: usize = 82;
+const METEORA_LB_PAIR_ACTIVATION_TYPE_OFFSET: usize = 86;
+const METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET: usize = 88;
+const METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET: usize = 120;
+const METEORA_LB_PAIR_RESERVE_X_OFFSET: usize = 152;
+const METEORA_LB_PAIR_RESERVE_Y_OFFSET: usize = 184;
+const METEORA_LB_PAIR_ACTIVATION_POINT_OFFSET: usize = 816;
+const METEORA_LB_PAIR_ENABLED: u8 = 0;
+/// Anchor discriminator for DAMM v2's zero-copy `Pool` account. Layout pinned
+/// to MeteoraAg/damm-v2 commit bdd8a1e355f484b3cff131578a662c560b97b72f.
+const METEORA_DAMM_V2_POOL_DISCRIMINATOR: [u8; 8] = [241, 154, 109, 4, 17, 177, 109, 188];
+const METEORA_DAMM_V2_POOL_SIZE: usize = 1_112;
+const METEORA_DAMM_TOKEN_A_MINT_OFFSET: usize = 168;
+const METEORA_DAMM_TOKEN_B_MINT_OFFSET: usize = 200;
+const METEORA_DAMM_TOKEN_A_VAULT_OFFSET: usize = 232;
+const METEORA_DAMM_TOKEN_B_VAULT_OFFSET: usize = 264;
+const METEORA_DAMM_ACTIVATION_POINT_OFFSET: usize = 472;
+const METEORA_DAMM_ACTIVATION_TYPE_OFFSET: usize = 480;
+const METEORA_DAMM_POOL_STATUS_OFFSET: usize = 481;
+const METEORA_DAMM_POOL_TYPE_OFFSET: usize = 485;
+const METEORA_DAMM_POOL_ENABLED: u8 = 0;
+const METEORA_DAMM_PERMISSIONLESS_POOL: u8 = 0;
+const METEORA_DAMM_CUSTOMIZABLE_POOL: u8 = 1;
+const METEORA_DAMM_TOKEN_VAULT_SEED: &[u8] = b"token_vault";
 pub const WRAPPED_SOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
 pub const ASSOCIATED_TOKEN_PROGRAM: Pubkey =
     pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
@@ -210,9 +243,8 @@ pub mod myne_protocol {
         require!(min_sol_lamports > 0, MyneError::InvalidLiquidityPool);
         require!(min_myne_base_units > 0, MyneError::InvalidLiquidityPool);
         if ctx.accounts.config.randomness_program != Pubkey::default() {
-            require_keys_eq!(
-                pool_program,
-                METEORA_DLMM_PROGRAM,
+            require!(
+                is_supported_meteora_program(pool_program),
                 MyneError::InvalidLiquidityPool
             );
             let base_vault = ctx
@@ -246,8 +278,6 @@ pub mod myne_protocol {
                 myne_vault.amount >= min_myne_base_units && sol_vault.amount >= min_sol_lamports,
                 MyneError::InvalidLiquidityPool
             );
-            assert_meteora_reserve(pool, myne_vault.key(), myne_vault.mint)?;
-            assert_meteora_reserve(pool, sol_vault.key(), sol_vault.mint)?;
         }
         require!(
             ctx.accounts.pool.key() == pool,
@@ -263,7 +293,33 @@ pub mod myne_protocol {
             MyneError::InvalidLiquidityPool
         );
         if ctx.accounts.config.randomness_program != Pubkey::default() {
-            assert_meteora_lb_pair(&ctx.accounts.pool.to_account_info())?;
+            let base_vault = ctx
+                .accounts
+                .base_vault
+                .as_ref()
+                .ok_or(MyneError::InvalidLiquidityPool)?;
+            let quote_vault = ctx
+                .accounts
+                .quote_vault
+                .as_ref()
+                .ok_or(MyneError::InvalidLiquidityPool)?;
+            let myne_vault = if base_vault.mint == ctx.accounts.config.mint {
+                base_vault
+            } else {
+                quote_vault
+            };
+            let sol_vault = if base_vault.mint == WRAPPED_SOL_MINT {
+                base_vault
+            } else {
+                quote_vault
+            };
+            assert_meteora_pool_accounts(
+                pool_program,
+                &ctx.accounts.pool.to_account_info(),
+                ctx.accounts.config.mint,
+                myne_vault.key(),
+                sol_vault.key(),
+            )?;
         }
 
         let gate = &mut ctx.accounts.liquidity_gate;
@@ -291,6 +347,140 @@ pub mod myne_protocol {
             gate.sol_vault = Pubkey::default();
         }
         gate.verified = true;
+        Ok(())
+    }
+
+    /// One-time recovery from the abandoned pre-launch mint. This instruction
+    /// is intentionally stricter than a general mint-rotation facility: it
+    /// requires an entirely unused, paused protocol, a fresh 100-MYNE legacy
+    /// SPL mint already controlled by the config PDA, and the complete supply
+    /// in the configured admin/liquidity wallet. The old mint authority is
+    /// revoked atomically before the config starts accepting the new mint.
+    pub fn migrate_prelaunch_mint(ctx: Context<MigratePrelaunchMint>) -> Result<()> {
+        require!(
+            ctx.accounts.config.paused,
+            MyneError::MigrationRequiresPause
+        );
+        require_eq!(
+            ctx.accounts.config.version,
+            CURRENT_VERSION,
+            MyneError::ProtocolUpgradeRequired
+        );
+        #[cfg(feature = "production")]
+        require_keys_eq!(
+            ctx.accounts.previous_mint.key(),
+            LEGACY_PRELAUNCH_MINT,
+            MyneError::InvalidPrelaunchMintMigration
+        );
+        require_keys_eq!(
+            ctx.accounts.config.mint,
+            ctx.accounts.previous_mint.key(),
+            MyneError::InvalidPrelaunchMintMigration
+        );
+        require_keys_neq!(
+            ctx.accounts.previous_mint.key(),
+            ctx.accounts.new_mint.key(),
+            MyneError::InvalidPrelaunchMintMigration
+        );
+        require_keys_eq!(
+            ctx.accounts.token_program.key(),
+            anchor_spl::token::ID,
+            MyneError::InvalidTokenProgram
+        );
+        require!(
+            ctx.accounts.previous_mint.decimals == MYNE_DECIMALS
+                && ctx.accounts.new_mint.decimals == MYNE_DECIMALS,
+            MyneError::InvalidMintDecimals
+        );
+        require!(
+            ctx.accounts.previous_mint.mint_authority == COption::Some(ctx.accounts.config.key())
+                && ctx.accounts.new_mint.mint_authority == COption::Some(ctx.accounts.config.key()),
+            MyneError::InvalidMintAuthority
+        );
+        require!(
+            ctx.accounts.previous_mint.freeze_authority == COption::None
+                && ctx.accounts.new_mint.freeze_authority == COption::None,
+            MyneError::InvalidFreezeAuthority
+        );
+        require!(
+            ctx.accounts.previous_mint.supply > 0
+                && ctx.accounts.previous_mint.supply <= GENESIS_BASE_UNITS
+                && ctx.accounts.new_mint.supply == GENESIS_BASE_UNITS,
+            MyneError::InvalidSupply
+        );
+        require!(
+            ctx.accounts.config.total_emitted_base_units == GENESIS_BASE_UNITS
+                && ctx.accounts.config.virtual_burn_base_units == 0
+                && ctx.accounts.config.motherlode_base_units == 0
+                && ctx.accounts.config.motherlode_lamports == 0,
+            MyneError::PrelaunchStateNotEmpty
+        );
+        require!(
+            ctx.accounts.mining_pool.total_unclaimed == 0
+                && ctx.accounts.mining_pool.reward_per_unclaimed == 0
+                && ctx.accounts.mining_pool.undistributed_base_units == 0,
+            MyneError::PrelaunchStateNotEmpty
+        );
+        require!(
+            ctx.accounts.stake_pool.active_stakers == 0
+                && ctx.accounts.stake_pool.total_standard == 0
+                && ctx.accounts.stake_pool.total_burn == 0
+                && ctx.accounts.stake_pool.total_weight == 0
+                && ctx.accounts.stake_pool.reward_per_weight == 0
+                && ctx.accounts.stake_pool.undistributed_lamports == 0
+                && ctx.accounts.stake_pool.total_funded_lamports == 0
+                && ctx.accounts.stake_pool.total_claimed_lamports == 0,
+            MyneError::PrelaunchStateNotEmpty
+        );
+        assert_canonical_token_account(
+            ctx.accounts.liquidity_tokens.key(),
+            ctx.accounts.config.admin_fee_wallet,
+            ctx.accounts.new_mint.key(),
+            ctx.accounts.token_program.key(),
+            MyneError::InvalidFeeDestination,
+        )?;
+        require!(
+            ctx.accounts.liquidity_tokens.amount == GENESIS_BASE_UNITS,
+            MyneError::InvalidSupply
+        );
+
+        let previous_mint = ctx.accounts.previous_mint.key();
+        let new_mint = ctx.accounts.new_mint.key();
+        let config_seeds: &[&[u8]] = &[CONFIG_SEED, &[ctx.accounts.config.bump]];
+        let signer_seeds = &[config_seeds];
+        legacy_token::set_authority(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.key(),
+                SetAuthority {
+                    current_authority: ctx.accounts.config.to_account_info(),
+                    account_or_mint: ctx.accounts.previous_mint.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            anchor_spl::token::spl_token::instruction::AuthorityType::MintTokens,
+            None,
+        )?;
+        ctx.accounts.previous_mint.reload()?;
+        require!(
+            ctx.accounts.previous_mint.mint_authority == COption::None,
+            MyneError::InvalidMintAuthority
+        );
+
+        ctx.accounts.config.mint = new_mint;
+        ctx.accounts.config.total_emitted_base_units = GENESIS_BASE_UNITS;
+        let migration = &mut ctx.accounts.migration;
+        migration.bump = ctx.bumps.migration;
+        migration.previous_mint = previous_mint;
+        migration.new_mint = new_mint;
+        migration.migrated_at = Clock::get()?.unix_timestamp;
+
+        emit!(PrelaunchMintMigrated {
+            previous_mint,
+            new_mint,
+            liquidity_owner: ctx.accounts.config.admin_fee_wallet,
+            liquidity_token_account: ctx.accounts.liquidity_tokens.key(),
+            genesis_base_units: GENESIS_BASE_UNITS,
+        });
         Ok(())
     }
 
@@ -2239,12 +2429,10 @@ fn assert_liquidity_pool(
         MyneError::InvalidLiquidityPool
     );
     if config.randomness_program != Pubkey::default() {
-        require_keys_eq!(
-            gate.pool_program,
-            METEORA_DLMM_PROGRAM,
+        require!(
+            is_supported_meteora_program(gate.pool_program),
             MyneError::InvalidLiquidityPool
         );
-        assert_meteora_lb_pair(pool)?;
         let base_vault = base_vault.ok_or(MyneError::InvalidLiquidityPool)?;
         let quote_vault = quote_vault.ok_or(MyneError::InvalidLiquidityPool)?;
         require_keys_eq!(
@@ -2267,8 +2455,13 @@ fn assert_liquidity_pool(
             WRAPPED_SOL_MINT,
             MyneError::InvalidLiquidityPool
         );
-        assert_meteora_reserve(gate.pool, base_vault.key(), base_vault.mint)?;
-        assert_meteora_reserve(gate.pool, quote_vault.key(), quote_vault.mint)?;
+        assert_meteora_pool_accounts(
+            gate.pool_program,
+            pool,
+            config.mint,
+            base_vault.key(),
+            quote_vault.key(),
+        )?;
         require!(
             base_vault.amount >= gate.min_myne_base_units
                 && quote_vault.amount >= gate.min_sol_lamports,
@@ -2278,33 +2471,230 @@ fn assert_liquidity_pool(
     Ok(())
 }
 
-fn assert_meteora_lb_pair(pool: &AccountInfo<'_>) -> Result<()> {
+fn is_supported_meteora_program(program: Pubkey) -> bool {
+    program == METEORA_DLMM_PROGRAM || program == METEORA_DAMM_V2_PROGRAM
+}
+
+fn assert_meteora_pool_accounts(
+    pool_program: Pubkey,
+    pool: &AccountInfo<'_>,
+    myne_mint: Pubkey,
+    myne_vault: Pubkey,
+    sol_vault: Pubkey,
+) -> Result<()> {
+    require_keys_eq!(*pool.owner, pool_program, MyneError::InvalidLiquidityPool);
+    if pool_program == METEORA_DLMM_PROGRAM {
+        let data = pool
+            .try_borrow_data()
+            .map_err(|_| error!(MyneError::InvalidLiquidityPool))?;
+        let state = parse_meteora_lb_pair(&data)?;
+        require!(
+            (state.token_x_mint == myne_mint && state.token_y_mint == WRAPPED_SOL_MINT)
+                || (state.token_y_mint == myne_mint && state.token_x_mint == WRAPPED_SOL_MINT),
+            MyneError::InvalidLiquidityPool
+        );
+        let expected_myne_vault = if state.token_x_mint == myne_mint {
+            state.reserve_x
+        } else {
+            state.reserve_y
+        };
+        let expected_sol_vault = if state.token_x_mint == WRAPPED_SOL_MINT {
+            state.reserve_x
+        } else {
+            state.reserve_y
+        };
+        require_keys_eq!(
+            myne_vault,
+            expected_myne_vault,
+            MyneError::InvalidLiquidityPool
+        );
+        require_keys_eq!(
+            sol_vault,
+            expected_sol_vault,
+            MyneError::InvalidLiquidityPool
+        );
+        require!(
+            state.status == METEORA_LB_PAIR_ENABLED,
+            MyneError::InvalidLiquidityPool
+        );
+        if state.activation_point > 0 {
+            let clock = Clock::get()?;
+            let current_point = match state.activation_type {
+                0 => clock.slot,
+                1 => u64::try_from(clock.unix_timestamp)
+                    .map_err(|_| error!(MyneError::InvalidLiquidityPool))?,
+                _ => return err!(MyneError::InvalidLiquidityPool),
+            };
+            require!(
+                current_point >= state.activation_point,
+                MyneError::InvalidLiquidityPool
+            );
+        }
+        assert_meteora_reserve(pool_program, pool.key(), myne_vault, myne_mint)?;
+        assert_meteora_reserve(pool_program, pool.key(), sol_vault, WRAPPED_SOL_MINT)?;
+        return Ok(());
+    }
     require_keys_eq!(
-        *pool.owner,
-        METEORA_DLMM_PROGRAM,
+        pool_program,
+        METEORA_DAMM_V2_PROGRAM,
         MyneError::InvalidLiquidityPool
     );
     let data = pool
         .try_borrow_data()
         .map_err(|_| error!(MyneError::InvalidLiquidityPool))?;
+    let state = parse_meteora_damm_v2_pool(&data)?;
     require!(
-        has_meteora_lb_pair_discriminator(&data),
+        (state.token_a_mint == myne_mint && state.token_b_mint == WRAPPED_SOL_MINT)
+            || (state.token_b_mint == myne_mint && state.token_a_mint == WRAPPED_SOL_MINT),
+        MyneError::InvalidLiquidityPool
+    );
+    let expected_myne_vault = if state.token_a_mint == myne_mint {
+        state.token_a_vault
+    } else {
+        state.token_b_vault
+    };
+    let expected_sol_vault = if state.token_a_mint == WRAPPED_SOL_MINT {
+        state.token_a_vault
+    } else {
+        state.token_b_vault
+    };
+    require_keys_eq!(
+        myne_vault,
+        expected_myne_vault,
+        MyneError::InvalidLiquidityPool
+    );
+    require_keys_eq!(
+        sol_vault,
+        expected_sol_vault,
+        MyneError::InvalidLiquidityPool
+    );
+    assert_meteora_reserve(pool_program, pool.key(), myne_vault, myne_mint)?;
+    assert_meteora_reserve(pool_program, pool.key(), sol_vault, WRAPPED_SOL_MINT)?;
+    require!(
+        state.pool_status == METEORA_DAMM_POOL_ENABLED,
+        MyneError::InvalidLiquidityPool
+    );
+    require!(
+        state.pool_type == METEORA_DAMM_PERMISSIONLESS_POOL
+            || state.pool_type == METEORA_DAMM_CUSTOMIZABLE_POOL,
+        MyneError::InvalidLiquidityPool
+    );
+    let clock = Clock::get()?;
+    let current_point = match state.activation_type {
+        0 => clock.slot,
+        1 => u64::try_from(clock.unix_timestamp)
+            .map_err(|_| error!(MyneError::InvalidLiquidityPool))?,
+        _ => return err!(MyneError::InvalidLiquidityPool),
+    };
+    require!(
+        current_point >= state.activation_point,
         MyneError::InvalidLiquidityPool
     );
     Ok(())
 }
 
-fn has_meteora_lb_pair_discriminator(data: &[u8]) -> bool {
-    data.len() >= METEORA_LB_PAIR_DISCRIMINATOR.len()
-        && data[..METEORA_LB_PAIR_DISCRIMINATOR.len()] == METEORA_LB_PAIR_DISCRIMINATOR
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MeteoraDammV2PoolState {
+    token_a_mint: Pubkey,
+    token_b_mint: Pubkey,
+    token_a_vault: Pubkey,
+    token_b_vault: Pubkey,
+    activation_point: u64,
+    activation_type: u8,
+    pool_status: u8,
+    pool_type: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MeteoraLbPairState {
+    token_x_mint: Pubkey,
+    token_y_mint: Pubkey,
+    reserve_x: Pubkey,
+    reserve_y: Pubkey,
+    status: u8,
+    activation_type: u8,
+    activation_point: u64,
+}
+
+fn parse_meteora_lb_pair(data: &[u8]) -> Result<MeteoraLbPairState> {
+    require!(
+        data.len() == METEORA_LB_PAIR_SIZE
+            && data[..METEORA_LB_PAIR_DISCRIMINATOR.len()] == METEORA_LB_PAIR_DISCRIMINATOR,
+        MyneError::InvalidLiquidityPool
+    );
+    Ok(MeteoraLbPairState {
+        token_x_mint: read_pubkey(data, METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET)?,
+        token_y_mint: read_pubkey(data, METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET)?,
+        reserve_x: read_pubkey(data, METEORA_LB_PAIR_RESERVE_X_OFFSET)?,
+        reserve_y: read_pubkey(data, METEORA_LB_PAIR_RESERVE_Y_OFFSET)?,
+        status: *data
+            .get(METEORA_LB_PAIR_STATUS_OFFSET)
+            .ok_or(MyneError::InvalidLiquidityPool)?,
+        activation_type: *data
+            .get(METEORA_LB_PAIR_ACTIVATION_TYPE_OFFSET)
+            .ok_or(MyneError::InvalidLiquidityPool)?,
+        activation_point: read_u64(data, METEORA_LB_PAIR_ACTIVATION_POINT_OFFSET)?,
+    })
+}
+
+fn parse_meteora_damm_v2_pool(data: &[u8]) -> Result<MeteoraDammV2PoolState> {
+    require!(
+        data.len() == METEORA_DAMM_V2_POOL_SIZE
+            && data[..METEORA_DAMM_V2_POOL_DISCRIMINATOR.len()]
+                == METEORA_DAMM_V2_POOL_DISCRIMINATOR,
+        MyneError::InvalidLiquidityPool
+    );
+    Ok(MeteoraDammV2PoolState {
+        token_a_mint: read_pubkey(data, METEORA_DAMM_TOKEN_A_MINT_OFFSET)?,
+        token_b_mint: read_pubkey(data, METEORA_DAMM_TOKEN_B_MINT_OFFSET)?,
+        token_a_vault: read_pubkey(data, METEORA_DAMM_TOKEN_A_VAULT_OFFSET)?,
+        token_b_vault: read_pubkey(data, METEORA_DAMM_TOKEN_B_VAULT_OFFSET)?,
+        activation_point: read_u64(data, METEORA_DAMM_ACTIVATION_POINT_OFFSET)?,
+        activation_type: *data
+            .get(METEORA_DAMM_ACTIVATION_TYPE_OFFSET)
+            .ok_or(MyneError::InvalidLiquidityPool)?,
+        pool_status: *data
+            .get(METEORA_DAMM_POOL_STATUS_OFFSET)
+            .ok_or(MyneError::InvalidLiquidityPool)?,
+        pool_type: *data
+            .get(METEORA_DAMM_POOL_TYPE_OFFSET)
+            .ok_or(MyneError::InvalidLiquidityPool)?,
+    })
+}
+
+fn read_pubkey(data: &[u8], offset: usize) -> Result<Pubkey> {
+    let bytes: [u8; 32] = data
+        .get(offset..offset + 32)
+        .ok_or(MyneError::InvalidLiquidityPool)?
+        .try_into()
+        .map_err(|_| error!(MyneError::InvalidLiquidityPool))?;
+    Ok(Pubkey::new_from_array(bytes))
+}
+
+fn read_u64(data: &[u8], offset: usize) -> Result<u64> {
+    let bytes: [u8; 8] = data
+        .get(offset..offset + 8)
+        .ok_or(MyneError::InvalidLiquidityPool)?
+        .try_into()
+        .map_err(|_| error!(MyneError::InvalidLiquidityPool))?;
+    Ok(u64::from_le_bytes(bytes))
 }
 
 /// Meteora DLMM reserve accounts are PDAs with seeds `[lb_pair, token_mint]`.
 /// Binding both reserve addresses prevents an unrelated funded token account
 /// from being paired with a genuine Meteora-owned pool account.
-fn assert_meteora_reserve(pool: Pubkey, reserve: Pubkey, mint: Pubkey) -> Result<()> {
-    let (expected, _) =
-        Pubkey::find_program_address(&[pool.as_ref(), mint.as_ref()], &METEORA_DLMM_PROGRAM);
+fn assert_meteora_reserve(
+    pool_program: Pubkey,
+    pool: Pubkey,
+    reserve: Pubkey,
+    mint: Pubkey,
+) -> Result<()> {
+    let seeds: &[&[u8]] = if pool_program == METEORA_DAMM_V2_PROGRAM {
+        &[METEORA_DAMM_TOKEN_VAULT_SEED, mint.as_ref(), pool.as_ref()]
+    } else {
+        &[pool.as_ref(), mint.as_ref()]
+    };
+    let (expected, _) = Pubkey::find_program_address(seeds, &pool_program);
     require_keys_eq!(reserve, expected, MyneError::InvalidLiquidityPool);
     Ok(())
 }
@@ -2343,14 +2733,23 @@ fn assert_canonical_token_account(
 mod motherlode_tests {
     use super::{
         assert_operational_roles_distinct, assert_randomness_program_allowed_for_build,
-        checked_bps, distribute_mining_rewards, has_meteora_lb_pair_discriminator,
+        checked_bps, distribute_mining_rewards, is_supported_meteora_program,
         liquidity_gate_required, max_supply_base_units, mining_share_value,
         mining_shares_for_credit, motherlode_hit, motherlode_pays_round, mul_div, mul_div_u64_u128,
-        proportional_interval_share, round_can_open_after_emission,
-        stake_reward_increment_and_remainder, switchboard_randomness_is_uncommitted,
-        BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER, METEORA_LB_PAIR_DISCRIMINATOR,
-        MINING_PROTOCOL_FEE_BPS, MINING_SHARE_SCALE, MOTHERLODE_ODDS, REWARD_SCALE,
-        SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
+        parse_meteora_damm_v2_pool, parse_meteora_lb_pair, proportional_interval_share,
+        round_can_open_after_emission, stake_reward_increment_and_remainder,
+        switchboard_randomness_is_uncommitted, BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER,
+        METEORA_DAMM_ACTIVATION_POINT_OFFSET, METEORA_DAMM_ACTIVATION_TYPE_OFFSET,
+        METEORA_DAMM_POOL_STATUS_OFFSET, METEORA_DAMM_POOL_TYPE_OFFSET,
+        METEORA_DAMM_TOKEN_A_MINT_OFFSET, METEORA_DAMM_TOKEN_A_VAULT_OFFSET,
+        METEORA_DAMM_TOKEN_B_MINT_OFFSET, METEORA_DAMM_TOKEN_B_VAULT_OFFSET,
+        METEORA_DAMM_V2_POOL_DISCRIMINATOR, METEORA_DAMM_V2_POOL_SIZE, METEORA_DAMM_V2_PROGRAM,
+        METEORA_DLMM_PROGRAM, METEORA_LB_PAIR_ACTIVATION_POINT_OFFSET,
+        METEORA_LB_PAIR_ACTIVATION_TYPE_OFFSET, METEORA_LB_PAIR_DISCRIMINATOR,
+        METEORA_LB_PAIR_RESERVE_X_OFFSET, METEORA_LB_PAIR_RESERVE_Y_OFFSET, METEORA_LB_PAIR_SIZE,
+        METEORA_LB_PAIR_STATUS_OFFSET, METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET,
+        METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET, MINING_PROTOCOL_FEE_BPS, MINING_SHARE_SCALE,
+        MOTHERLODE_ODDS, REWARD_SCALE, SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
     };
     use super::{is_fresh_switchboard_commit, SwitchboardRandomness};
     use crate::state::MiningPool;
@@ -2358,13 +2757,77 @@ mod motherlode_tests {
 
     #[test]
     fn meteora_gate_accepts_only_the_lb_pair_account_discriminator() {
-        let mut valid = METEORA_LB_PAIR_DISCRIMINATOR.to_vec();
-        valid.extend_from_slice(&[0; 32]);
-        assert!(has_meteora_lb_pair_discriminator(&valid));
-        assert!(!has_meteora_lb_pair_discriminator(&valid[..7]));
+        let token_x_mint = Pubkey::new_unique();
+        let token_y_mint = Pubkey::new_unique();
+        let reserve_x = Pubkey::new_unique();
+        let reserve_y = Pubkey::new_unique();
+        let mut valid = vec![0u8; METEORA_LB_PAIR_SIZE];
+        valid[..8].copy_from_slice(&METEORA_LB_PAIR_DISCRIMINATOR);
+        valid[METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET..METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET + 32]
+            .copy_from_slice(token_x_mint.as_ref());
+        valid[METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET..METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET + 32]
+            .copy_from_slice(token_y_mint.as_ref());
+        valid[METEORA_LB_PAIR_RESERVE_X_OFFSET..METEORA_LB_PAIR_RESERVE_X_OFFSET + 32]
+            .copy_from_slice(reserve_x.as_ref());
+        valid[METEORA_LB_PAIR_RESERVE_Y_OFFSET..METEORA_LB_PAIR_RESERVE_Y_OFFSET + 32]
+            .copy_from_slice(reserve_y.as_ref());
+        valid[METEORA_LB_PAIR_STATUS_OFFSET] = 0;
+        valid[METEORA_LB_PAIR_ACTIVATION_TYPE_OFFSET] = 1;
+        valid[METEORA_LB_PAIR_ACTIVATION_POINT_OFFSET..METEORA_LB_PAIR_ACTIVATION_POINT_OFFSET + 8]
+            .copy_from_slice(&456u64.to_le_bytes());
+        let parsed = parse_meteora_lb_pair(&valid).unwrap();
+        assert_eq!(parsed.token_x_mint, token_x_mint);
+        assert_eq!(parsed.token_y_mint, token_y_mint);
+        assert_eq!(parsed.reserve_x, reserve_x);
+        assert_eq!(parsed.reserve_y, reserve_y);
+        assert_eq!(parsed.status, 0);
+        assert_eq!(parsed.activation_type, 1);
+        assert_eq!(parsed.activation_point, 456);
+        assert!(parse_meteora_lb_pair(&valid[..7]).is_err());
+        assert!(parse_meteora_lb_pair(&valid[..valid.len() - 1]).is_err());
 
         valid[0] ^= 1;
-        assert!(!has_meteora_lb_pair_discriminator(&valid));
+        assert!(parse_meteora_lb_pair(&valid).is_err());
+    }
+
+    #[test]
+    fn meteora_gate_parses_only_the_pinned_damm_v2_pool_layout() {
+        let token_a_mint = Pubkey::new_unique();
+        let token_b_mint = Pubkey::new_unique();
+        let token_a_vault = Pubkey::new_unique();
+        let token_b_vault = Pubkey::new_unique();
+        let mut data = vec![0u8; METEORA_DAMM_V2_POOL_SIZE];
+        data[..8].copy_from_slice(&METEORA_DAMM_V2_POOL_DISCRIMINATOR);
+        data[METEORA_DAMM_TOKEN_A_MINT_OFFSET..METEORA_DAMM_TOKEN_A_MINT_OFFSET + 32]
+            .copy_from_slice(token_a_mint.as_ref());
+        data[METEORA_DAMM_TOKEN_B_MINT_OFFSET..METEORA_DAMM_TOKEN_B_MINT_OFFSET + 32]
+            .copy_from_slice(token_b_mint.as_ref());
+        data[METEORA_DAMM_TOKEN_A_VAULT_OFFSET..METEORA_DAMM_TOKEN_A_VAULT_OFFSET + 32]
+            .copy_from_slice(token_a_vault.as_ref());
+        data[METEORA_DAMM_TOKEN_B_VAULT_OFFSET..METEORA_DAMM_TOKEN_B_VAULT_OFFSET + 32]
+            .copy_from_slice(token_b_vault.as_ref());
+        data[METEORA_DAMM_ACTIVATION_POINT_OFFSET..METEORA_DAMM_ACTIVATION_POINT_OFFSET + 8]
+            .copy_from_slice(&123u64.to_le_bytes());
+        data[METEORA_DAMM_ACTIVATION_TYPE_OFFSET] = 1;
+        data[METEORA_DAMM_POOL_STATUS_OFFSET] = 0;
+        data[METEORA_DAMM_POOL_TYPE_OFFSET] = 1;
+
+        let parsed = parse_meteora_damm_v2_pool(&data).unwrap();
+        assert_eq!(parsed.token_a_mint, token_a_mint);
+        assert_eq!(parsed.token_b_mint, token_b_mint);
+        assert_eq!(parsed.token_a_vault, token_a_vault);
+        assert_eq!(parsed.token_b_vault, token_b_vault);
+        assert_eq!(parsed.activation_point, 123);
+        assert_eq!(parsed.activation_type, 1);
+        assert_eq!(parsed.pool_status, 0);
+        assert_eq!(parsed.pool_type, 1);
+
+        data[0] ^= 1;
+        assert!(parse_meteora_damm_v2_pool(&data).is_err());
+        assert!(parse_meteora_damm_v2_pool(&data[..data.len() - 1]).is_err());
+        assert!(is_supported_meteora_program(METEORA_DLMM_PROGRAM));
+        assert!(is_supported_meteora_program(METEORA_DAMM_V2_PROGRAM));
+        assert!(!is_supported_meteora_program(Pubkey::new_unique()));
     }
 
     #[test]
@@ -3305,6 +3768,15 @@ pub struct LiquidityGate {
     pub sol_vault: Pubkey,
 }
 
+#[account]
+#[derive(InitSpace)]
+pub struct PrelaunchMintMigration {
+    pub bump: u8,
+    pub previous_mint: Pubkey,
+    pub new_mint: Pubkey,
+    pub migrated_at: i64,
+}
+
 #[derive(Accounts)]
 pub struct InitializeProtocol<'info> {
     #[account(init, payer = payer, space = 8 + ProtocolConfig::INIT_SPACE, seeds = [CONFIG_SEED], bump)]
@@ -3342,6 +3814,33 @@ pub struct MigrateFeeScheduleV6<'info> {
     #[account(mut, seeds=[MINING_POOL_SEED], bump=mining_pool.bump)]
     pub mining_pool: Account<'info, MiningPool>,
     pub admin: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct MigratePrelaunchMint<'info> {
+    #[account(mut, seeds=[CONFIG_SEED], bump=config.bump, has_one=admin)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(seeds=[MINING_POOL_SEED], bump=mining_pool.bump)]
+    pub mining_pool: Account<'info, MiningPool>,
+    #[account(seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
+    pub stake_pool: Account<'info, StakePool>,
+    #[account(
+        init,
+        payer=admin,
+        space=PrelaunchMintMigration::DISCRIMINATOR.len()+PrelaunchMintMigration::INIT_SPACE,
+        seeds=[PRELAUNCH_MINT_MIGRATION_SEED],
+        bump
+    )]
+    pub migration: Account<'info, PrelaunchMintMigration>,
+    #[account(mut)]
+    pub previous_mint: InterfaceAccount<'info, Mint>,
+    pub new_mint: InterfaceAccount<'info, Mint>,
+    #[account(token::mint=new_mint, token::authority=config.admin_fee_wallet)]
+    pub liquidity_tokens: InterfaceAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -3822,6 +4321,14 @@ pub struct OperationalWalletsRotated {
     pub previous_admin_fee_wallet: Pubkey,
     pub admin_fee_wallet: Pubkey,
     pub admin_fee_token_account: Pubkey,
+}
+#[event]
+pub struct PrelaunchMintMigrated {
+    pub previous_mint: Pubkey,
+    pub new_mint: Pubkey,
+    pub liquidity_owner: Pubkey,
+    pub liquidity_token_account: Pubkey,
+    pub genesis_base_units: u64,
 }
 #[event]
 pub struct RandomnessProgramChanged {

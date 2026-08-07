@@ -28,6 +28,7 @@ const [config, configBump] = pda('config');
 const [miningPool, miningPoolBump] = pda('mining_pool');
 const [stakePool, stakePoolBump] = pda('stake_pool');
 const [liquidityGate, liquidityGateBump] = pda('liquidity_gate');
+const [prelaunchMintMigration, prelaunchMintMigrationBump] = pda('prelaunch_mint_migration');
 const [adminMiner, adminMinerBump] = pda('miner', adminFeeWallet.toBuffer());
 const [adminStakePosition, adminStakePositionBump] = pda('stake_position', adminFeeWallet.toBuffer());
 
@@ -58,6 +59,10 @@ console.log(JSON.stringify({
     miningPool: { address: miningPool.toBase58(), bump: miningPoolBump },
     stakePool: { address: stakePool.toBase58(), bump: stakePoolBump },
     liquidityGate: { address: liquidityGate.toBase58(), bump: liquidityGateBump },
+    prelaunchMintMigration: {
+      address: prelaunchMintMigration.toBase58(),
+      bump: prelaunchMintMigrationBump,
+    },
     adminMiner: { address: adminMiner.toBase58(), bump: adminMinerBump },
     adminStakePosition: { address: adminStakePosition.toBase58(), bump: adminStakePositionBump },
   },

@@ -6,14 +6,17 @@ import * as splToken from '@solana/spl-token';
 import web3 from '@solana/web3.js';
 
 const { AnchorProvider, BN, EventParser, Program, setProvider } = anchor;
-const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = web3;
+const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } = web3;
 const {
   AuthorityType,
   TOKEN_PROGRAM_ID,
+  createSetAuthorityInstruction,
   createMint,
   getOrCreateAssociatedTokenAccount,
+  getMint,
   mintTo,
   setAuthority,
+  transferChecked,
 } = splToken;
 
 const GENESIS_BASE_UNITS = 100_000_000_000n;
@@ -68,7 +71,7 @@ const upgradeAuthoritySigners = upgradeAuthority.publicKey.equals(payer.publicKe
   ? []
   : [upgradeAuthority];
 
-const mint = await createMint(
+let mint = await createMint(
   provider.connection,
   payer,
   payer.publicKey,
@@ -78,7 +81,7 @@ const mint = await createMint(
   undefined,
   TOKEN_PROGRAM_ID,
 );
-const launchAccount = await getOrCreateAssociatedTokenAccount(
+let launchAccount = await getOrCreateAssociatedTokenAccount(
   provider.connection,
   payer,
   mint,
@@ -101,7 +104,7 @@ const buybackAirdrop = await provider.connection.requestAirdrop(
 await provider.connection.confirmTransaction(buybackAirdrop, 'confirmed');
 // The fallback path is constrained to this canonical ATA and remains distinct
 // from the claimant's token account during the local aliasing checks.
-const adminFeeAccount = (await getOrCreateAssociatedTokenAccount(
+let adminFeeAccount = (await getOrCreateAssociatedTokenAccount(
   provider.connection,
   payer,
   mint,
@@ -170,6 +173,106 @@ const initializeSignature = await program.methods
   .accounts({ ...initializeAccounts, upgradeAuthority: upgradeAuthority.publicKey })
   .signers(upgradeAuthoritySigners)
   .rpc();
+
+// Exercise the production relaunch invariant before any protocol use: one
+// fresh exact-100-MYNE mint, no freeze authority, full supply in the configured
+// admin/liquidity wallet, atomic authority transfer + migration, and permanent
+// retirement of the previous mint authority.
+const previousMint = mint;
+const freshMint = await createMint(
+  provider.connection,
+  payer,
+  payer.publicKey,
+  null,
+  9,
+  undefined,
+  undefined,
+  TOKEN_PROGRAM_ID,
+);
+const freshLiquidityAccount = await getOrCreateAssociatedTokenAccount(
+  provider.connection,
+  payer,
+  freshMint,
+  fallbackOwner.publicKey,
+);
+await mintTo(
+  provider.connection,
+  payer,
+  freshMint,
+  freshLiquidityAccount.address,
+  payer,
+  GENESIS_BASE_UNITS,
+);
+const [prelaunchMintMigration] = PublicKey.findProgramAddressSync(
+  [Buffer.from('prelaunch_mint_migration')],
+  PROGRAM_ID,
+);
+const migrationInstruction = await program.methods
+  .migratePrelaunchMint()
+  .accounts({
+    config,
+    miningPool,
+    stakePool,
+    migration: prelaunchMintMigration,
+    previousMint,
+    newMint: freshMint,
+    liquidityTokens: freshLiquidityAccount.address,
+    admin: upgradeAuthority.publicKey,
+    tokenProgram: TOKEN_PROGRAM_ID,
+    systemProgram: SystemProgram.programId,
+  })
+  .instruction();
+const migrationTransaction = new Transaction().add(
+  createSetAuthorityInstruction(
+    freshMint,
+    payer.publicKey,
+    AuthorityType.MintTokens,
+    config,
+    [],
+    TOKEN_PROGRAM_ID,
+  ),
+  migrationInstruction,
+);
+const migrationSignature = await provider.sendAndConfirm(
+  migrationTransaction,
+  upgradeAuthoritySigners,
+);
+await provider.connection.confirmTransaction(migrationSignature, 'confirmed');
+const [migratedConfig, retiredMintState, freshMintState, migrationState] = await Promise.all([
+  program.account.protocolConfig.fetch(config),
+  getMint(provider.connection, previousMint, 'confirmed', TOKEN_PROGRAM_ID),
+  getMint(provider.connection, freshMint, 'confirmed', TOKEN_PROGRAM_ID),
+  program.account.prelaunchMintMigration.fetch(prelaunchMintMigration),
+]);
+assert.ok(migratedConfig.mint.equals(freshMint));
+assert.equal(retiredMintState.mintAuthority, null);
+assert.ok(freshMintState.mintAuthority?.equals(config));
+assert.ok(migrationState.previousMint.equals(previousMint));
+assert.ok(migrationState.newMint.equals(freshMint));
+assert.ok(Number.isInteger(migrationState.bump));
+
+const freshLaunchAccount = await getOrCreateAssociatedTokenAccount(
+  provider.connection,
+  payer,
+  freshMint,
+  payer.publicKey,
+);
+await transferChecked(
+  provider.connection,
+  payer,
+  freshLiquidityAccount.address,
+  freshMint,
+  freshLaunchAccount.address,
+  fallbackOwner,
+  90_000_000_000n,
+  9,
+  [],
+  undefined,
+  TOKEN_PROGRAM_ID,
+);
+mint = freshMint;
+launchAccount = freshLaunchAccount;
+adminFeeAccount = freshLiquidityAccount.address;
 
 // The local test uses the freshly-created mint as a non-empty token-account stand-in. This
 // exercises the same immutable address/owner gate used for Meteora without pretending a system
@@ -862,6 +965,7 @@ console.log(JSON.stringify({
   initializeSignature,
   tests: [
     'upgrade-authority-only initialization',
+    'one-time empty-state mint migration with atomic legacy-authority retirement',
     'validated 100 MYNE genesis mint',
     'immutable launch economics',
     'admin pause authorization',

@@ -2225,6 +2225,156 @@
       "args": []
     },
     {
+      "name": "migrate_prelaunch_mint",
+      "docs": [
+        "One-time recovery from the abandoned pre-launch mint. This instruction",
+        "is intentionally stricter than a general mint-rotation facility: it",
+        "requires an entirely unused, paused protocol, a fresh 100-MYNE legacy",
+        "SPL mint already controlled by the config PDA, and the complete supply",
+        "in the configured admin/liquidity wallet. The old mint authority is",
+        "revoked atomically before the config starts accepting the new mint."
+      ],
+      "discriminator": [
+        2,
+        204,
+        43,
+        168,
+        182,
+        161,
+        203,
+        165
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "migration",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  101,
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104,
+                  95,
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  109,
+                  105,
+                  103,
+                  114,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "previous_mint",
+          "writable": true
+        },
+        {
+          "name": "new_mint"
+        },
+        {
+          "name": "liquidity_tokens"
+        },
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "token_program"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "open_round",
       "discriminator": [
         66,
@@ -3955,6 +4105,19 @@
       ]
     },
     {
+      "name": "PrelaunchMintMigration",
+      "discriminator": [
+        43,
+        227,
+        234,
+        227,
+        213,
+        49,
+        96,
+        49
+      ]
+    },
+    {
       "name": "ProtocolConfig",
       "discriminator": [
         207,
@@ -4188,6 +4351,19 @@
         209,
         178,
         218
+      ]
+    },
+    {
+      "name": "PrelaunchMintMigrated",
+      "discriminator": [
+        114,
+        77,
+        60,
+        192,
+        85,
+        124,
+        188,
+        55
       ]
     },
     {
@@ -4739,11 +4915,21 @@
     },
     {
       "code": 6057,
+      "name": "InvalidPrelaunchMintMigration",
+      "msg": "The pre-launch mint migration does not match the one approved recovery path"
+    },
+    {
+      "code": 6058,
+      "name": "PrelaunchStateNotEmpty",
+      "msg": "The protocol has activity or liabilities and can no longer use the pre-launch mint migration"
+    },
+    {
+      "code": 6059,
       "name": "InvalidMiningPoolAccounting",
       "msg": "The unclaimed mining-reward share accounting is inconsistent"
     },
     {
-      "code": 6058,
+      "code": 6060,
       "name": "MiningRewardBelowSharePrecision",
       "msg": "The mining reward is below the unclaimed-share precision"
     }
@@ -5342,6 +5528,58 @@
           {
             "name": "paused",
             "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrelaunchMintMigrated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquidity_owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquidity_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "genesis_base_units",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PrelaunchMintMigration",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "previous_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "migrated_at",
+            "type": "i64"
           }
         ]
       }

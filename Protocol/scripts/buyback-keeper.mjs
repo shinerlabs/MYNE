@@ -17,7 +17,7 @@ import web3 from '@solana/web3.js';
 import * as splToken from '@solana/spl-token';
 import {
   calculateSpend,
-  METEORA_DLMM_LABEL,
+  meteoraRouteForProgram,
   validateJupiterEndpoint,
   validateDirectMeteoraQuote,
 } from './buyback-policy.mjs';
@@ -59,7 +59,6 @@ const JUPITER_SWAP_URL = validateJupiterEndpoint(
   { expectedPath: '/swap/v1/swap', allowCustom: customJupiterAuthorized },
 );
 const JUPITER_AGGREGATOR_V6 = new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4');
-const METEORA_DLMM_PROGRAM = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const provider = AnchorProvider.env();
 setProvider(provider);
@@ -179,13 +178,13 @@ function readInteger(value, name) {
   return parsed;
 }
 
-async function fetchQuote(inputLamports, mint, poolAddress, slippageBps) {
+async function fetchQuote(inputLamports, mint, poolAddress, slippageBps, route) {
   const params = new URLSearchParams({
     inputMint: NATIVE_MINT.toBase58(),
     outputMint: mint.toBase58(),
     amount: String(inputLamports),
     slippageBps: String(slippageBps),
-    dexes: METEORA_DLMM_LABEL,
+    dexes: route.label,
     onlyDirectRoutes: 'true',
     restrictIntermediateTokens: 'true',
   });
@@ -198,6 +197,7 @@ async function fetchQuote(inputLamports, mint, poolAddress, slippageBps) {
       poolAddress: poolAddress.toBase58(),
       inputLamports,
       outputMint: mint.toBase58(),
+      expectedAmmLabel: route.label,
       maxPriceImpactPct: Number(process.env.MAX_PRICE_IMPACT_PCT || '5'),
     }),
   };
@@ -230,6 +230,7 @@ async function inspectSwapTransaction(transaction, {
   myneAta,
   beforeBaseUnits,
   minimumOutputBaseUnits,
+  meteoraProgram,
 }) {
   assert.equal(
     transaction.message.staticAccountKeys[0]?.toBase58(),
@@ -256,7 +257,7 @@ async function inspectSwapTransaction(transaction, {
     TOKEN_PROGRAM_ID.toBase58(),
     ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
     JUPITER_AGGREGATOR_V6.toBase58(),
-    METEORA_DLMM_PROGRAM.toBase58(),
+    meteoraProgram,
   ]);
   for (const instruction of decompiled.instructions) {
     assert.ok(
@@ -524,6 +525,14 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   }
   const gateState = await program.account.liquidityGate.fetch(liquidityGate);
   assert.ok(gateState.verified, 'Liquidity gate is not verified');
+  const meteoraRoute = meteoraRouteForProgram(gateState.poolProgram.toBase58());
+  const registeredPool = await provider.connection.getAccountInfo(gateState.pool, commitment);
+  assert.ok(
+    registeredPool
+      && !registeredPool.executable
+      && registeredPool.owner.equals(gateState.poolProgram),
+    'Registered Meteora pool owner differs from the immutable gate',
+  );
   assert.equal(configState.mint.toBase58(), process.env.MYNE_MINT_ADDRESS || configState.mint.toBase58(), 'MYNE mint mismatch');
   assert.equal(configState.buybackWallet.toBase58(), payer.publicKey.toBase58(), 'Keeper must control config.buybackWallet');
   const nowSeconds = Math.floor(Date.now() / 1000);
@@ -607,7 +616,13 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const spend = spendPlan.spendLamports;
   const slippageBps = readInteger(process.env.BUYBACK_SLIPPAGE_BPS || '100', 'BUYBACK_SLIPPAGE_BPS');
   assert.ok(slippageBps <= 500, 'BUYBACK_SLIPPAGE_BPS must be <= 500 (5%)');
-  const { raw: quote, checked } = await fetchQuote(spend, configState.mint, poolAddress, slippageBps);
+  const { raw: quote, checked } = await fetchQuote(
+    spend,
+    configState.mint,
+    poolAddress,
+    slippageBps,
+    meteoraRoute,
+  );
   const result = { skipped: false, dryRun, round: roundId.toString(), allocationLamports: allocation.toString(), pool: poolAddress.toBase58(), spendLamports: spend, ...checked };
   if (dryRun) return result;
   const ensuredAta = await ensureMyneAta(configState.mint);
@@ -618,6 +633,7 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
     myneAta: ensuredAta,
     beforeBaseUnits: before,
     minimumOutputBaseUnits: quote.otherAmountThreshold || checked.outputBaseUnits,
+    meteoraProgram: meteoraRoute.program,
   });
   swap.sign([payer]);
   const swapSignature = base58Encode(swap.signatures[0]);

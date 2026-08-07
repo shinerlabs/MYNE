@@ -3,9 +3,10 @@
  *
  * MYNE launches through a manually-created Meteora MYNE/SOL pool. Browser trading remains
  * deliberately fail-closed until a reviewed quote/swap adapter is supplied. The read-only market
- * quote below is narrower: it accepts only the exact pool registered in the protocol's immutable
- * liquidity gate, decodes the live price directly from the on-chain Meteora LbPair, and checks both
- * registered reserves against the gate's minimum balances. No transaction depends on this quote.
+ * quote below is narrower: it accepts only the exact official DAMM v2 or DLMM pool registered in
+ * the protocol's immutable liquidity gate, decodes the live price directly from the on-chain pool,
+ * and checks both registered reserves against the gate's minimum balances. No transaction depends
+ * on this quote.
  */
 
 import { PublicKey } from '@solana/web3.js';
@@ -15,6 +16,7 @@ import { fetchProtocolAccount, protocolPdas } from './anchor-client.js';
 import { connection } from './client.js';
 
 const METEORA_DLMM_PROGRAM = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
+const METEORA_DAMM_V2_PROGRAM = new PublicKey('cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG');
 const WRAPPED_SOL_MINT = 'So11111111111111111111111111111111111111112';
 const SPL_TOKEN_PROGRAMS = new Set([
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
@@ -22,6 +24,9 @@ const SPL_TOKEN_PROGRAMS = new Set([
 ]);
 const LB_PAIR_DISCRIMINATOR = Uint8Array.from([33, 11, 49, 98, 181, 101, 177, 13]);
 export const METEORA_LB_PAIR_ACCOUNT_LEN = 904;
+const DAMM_V2_POOL_DISCRIMINATOR = Uint8Array.from([241, 154, 109, 4, 17, 177, 109, 188]);
+export const METEORA_DAMM_V2_POOL_ACCOUNT_LEN = 1_112;
+const DAMM_V2_TOKEN_VAULT_SEED = new TextEncoder().encode('token_vault');
 const SPL_TOKEN_ACCOUNT_MIN_LEN = 165;
 const OFFSETS = Object.freeze({
   pairType: 75,
@@ -33,6 +38,17 @@ const OFFSETS = Object.freeze({
   tokenYMint: 120,
   reserveX: 152,
   reserveY: 184,
+});
+const DAMM_V2_OFFSETS = Object.freeze({
+  tokenAMint: 168,
+  tokenBMint: 200,
+  tokenAVault: 232,
+  tokenBVault: 264,
+  sqrtPrice: 456,
+  activationPoint: 472,
+  activationType: 480,
+  status: 481,
+  poolType: 485,
 });
 
 export const poolAvailable = false;
@@ -62,12 +78,17 @@ const bytesOf = (data, label) => {
   return data;
 };
 
-const hasDiscriminator = (data) => data?.length >= LB_PAIR_DISCRIMINATOR.length
-  && LB_PAIR_DISCRIMINATOR.every((byte, index) => data[index] === byte);
+const hasDiscriminator = (data, discriminator) => data?.length >= discriminator.length
+  && discriminator.every((byte, index) => data[index] === byte);
 
 const publicKeyAt = (data, offset, label) => {
   try { return new PublicKey(data.subarray(offset, offset + 32)).toBase58(); }
-  catch { throw new Error(`Meteora LbPair contains an invalid ${label}`); }
+  catch { throw new Error(`Meteora pool contains an invalid ${label}`); }
+};
+
+const u128LeAt = (bytes, offset) => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return view.getBigUint64(offset, true) + (view.getBigUint64(offset + 8, true) << 64n);
 };
 
 /**
@@ -82,7 +103,9 @@ export function decodeMeteoraLbPair(data) {
   if (bytes.length !== METEORA_LB_PAIR_ACCOUNT_LEN) {
     throw new Error(`Meteora LbPair has unsupported length ${bytes.length}`);
   }
-  if (!hasDiscriminator(bytes)) throw new Error('Meteora account is not an LbPair');
+  if (!hasDiscriminator(bytes, LB_PAIR_DISCRIMINATOR)) {
+    throw new Error('Meteora account is not an LbPair');
+  }
 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const activeId = view.getInt32(OFFSETS.activeId, true);
@@ -108,6 +131,43 @@ export function decodeMeteoraLbPair(data) {
     reserveX: publicKeyAt(bytes, OFFSETS.reserveX, 'Token X reserve'),
     reserveY: publicKeyAt(bytes, OFFSETS.reserveY, 'Token Y reserve'),
     tokenYPerTokenX,
+  });
+}
+
+/** Decode Meteora DAMM v2's exact 1,112-byte zero-copy Pool account. */
+export function decodeMeteoraDammV2Pool(data) {
+  const bytes = bytesOf(data, 'Meteora DAMM v2 Pool');
+  if (bytes.length !== METEORA_DAMM_V2_POOL_ACCOUNT_LEN) {
+    throw new Error(`Meteora DAMM v2 Pool has unsupported length ${bytes.length}`);
+  }
+  if (!hasDiscriminator(bytes, DAMM_V2_POOL_DISCRIMINATOR)) {
+    throw new Error('Meteora account is not a DAMM v2 Pool');
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const status = bytes[DAMM_V2_OFFSETS.status];
+  const poolType = bytes[DAMM_V2_OFFSETS.poolType];
+  const activationType = bytes[DAMM_V2_OFFSETS.activationType];
+  if (status !== 0) throw new Error('Meteora DAMM v2 Pool is not enabled');
+  if (poolType !== 0 && poolType !== 1) throw new Error('Meteora DAMM v2 Pool type is unsupported');
+  if (activationType !== 0 && activationType !== 1) {
+    throw new Error('Meteora DAMM v2 activation type is unsupported');
+  }
+  const sqrtPrice = u128LeAt(bytes, DAMM_V2_OFFSETS.sqrtPrice);
+  const sqrtRatio = Number(sqrtPrice) / (2 ** 64);
+  const tokenBPerTokenA = sqrtRatio * sqrtRatio;
+  if (!Number.isFinite(tokenBPerTokenA) || tokenBPerTokenA <= 0) {
+    throw new Error('Meteora DAMM v2 price is outside the supported range');
+  }
+  return Object.freeze({
+    status,
+    poolType,
+    activationType,
+    activationPoint: view.getBigUint64(DAMM_V2_OFFSETS.activationPoint, true),
+    tokenXMint: publicKeyAt(bytes, DAMM_V2_OFFSETS.tokenAMint, 'Token A mint'),
+    tokenYMint: publicKeyAt(bytes, DAMM_V2_OFFSETS.tokenBMint, 'Token B mint'),
+    reserveX: publicKeyAt(bytes, DAMM_V2_OFFSETS.tokenAVault, 'Token A vault'),
+    reserveY: publicKeyAt(bytes, DAMM_V2_OFFSETS.tokenBVault, 'Token B vault'),
+    tokenYPerTokenX: tokenBPerTokenA,
   });
 }
 
@@ -141,7 +201,12 @@ const gateMinimum = (value, label) => {
  * Purely validate and orient one on-chain pool snapshot as MYNE per SOL.
  */
 export function decodeMeteoraPoolSnapshot({ poolData, myneVaultInfo, solVaultInfo }, expected) {
-  const pair = decodeMeteoraLbPair(poolData);
+  const poolProgram = new PublicKey(expected.poolProgram);
+  const poolAddress = new PublicKey(expected.poolAddress);
+  const isDlmm = poolProgram.equals(METEORA_DLMM_PROGRAM);
+  const isDammV2 = poolProgram.equals(METEORA_DAMM_V2_PROGRAM);
+  if (!isDlmm && !isDammV2) throw new Error('Liquidity gate uses an unsupported Meteora program');
+  const pair = isDammV2 ? decodeMeteoraDammV2Pool(poolData) : decodeMeteoraLbPair(poolData);
   const myneMint = addressOf(expected.myneMint, 'MYNE mint');
   const myneVault = addressOf(expected.myneVault, 'MYNE reserve');
   const solVault = addressOf(expected.solVault, 'WSOL reserve');
@@ -154,6 +219,16 @@ export function decodeMeteoraPoolSnapshot({ poolData, myneVaultInfo, solVaultInf
   }
   if (myneIsY && (pair.reserveY !== myneVault || pair.reserveX !== solVault)) {
     throw new Error('Meteora pool reserves do not match the registered liquidity gate');
+  }
+
+  const reserveFor = (mint) => PublicKey.findProgramAddressSync(
+    isDammV2
+      ? [DAMM_V2_TOKEN_VAULT_SEED, new PublicKey(mint).toBuffer(), poolAddress.toBuffer()]
+      : [poolAddress.toBuffer(), new PublicKey(mint).toBuffer()],
+    poolProgram,
+  )[0].toBase58();
+  if (pair.reserveX !== reserveFor(pair.tokenXMint) || pair.reserveY !== reserveFor(pair.tokenYMint)) {
+    throw new Error('Meteora pool vault PDAs do not match the official program derivation');
   }
 
   const myneReserve = decodeTokenReserve(myneVaultInfo, myneMint, 'MYNE reserve');
@@ -183,8 +258,9 @@ export async function readMeteoraMynePerSol() {
   if (!gate?.verified) return null;
 
   const pool = new PublicKey(gate.pool);
-  if (!new PublicKey(gate.poolProgram).equals(METEORA_DLMM_PROGRAM)) {
-    throw new Error('Liquidity gate is not bound to Meteora DLMM');
+  const poolProgram = new PublicKey(gate.poolProgram);
+  if (!poolProgram.equals(METEORA_DLMM_PROGRAM) && !poolProgram.equals(METEORA_DAMM_V2_PROGRAM)) {
+    throw new Error('Liquidity gate is not bound to an official supported Meteora program');
   }
   const myneVault = new PublicKey(gate.myneVault);
   const solVault = new PublicKey(gate.solVault);
@@ -192,10 +268,12 @@ export async function readMeteoraMynePerSol() {
     [pool, myneVault, solVault],
     { commitment: 'confirmed' },
   );
-  if (!poolAccount || poolAccount.executable || !poolAccount.owner.equals(METEORA_DLMM_PROGRAM)) {
-    throw new Error('Registered liquidity pool is not a Meteora LbPair account');
+  if (!poolAccount || poolAccount.executable || !poolAccount.owner.equals(poolProgram)) {
+    throw new Error('Registered liquidity pool is not owned by its configured Meteora program');
   }
   return decodeMeteoraPoolSnapshot({ poolData: poolAccount.data, myneVaultInfo, solVaultInfo }, {
+    poolAddress: pool,
+    poolProgram,
     myneMint: PROGRAMS.tokenMint,
     myneVault,
     solVault,

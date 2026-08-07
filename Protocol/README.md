@@ -94,7 +94,8 @@ program-owned account in production.
 ## Mainnet-candidate boundary
 
 The checked-in code is a deployment candidate, not an authorization to launch. Production uses
-the verified Switchboard commit/reveal path and a canonical Meteora DLMM reserve gate; the legacy
+the verified Switchboard commit/reveal path and a canonical official Meteora DAMM v2 or DLMM
+reserve gate; the legacy
 caller-supplied randomness instruction is limited to configs whose randomness program is the
 default key. Before funding Mainnet, complete the external Switchboard/Meteora rehearsal,
 independent security review, legal review, and production-key/keeper setup in
