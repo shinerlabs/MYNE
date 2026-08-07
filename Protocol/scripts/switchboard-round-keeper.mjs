@@ -13,7 +13,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import anchor from '@anchor-lang/core';
 import * as sb from '@switchboard-xyz/on-demand';
-import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
+import {
+  ComputeBudgetProgram,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  TransactionMessage,
+  VersionedTransaction,
+} from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 import { loadExplicitSwitchboardEnv } from './production-switchboard-env.mjs';
 
@@ -83,9 +90,12 @@ const indexedRows = async (path) => {
   return text ? JSON.parse(text) : [];
 };
 
-const buildKeeperTransaction = (ixs, extraSigners, units) => sb.asV0Tx({
-  connection,
-  ixs: [
+const buildKeeperTransaction = async (ixs, extraSigners, units) => {
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(commitment);
+  const message = new TransactionMessage({
+    recentBlockhash: blockhash,
+    payerKey: keypair.publicKey,
+    instructions: [
     ComputeBudgetProgram.setComputeUnitLimit({ units }),
     ...(Number(process.env.KEEPER_PRIORITY_MICROLAMPORTS || 0) > 0
       ? [ComputeBudgetProgram.setComputeUnitPrice({
@@ -93,23 +103,29 @@ const buildKeeperTransaction = (ixs, extraSigners, units) => sb.asV0Tx({
       })]
       : []),
     ...ixs,
-  ],
-  payer: keypair.publicKey,
-  signers: [keypair, ...extraSigners],
-});
+    ],
+  }).compileToV0Message();
+  const transaction = new VersionedTransaction(message);
+  transaction.sign([keypair, ...extraSigners]);
+  return { transaction, blockhash, lastValidBlockHeight };
+};
 
 const sendKeeperInstructions = async (ixs, extraSigners = []) => {
-  const simulationTx = await buildKeeperTransaction(ixs, extraSigners, 1_400_000);
-  const simulation = await connection.simulateTransaction(simulationTx, {
+  const simulationBuild = await buildKeeperTransaction(ixs, extraSigners, 1_400_000);
+  const simulation = await connection.simulateTransaction(simulationBuild.transaction, {
     commitment,
     sigVerify: false,
   });
   assert.equal(simulation.value.err, null, `Keeper simulation failed: ${JSON.stringify(simulation.value.err)}\n${(simulation.value.logs || []).join('\n')}`);
   const measuredUnits = Math.max(50_000, Number(simulation.value.unitsConsumed || 1_400_000));
   const computeLimit = Math.min(1_400_000, Math.ceil(measuredUnits * 1.1));
-  const transaction = await buildKeeperTransaction(ixs, extraSigners, computeLimit);
-  const signature = await connection.sendTransaction(transaction, txOpts);
-  const confirmation = await connection.confirmTransaction(signature, commitment);
+  const finalBuild = await buildKeeperTransaction(ixs, extraSigners, computeLimit);
+  const signature = await connection.sendTransaction(finalBuild.transaction, txOpts);
+  const confirmation = await connection.confirmTransaction({
+    signature,
+    blockhash: finalBuild.blockhash,
+    lastValidBlockHeight: finalBuild.lastValidBlockHeight,
+  }, commitment);
   assert.equal(confirmation.value.err, null, `Keeper transaction failed: ${JSON.stringify(confirmation.value.err)}`);
   return { signature, measuredUnits, computeLimit };
 };

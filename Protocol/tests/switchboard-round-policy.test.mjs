@@ -45,6 +45,17 @@ test('Switchboard keeper converts the native round id to BN at every Anchor u64 
   assert.doesNotMatch(source, /\.methods\.(?:openRound|bindRoundRandomness|executeAutoPlan|recordRoundRandomnessCommit)\(ROUND_ID(?:,|\))/);
 });
 
+test('Switchboard keeper owns compute-budget construction without SDK duplicates', async () => {
+  const source = await readFile(
+    new URL('../scripts/switchboard-round-keeper.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /new TransactionMessage\(\{[\s\S]*ComputeBudgetProgram\.setComputeUnitLimit/);
+  assert.match(source, /new VersionedTransaction\(message\)/);
+  assert.match(source, /confirmTransaction\(\{[\s\S]*lastValidBlockHeight/);
+  assert.doesNotMatch(source, /sb\.asV0Tx/);
+});
+
 test('manual and demo clients supply the deploy randomness account explicitly', async () => {
   const [lottery, capabilities, localKeeper, localTest] = await Promise.all([
     readFile(new URL('../../Frontend/src/chain/lottery.js', import.meta.url), 'utf8'),
