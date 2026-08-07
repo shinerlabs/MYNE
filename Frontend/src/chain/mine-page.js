@@ -2,7 +2,7 @@ import { formatEther, parseEther } from './units.js';
 
 import {
   UNLIMITED_PLAYS, approveClaimDelegate, cancelPlan, configurePlan, depositToPlan,
-  isClaimDelegate, readFeeParams, readPlan, requiredDeposit,
+  isClaimDelegate, maxAutoPlanFundingLamports, readFeeParams, readPlan, requiredDeposit,
 } from './autocommit.js';
 
 export { UNLIMITED_PLAYS };
@@ -61,6 +61,7 @@ export const state = {
   lastResolved: null,
   currentRound: null, // full readRound() of state.roundId — carries its own `resolved`/winner
   plan: null, // MYNE auto-plan for the connected account (null = none configured)
+  autoPlanMaxFee: null, // live rent for one BetReceipt; null means the RPC quote is unavailable
 };
 
 const subscribers = new Set();
@@ -131,7 +132,14 @@ async function refreshJackpot() {
 async function refreshPlan() {
   if (!state.account) { state.plan = null; return emit(); }
   try {
-    const plan = await readPlan(state.account);
+    const [planResult, feeResult] = await Promise.allSettled([
+      readPlan(state.account),
+      readFeeParams(),
+    ]);
+    if (feeResult.status === 'fulfilled') state.autoPlanMaxFee = feeResult.value.maxFee;
+    else state.autoPlanMaxFee = null;
+    if (planResult.status === 'rejected') throw planResult.reason;
+    const plan = planResult.value;
     // Keep a DISABLED plan visible while it still holds a balance. An exhausted plan keeps
     // its unspent deposit until cancelPlan() refunds it, so hiding it here stranded the
     // user's SOL with no way to withdraw from the UI.
@@ -384,6 +392,10 @@ async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoCla
   if (deposit > state.balance) {
     return notify(`Need ${formatEther(deposit)} SOL to fund this plan (incl. executor fees)`);
   }
+  const maximumFunding = maxAutoPlanFundingLamports(state.balance);
+  if (deposit > maximumFunding) {
+    return notify(`Auto-round can use at most ${formatEther(maximumFunding)} SOL (90% of your wallet balance)`);
+  }
 
   // Auto-claim needs AutoCommit approved as a lottery delegate, otherwise the executor's
   // claims silently no-op. One-time, so only prompt when it isn't already granted.
@@ -415,6 +427,10 @@ export async function topUpPlan(rounds = 10) {
   const { maxFee } = await readFeeParams();
   const value = state.plan.amountPerPlay * BigInt(rounds) + maxFee * BigInt(rounds);
   if (value > state.balance) return notify(`Need ${formatEther(value)} SOL to add ${rounds} rounds`);
+  const maximumFunding = maxAutoPlanFundingLamports(state.balance);
+  if (value > maximumFunding) {
+    return notify(`Auto-round top-ups can use at most ${formatEther(maximumFunding)} SOL (90% of your wallet balance)`);
+  }
 
   await runTx(`Adding ~${rounds} rounds…`, () => depositToPlan(value), async () => {
     await Promise.all([refreshPlan(), refreshMiner()]);
