@@ -54,22 +54,25 @@ test('compact Stake keeps rewards bounded and APY metadata readable', () => {
   assert.match(fitStyles, /@media \(max-width: 900px\), \(max-height: 650px\)[\s\S]*\.staking-overview \{[\s\S]*height:\s*min\(100%, clamp\(240px, 45dvh, 310px\)\) !important/);
   assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-yield-metric > small \{[\s\S]*display:\s*none !important/);
   assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-overview \{[\s\S]*height:\s*min\(100%, 270px\) !important/);
-  assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-history > header > small \{[\s\S]*display:\s*none !important/);
   assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*#claim-stake-rewards \{[\s\S]*white-space:\s*nowrap !important/);
 });
 
 test('short desktop Stake reclaims the full frame instead of squeezing into the first column', () => {
-  assert.match(fitStyles, /@media \(min-width: 901px\) and \(max-height: 650px\)[\s\S]*\.staking-dashboard \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) !important;[\s\S]*"history"[\s\S]*"tabs"[\s\S]*"active"/);
+  assert.match(fitStyles, /@media \(min-width: 901px\) and \(max-height: 650px\)[\s\S]*\.staking-dashboard \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) !important;[\s\S]*"tabs"[\s\S]*"active"/);
   assert.match(fitStyles, /@media \(min-width: 901px\) and \(max-height: 650px\)[\s\S]*\.staking-actions \.stake-composer \{[\s\S]*"mode tier"[\s\S]*"amount quick"[\s\S]*"submit submit"/);
   assert.match(fitStyles, /@media \(min-width: 901px\) and \(max-height: 650px\)[\s\S]*\.staking-position-strip,[\s\S]*height:\s*44px !important/);
 });
 
-test('staking history spans the dashboard above the stake and unstake controls', () => {
+test('staking history lives only in About while Stake stays operational', () => {
   const dashboardStart = source.indexOf('<div class="staking-dashboard"');
-  const chartStart = source.indexOf('<section class="staking-history panel"', dashboardStart);
+  const dashboardEnd = source.indexOf('</main>', dashboardStart);
+  const chartStart = source.indexOf('<section class="staking-history about-staking-history"');
   const actionsStart = source.indexOf('<div class="staking-dashboard-column staking-actions"', dashboardStart);
-  assert.ok(dashboardStart >= 0 && chartStart > dashboardStart && chartStart < actionsStart);
-  assert.match(styles, /\.staking-dashboard > \.staking-history \{[\s\S]*grid-area:\s*history !important/);
+  assert.ok(dashboardStart >= 0 && actionsStart > dashboardStart && dashboardEnd > actionsStart);
+  assert.ok(chartStart > dashboardEnd);
+  assert.doesNotMatch(source.slice(dashboardStart, dashboardEnd), /data-staking-chart/);
+  assert.match(source, /if \(target === 'staking-model'\) void refreshStakingHistory\(\)/);
+  assert.doesNotMatch(source, /const refreshStaking = async \(\) => \{\s*void refreshStakingMetrics\(\);\s*void refreshStakingHistory\(\)/);
   assert.match(styles, /\.staking-dashboard > \.staking-actions \{\s*grid-area:\s*actions !important/);
 });
 
@@ -98,23 +101,23 @@ test('desktop Stake keeps rewards primary and bounds the transaction rail', () =
   assert.match(source, /8% of all mining volume is paid to stakers in SOL\./);
 });
 
-test('desktop Stake stays top-aligned inside its restrained 1440 by 500 frame', () => {
+test('desktop Stake stays top-aligned inside its restrained 1440px frame', () => {
   assert.match(fitStyles, /body\[data-route="stake"\] \.staking-shell\.page-view\.active,[\s\S]*width:\s*min\(1440px, calc\(100% - 48px\)\) !important/);
   assert.match(fitStyles, /body\[data-route="stake"\] \.staking-shell\.page-view\.active \{[\s\S]*align-items:\s*start !important/);
-  assert.match(fitStyles, /body\[data-route="stake"\] \.staking-dashboard \{[\s\S]*height:\s*min\(100%, 500px\) !important;[\s\S]*align-self:\s*start !important;[\s\S]*justify-self:\s*stretch !important/);
+  assert.match(fitStyles, /body\[data-route="stake"\] \.staking-dashboard \{[\s\S]*height:\s*min\(100%, 388px\) !important;[\s\S]*align-self:\s*start !important;[\s\S]*justify-self:\s*stretch !important/);
   assert.match(fitStyles, /body\[data-route="stake"\] \.staking-overview > \.stake-rewards \{[\s\S]*align-items:\s*center !important/);
   assert.match(fitStyles, /body\[data-route="stake"\] \.staking-actions \.stake-composer \{[\s\S]*align-content:\s*start !important/);
   assert.match(fitStyles, /\.stake-composer:has\(#stake-tier-tabs\[hidden\]\) \{[\s\S]*grid-template-areas:[\s\S]*"mode mode"[\s\S]*"label label"[\s\S]*"amount quick"[\s\S]*"policy policy"[\s\S]*"submit submit"/);
   assert.match(fitStyles, /\.stake-composer:has\(#stake-tier-tabs\[hidden\]\) \{[\s\S]*height:\s*auto !important;[\s\S]*align-self:\s*start !important/);
   assert.match(fitStyles, /\.staking-actions > \.staking-layout:has\(#stake-tier-tabs\[hidden\]\) \{[\s\S]*height:\s*auto !important/);
-  assert.match(fitStyles, /@media \(min-width: 901px\) and \(max-height: 800px\)[\s\S]*body\[data-route="stake"\] \.staking-dashboard \{[\s\S]*height:\s*min\(100%, 460px\) !important;[\s\S]*grid-template-rows:\s*clamp\(104px, 15dvh, 118px\) minmax\(0, 1fr\) !important/);
+  assert.match(fitStyles, /@media \(min-width: 901px\) and \(max-height: 800px\)[\s\S]*body\[data-route="stake"\] \.staking-dashboard \{[\s\S]*height:\s*min\(100%, 332px\) !important;[\s\S]*grid-template-rows:\s*minmax\(0, 1fr\) !important/);
 });
 
 test('stake vertical order and spacing are explicit at every responsive mode', () => {
-  assert.match(styles, /\.staking-dashboard \{[\s\S]*grid-template-areas:[\s\S]*"history history"[\s\S]*"overview actions"/);
+  assert.match(styles, /\.staking-dashboard \{[\s\S]*grid-template-areas:\s*"overview actions"/);
   assert.match(styles, /\.staking-overview > :is\(\.stake-rewards, \.staking-position-strip\),[\s\S]*\.staking-actions > \.staking-layout \{[\s\S]*grid-area:\s*auto !important/);
-  assert.match(styles, /@media \(max-width: 900px\)[\s\S]*grid-template-areas:[\s\S]*"history"[\s\S]*"overview"[\s\S]*"actions"/);
-  assert.match(styles, /\.staking-dashboard > \.staking-history,[\s\S]*\.stake-composer[\s\S]*margin:\s*0 !important/);
+  assert.match(styles, /@media \(max-width: 900px\)[\s\S]*grid-template-areas:[\s\S]*"overview"[\s\S]*"actions"/);
+  assert.match(styles, /\.staking-dashboard :is\([\s\S]*\.stake-composer[\s\S]*margin:\s*0 !important/);
 });
 
 test('staking history keeps its accessible label without a native hover tooltip', () => {
@@ -154,7 +157,7 @@ test('desktop Referrals uses a compact link card and an aligned explanatory rail
 
 test('desktop Stake and Referrals share a restrained 1440px content frame', () => {
   assert.match(fitStyles, /body\[data-route="stake"\] \.staking-shell\.page-view\.active,[\s\S]*body\[data-route="referrals"\][\s\S]*width:\s*min\(1440px, calc\(100% - 48px\)\) !important/);
-  assert.match(fitStyles, /body\[data-route="stake"\] \.staking-dashboard \{[\s\S]*height:\s*min\(100%, 500px\) !important/);
+  assert.match(fitStyles, /body\[data-route="stake"\] \.staking-dashboard \{[\s\S]*height:\s*min\(100%, 388px\) !important/);
   assert.match(fitStyles, /body\[data-route="referrals"\] \.referrals-dashboard \{[\s\S]*height:\s*min\(100%, 620px\) !important/);
 });
 

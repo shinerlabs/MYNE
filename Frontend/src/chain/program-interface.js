@@ -34,6 +34,7 @@ export const MYNE_INSTRUCTIONS = Object.freeze({
   settleRoundVerified: 'settle_round_verified',
   claimRound: 'claim_receipt',
   claimMyne: 'claim_myne',
+  burnUnclaimedMyne: 'burn_unclaimed_myne',
   refundReceipt: 'refund_receipt',
   stake: 'stake_standard',
   burnStake: 'burn_stake',

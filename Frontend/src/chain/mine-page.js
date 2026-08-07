@@ -15,7 +15,7 @@ import {
 import {
   claimRound, claimManyRounds, placeBet, readJackpot, readMiner, readMyBets, readRound, netClaimable, passiveOnRounds,
   verifyFeeEconomics, verifyPremine, verifyRoundTiming, waitForTx, withdrawUnrefined,
-  claimManyEthOnly, syncRoundGenesis,
+  burnUnclaimedMyne, claimManyEthOnly, syncRoundGenesis,
 } from './lottery.js';
 import { ROUND_DURATION, BETTING_DURATION, isPremine } from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
@@ -508,7 +508,31 @@ export async function claimEthOnly(roundIds) {
 export async function refine() {
   if (!getAccount()) return connectWallet();
   if (state.unclaimed === 0n) return notify('Nothing to refine');
-  await runTx('Refining…', withdrawUnrefined, refreshMiner);
+  return runTx('Claiming MYNE…', withdrawUnrefined, refreshMiner);
+}
+
+/** Settle every selected receipt, then complete the liquid MYNE claim with its 10% fee. */
+export async function claimAll(roundIds) {
+  if (!getAccount()) return connectWallet();
+  if (roundIds.length > 0) {
+    const claimed = await claimMany(roundIds);
+    // Do not present a partial receipt settlement as "Claim All". Already-confirmed batches remain
+    // safe and claimable MYNE stays in the miner account; the user can retry the remaining batch.
+    if (claimed !== roundIds.length) return false;
+  }
+  if (state.unclaimed === 0n) return notify('No MYNE available to claim');
+  return refine();
+}
+
+/** Settle every selected receipt, then convert all accumulated MYNE into permanent 5x weight. */
+export async function stakeAndBurnRewards(roundIds) {
+  if (!getAccount()) return connectWallet();
+  if (roundIds.length > 0) {
+    const claimed = await claimMany(roundIds);
+    if (claimed !== roundIds.length) return false;
+  }
+  if (state.unclaimed === 0n) return notify('No MYNE available to stake and burn');
+  return runTx('Staking + burning MYNE…', burnUnclaimedMyne, refreshMiner);
 }
 
 // --- boot ----------------------------------------------------------------------------

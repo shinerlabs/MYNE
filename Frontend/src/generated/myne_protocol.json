@@ -310,6 +310,157 @@
       ]
     },
     {
+      "name": "burn_unclaimed_myne",
+      "docs": [
+        "Converts every accumulated mining reward into permanent 5x burn-stake weight.",
+        "",
+        "The MYNE represented by `miner.unclaimed_myne` has not been minted yet, so this path",
+        "records the same permanent virtual burn used by Auto-burn instead of minting tokens only",
+        "to burn them in a second instruction. No claim fee is taken: no liquid MYNE leaves the",
+        "protocol, and the authority can only increase its own canonical stake position."
+      ],
+      "discriminator": [
+        93,
+        182,
+        248,
+        210,
+        192,
+        168,
+        209,
+        83
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "miner",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "miner",
+            "stake_position"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "cancel_auto_plan",
       "discriminator": [
         172,
@@ -3902,6 +4053,19 @@
       ]
     },
     {
+      "name": "UnclaimedMyneBurned",
+      "discriminator": [
+        135,
+        106,
+        196,
+        172,
+        153,
+        163,
+        44,
+        92
+      ]
+    },
+    {
       "name": "UnstakeRequested",
       "discriminator": [
         21,
@@ -5380,6 +5544,26 @@
           },
           {
             "name": "lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UnclaimedMyneBurned",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "reward_weight_added",
             "type": "u64"
           }
         ]

@@ -9,6 +9,13 @@ export function settledSolReward(prizeLamports, winningStake, winningTotal) {
   return stake > 0n && total > 0n ? (prize * stake) / total : 0n;
 }
 
+/** Exact basis-point share of the winning tile, for transparent result reporting. */
+export function winningTileShareBps(winningStake, winningTotal) {
+  const stake = BigInt(winningStake);
+  const total = BigInt(winningTotal);
+  return stake > 0n && total > 0n ? (stake * 10_000n) / total : 0n;
+}
+
 /** Mirrors the contract's cumulative-interval allocation, including integer remainder. */
 export function intervalReward(poolAmount, cumulativeStart, amount, denominator) {
   const pool = BigInt(poolAmount);

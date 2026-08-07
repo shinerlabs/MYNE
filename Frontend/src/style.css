@@ -7596,6 +7596,13 @@ body[data-route="mine"] .control-column .round-miners-panel {
 .round-miner-card > footer > span { color: #777980; font-size: 9px; font-weight: 650; letter-spacing: .05em; }
 .round-miner-card > footer > strong { display: flex; align-items: center; justify-content: flex-end; gap: 5px; color: #f2f2f3; font: 720 13px var(--font-number); }
 .round-miner-card > footer > strong em { color: #777980; font: 600 9px var(--font-sans); font-style: normal; }
+.round-miner-card > footer > strong.winning-stake-value em {
+  min-width: 45px;
+  margin-left: 4px;
+  color: #aeb0b5;
+  font-family: var(--font-number);
+  text-align: right;
+}
 .round-miner-card > footer > strong span { color: #55585e; }
 .round-miner-card > footer img:not(.eth) { width: 14px; height: 14px; object-fit: contain; }
 .round-miner-card > footer .eth { width: calc(15px * var(--eth-scale)); height: calc(15px * var(--eth-scale)); }

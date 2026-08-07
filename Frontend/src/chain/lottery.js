@@ -305,6 +305,30 @@ export async function withdrawUnrefined() {
   return sendInstructions(instructions);
 }
 
+/**
+ * Permanently convert all accumulated, unminted MYNE into 5x staking weight.
+ *
+ * This is intentionally a dedicated program instruction. Minting through `claimMyne` first would
+ * apply the liquid-claim fee and require a second token burn, contradicting the UI's 0% fee path.
+ */
+export async function burnUnclaimedMyne() {
+  const account = getAccount();
+  if (!account) throw new Error('Connect a Solana wallet first');
+  const miner = await fetchProtocolAccount('Miner', minerPda(account));
+  if (!miner || toBig(miner.unclaimedMyne) === 0n) throw new Error('Nothing to stake and burn');
+  const authority = new PublicKey(account);
+  const { program } = await getWritableProgram();
+  const instruction = await program.methods.burnUnclaimedMyne().accounts({
+    config: protocolPdas.config,
+    miningPool: protocolPdas.miningPool,
+    stakePool: protocolPdas.stakePool,
+    miner: minerPda(account),
+    stakePosition: stakePositionPda(account),
+    authority,
+  }).instruction();
+  return sendInstructions([instruction]);
+}
+
 export async function readRoundWinners(roundId) {
   const round = await readRound(roundId);
   const receiptRows = await decodedReceipts({ roundId });

@@ -115,8 +115,10 @@ restart Vite, and open `/local.html`.
 ## Controlled Devnet demo keeper
 
 After the admin wallet has been deliberately funded with Devnet SOL, the demo keeper can create
-ten ephemeral miners and three ephemeral stakers, deploy randomized demo amounts, and settle
-rounds. It is guarded against accidental use on any non-local/non-Devnet endpoint and requires an
+ten ephemeral miners and three ephemeral stakers, deploy controlled 10x-20x demo amounts, and
+settle rounds. Devnet partitions the 25-tile coverage between five miners to control faucet spend;
+the localhost fixture places all five on every tile with the same exact bid for equal-share payout
+audits. It is guarded against accidental use on any non-local/non-Devnet endpoint and requires an
 explicit program-id confirmation:
 
 ```bash

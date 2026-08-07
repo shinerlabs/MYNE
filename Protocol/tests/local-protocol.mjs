@@ -487,6 +487,52 @@ assert.equal(
   payerReferral,
   'A labelled referrer receives exactly 1% of the claimed gross amount',
 );
+
+// The Rewards panel's 0% Stake + Burn action must not mint liquid MYNE or route through the
+// 10% claim-fee path. It checkpoints passive rewards, consumes the complete unclaimed balance,
+// and records the same permanent 5x virtual stake used by Auto-burn.
+const referrerPositionBeforeBurn = await program.account.stakePosition.fetch(referrerStakePosition);
+const referrerMinerBeforeBurn = await program.account.miner.fetch(referrerMiner);
+const poolBeforeBurn = await program.account.miningPool.fetch(miningPool);
+const referrerPassiveDelta = BigInt(poolBeforeBurn.rewardPerUnclaimed.toString())
+  - BigInt(referrerMinerBeforeBurn.passiveRewardDebt.toString());
+const referrerPassive = BigInt(referrerMinerBeforeBurn.unclaimedMyne.toString())
+  * referrerPassiveDelta / 1_000_000_000_000_000_000n;
+const referrerBurnAmount = BigInt(referrerMinerBeforeBurn.unclaimedMyne.toString()) + referrerPassive;
+const supplyBeforeRewardBurn = (await splToken.getMint(provider.connection, mint)).supply;
+await program.methods
+  .burnUnclaimedMyne()
+  .accounts({
+    config,
+    miningPool,
+    stakePool,
+    miner: referrerMiner,
+    stakePosition: referrerStakePosition,
+    authority: referrer.publicKey,
+  })
+  .signers([referrer])
+  .rpc();
+const referrerMinerAfterBurn = await program.account.miner.fetch(referrerMiner);
+const referrerPositionAfterBurn = await program.account.stakePosition.fetch(referrerStakePosition);
+assert.equal(referrerMinerAfterBurn.unclaimedMyne.toString(), '0');
+assert.equal(
+  BigInt(referrerPositionAfterBurn.burnPrincipal.toString())
+    - BigInt(referrerPositionBeforeBurn.burnPrincipal.toString()),
+  referrerBurnAmount,
+  'Stake + Burn converts the complete checkpointed reward balance',
+);
+assert.equal(
+  BigInt(referrerPositionAfterBurn.rewardWeight.toString())
+    - BigInt(referrerPositionBeforeBurn.rewardWeight.toString()),
+  referrerBurnAmount * 5n,
+  'Stake + Burn adds exactly 5x permanent pool weight',
+);
+assert.equal(
+  (await splToken.getMint(provider.connection, mint)).supply,
+  supplyBeforeRewardBurn,
+  'The fee-free virtual burn path never mints liquid MYNE',
+);
+
 const adminBalanceBeforeFallback = (await splToken.getAccount(provider.connection, adminFeeAccount)).amount;
 const rogueTokens = await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, rogue.publicKey);
 const rogueState = await program.account.miner.fetch(rogueMiner);

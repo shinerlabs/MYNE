@@ -42,8 +42,9 @@ pnpm run local:keeper
 
 `local:keeper` is hard-locked to localhost. It creates ten funded demo miners, including five
 persistent cover-all miners that bid on every one of the 25 tiles each round. Those five miners
-randomize each tile between 10x and 20x the 0.001 SOL demo base, so every local round stays
-populated with varied bids and a confirmed winner. The keeper submits real receipt transactions
+share one exact per-tile bid that changes between 10x and 20x the 0.001 SOL demo base each round.
+This keeps every local round populated while making equal-bid reward splits directly auditable.
+The keeper submits real receipt transactions
 every 65-second round, executes funded user auto-plans, and settles immediately after the
 60-second bidding window so the confirmed tile is visible for the final 5 seconds.
 

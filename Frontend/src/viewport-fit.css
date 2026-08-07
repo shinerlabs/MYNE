@@ -153,27 +153,9 @@ body[data-route="referrals"] .feature-shell[data-page="referrals"] .referral-met
 
 body[data-route="stake"] .staking-dashboard {
   grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  grid-template-areas:
-    "history history"
-    "overview actions" !important;
-  grid-template-rows: clamp(78px, 17dvh, 138px) minmax(0, 1fr) !important;
+  grid-template-areas: "overview actions" !important;
+  grid-template-rows: minmax(0, 1fr) !important;
   align-items: stretch !important;
-}
-
-body[data-route="stake"] .staking-dashboard > .staking-history {
-  grid-area: history !important;
-  min-height: 0 !important;
-  height: 100% !important;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  margin: 0 !important;
-  padding: clamp(9px, 1.5dvh, 14px) clamp(12px, 1.4vw, 18px) !important;
-  overflow: hidden;
-}
-
-body[data-route="stake"] .staking-history-plot {
-  min-height: 0 !important;
-  height: auto !important;
 }
 
 body[data-route="stake"] :is(.staking-overview, .staking-actions) {
@@ -478,10 +460,9 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
   body[data-route="stake"] .staking-dashboard {
     grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas:
-      "history"
       "tabs"
       "active" !important;
-    grid-template-rows: clamp(66px, 14dvh, 86px) 32px minmax(0, 1fr) !important;
+    grid-template-rows: 32px minmax(0, 1fr) !important;
   }
 
   body[data-route="stake"] .staking-dashboard[data-mobile-view="overview"] > .staking-overview,
@@ -653,10 +634,6 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
 
   body[data-route="stake"] .staking-dashboard #stake-reward-updated,
   body[data-route="stake"] .staking-dashboard .eth-lifetime small {
-    display: none !important;
-  }
-
-  body[data-route="stake"] .staking-history > header > small {
     display: none !important;
   }
 
@@ -1129,13 +1106,13 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
   }
 
   body[data-route="stake"] .staking-dashboard {
-    height: min(100%, 500px) !important;
+    height: min(100%, 388px) !important;
     align-self: start !important;
     justify-self: stretch !important;
     grid-template-columns: minmax(0, 1fr) clamp(460px, 36vw, 500px) !important;
-    grid-template-rows: clamp(100px, 12dvh, 112px) minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
     column-gap: 14px !important;
-    row-gap: 12px !important;
+    row-gap: 0 !important;
   }
 
   body[data-route="stake"] .staking-metrics {
@@ -1164,16 +1141,6 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
     color: var(--surface-text-tertiary) !important;
     font-size: 7px !important;
     letter-spacing: .12em;
-  }
-
-  body[data-route="stake"] .staking-dashboard > .staking-history {
-    padding: 13px 18px 10px !important;
-  }
-
-  body[data-route="stake"] .staking-history > header span,
-  body[data-route="stake"] .staking-history > header small,
-  body[data-route="stake"] .staking-history > footer span {
-    font-size: 8.5px !important;
   }
 
   body[data-route="stake"] .staking-overview {
@@ -1634,9 +1601,9 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
   }
 
   body[data-route="stake"] .staking-dashboard {
-    height: min(100%, 460px) !important;
-    grid-template-rows: clamp(104px, 15dvh, 118px) minmax(0, 1fr) !important;
-    row-gap: 10px !important;
+    height: min(100%, 332px) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    row-gap: 0 !important;
   }
 
   body[data-route="stake"] .staking-overview {
@@ -1780,16 +1747,10 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
     height: 100% !important;
     grid-template-columns: minmax(0, 1fr) !important;
     grid-template-areas:
-      "history"
       "tabs"
       "active" !important;
-    grid-template-rows: 58px 30px minmax(0, 1fr) !important;
+    grid-template-rows: 30px minmax(0, 1fr) !important;
     gap: 6px !important;
-  }
-
-  body[data-route="stake"] .staking-dashboard > .staking-history {
-    grid-area: history !important;
-    padding: 7px 14px 5px !important;
   }
 
   body[data-route="stake"] .staking-dashboard > .stake-dashboard-tabs {

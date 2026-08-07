@@ -1720,6 +1720,50 @@ pub mod myne_protocol {
         Ok(())
     }
 
+    /// Converts every accumulated mining reward into permanent 5x burn-stake weight.
+    ///
+    /// The MYNE represented by `miner.unclaimed_myne` has not been minted yet, so this path
+    /// records the same permanent virtual burn used by Auto-burn instead of minting tokens only
+    /// to burn them in a second instruction. No claim fee is taken: no liquid MYNE leaves the
+    /// protocol, and the authority can only increase its own canonical stake position.
+    pub fn burn_unclaimed_myne(ctx: Context<BurnUnclaimedMyne>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
+        checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
+
+        let amount = ctx.accounts.miner.unclaimed_myne;
+        require!(amount > 0, MyneError::InsufficientBalance);
+        ctx.accounts.miner.unclaimed_myne = 0;
+        ctx.accounts.mining_pool.total_unclaimed = ctx
+            .accounts
+            .mining_pool
+            .total_unclaimed
+            .checked_sub(amount)
+            .ok_or(MyneError::ArithmeticOverflow)?;
+        add_virtual_burn(
+            &mut ctx.accounts.config,
+            &mut ctx.accounts.stake_pool,
+            &mut ctx.accounts.stake_position,
+            amount,
+        )?;
+        ctx.accounts.miner.lifetime_myne_claimed =
+            checked_add(ctx.accounts.miner.lifetime_myne_claimed, amount)?;
+
+        emit!(StakeChanged {
+            authority: ctx.accounts.authority.key(),
+            standard_delta: 0,
+            burn_delta: amount as i128,
+        });
+        emit!(UnclaimedMyneBurned {
+            authority: ctx.accounts.authority.key(),
+            amount,
+            reward_weight_added: amount
+                .checked_mul(BURN_WEIGHT_MULTIPLIER)
+                .ok_or(MyneError::ArithmeticOverflow)?,
+        });
+        Ok(())
+    }
+
     pub fn claim_myne(ctx: Context<ClaimMyne>) -> Result<()> {
         require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         assert_canonical_token_account(
@@ -2149,6 +2193,29 @@ mod motherlode_tests {
         assert_eq!(first, 1_584_000_000);
         assert_eq!(second, 176_000_000);
         assert_eq!(first + second, prize);
+    }
+
+    #[test]
+    fn five_equal_winning_tile_contributions_receive_equal_sol_rewards() {
+        // This is the user-visible fairness invariant: tile count, losing-tile
+        // deployment and wallet identity cannot affect a winning receipt's share.
+        let prize: u64 = 1_100_000_000;
+        let stake: u64 = 15_000_000;
+        let winning_total = stake.checked_mul(5).unwrap();
+        let rewards = (0..5)
+            .map(|index| {
+                proportional_interval_share(
+                    prize,
+                    stake.checked_mul(index).unwrap(),
+                    stake,
+                    winning_total,
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(rewards, vec![220_000_000; 5]);
+        assert_eq!(rewards.iter().sum::<u64>(), prize);
     }
 
     #[test]
@@ -2936,6 +3003,21 @@ pub struct ClaimMyne<'info> {
     pub token_program: Interface<'info, TokenInterface>,
 }
 
+#[derive(Accounts)]
+pub struct BurnUnclaimedMyne<'info> {
+    #[account(mut, seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(mut, seeds=[MINING_POOL_SEED], bump=mining_pool.bump)]
+    pub mining_pool: Account<'info, MiningPool>,
+    #[account(mut, seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
+    pub stake_pool: Account<'info, StakePool>,
+    #[account(mut, seeds=[MINER_SEED, authority.key().as_ref()], bump=miner.bump, has_one=authority)]
+    pub miner: Account<'info, Miner>,
+    #[account(mut, seeds=[STAKE_POSITION_SEED, authority.key().as_ref()], bump=stake_position.bump, has_one=authority)]
+    pub stake_position: Account<'info, StakePosition>,
+    pub authority: Signer<'info>,
+}
+
 #[event]
 pub struct ProtocolInitialized {
     pub admin: Pubkey,
@@ -3118,4 +3200,10 @@ pub struct MyneClaimed {
     pub fee_base_units: u64,
     pub referral_base_units: u64,
     pub admin_base_units: u64,
+}
+#[event]
+pub struct UnclaimedMyneBurned {
+    pub authority: Pubkey,
+    pub amount: u64,
+    pub reward_weight_added: u64,
 }

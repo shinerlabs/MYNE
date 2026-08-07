@@ -43,12 +43,10 @@ body[data-route="stake"] .staking-metrics strong {
   align-items: start;
 }
 
-/* Stake uses named rows so every responsive mode has one source of truth for vertical order.
-   This prevents older grid-row and margin experiments from moving either column independently. */
+/* Stake is intentionally an operational two-column view. Historical staking context lives in
+   About → Staking, leaving this route focused on claimable SOL and position controls. */
 body[data-route="stake"] .staking-dashboard {
-  grid-template-areas:
-    "history history"
-    "overview actions";
+  grid-template-areas: "overview actions";
 }
 
 .referrals-dashboard {
@@ -57,17 +55,6 @@ body[data-route="stake"] .staking-dashboard {
 
 .staking-dashboard-column,
 .referrals-column { min-width: 0; }
-
-/* The staking history is the shared context for both the rewards summary and the position
-   controls, so it owns the first full-width row instead of competing with the composer. */
-body[data-route="stake"] .staking-dashboard > .staking-history {
-  grid-area: history !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  min-width: 0;
-  margin: 0;
-  box-sizing: border-box;
-}
 
 body[data-route="stake"] .staking-dashboard > .staking-overview { grid-area: overview !important; }
 body[data-route="stake"] .staking-dashboard > .staking-actions { grid-area: actions !important; }
@@ -286,16 +273,14 @@ body[data-route="referrals"] .referral-row {
 
   body[data-route="stake"] .staking-dashboard {
     grid-template-areas:
-      "history"
       "overview"
       "actions";
-    grid-template-rows: auto auto auto !important;
+    grid-template-rows: auto auto !important;
     row-gap: 18px;
   }
 
   /* Let the dashboard gap establish the rhythm. Route-specific margins previously doubled it at
      several breakpoints and made the chart, rewards and composer appear vertically offset. */
-  body[data-route="stake"] .staking-dashboard > .staking-history,
   body[data-route="stake"] .staking-dashboard :is(
     .staking-overview,
     .staking-actions,

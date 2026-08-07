@@ -21,7 +21,7 @@ import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, inv
 import {
   confirmedMinerRoundKey, previousConfirmedRoundId, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
-import { displayedMotherlodeSol, settledSolReward } from './chain/round-rewards.js';
+import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
 import { readSupplyStats } from './chain/supply.js';
 import { renderProtocolStats } from './about-stats.js';
 import { mountSolPrice, usdFor, getSolUsd, getMyneUsd, setMynePerSol, showPremineMynePrice } from './sol-price.js';
@@ -197,11 +197,11 @@ const claimPanel = `<section class="claim-panel panel rewards-panel collapsed" a
   </div>
   <div class="claimable-rounds" id="claimable-rounds" hidden></div>
   <div class="rewards-actions">
-    <button class="claim-eth-only" id="claim-eth-only">Claim SOL</button>
-    <button class="claim-all" id="claim-all"${isPremine ? ' disabled' : ''}>${isPremine ? 'MYNE locked' : 'Claim All'}</button>
+    <button class="claim-eth-only reward-action" id="claim-eth-only" type="button" data-reward-action="sol"><span>Claim SOL</span><small>Keep MYNE accruing</small></button>
+    <button class="claim-all reward-action" id="claim-all" type="button" data-reward-action="all"${isPremine ? ' disabled' : ''}><span data-reward-action-label>${isPremine ? 'MYNE locked' : 'Claim all'}</span><small>${isPremine ? 'Available after launch' : 'SOL + MYNE · 10% fee'}</small></button>
   </div>
 
-  <button class="rewards-stake" id="rewards-stake" data-route="stake">Stake / Burn (0% Fee)</button>
+  <button class="rewards-stake reward-action" id="rewards-stake" type="button" data-reward-action="burn"><span>Stake + burn</span><small>Permanent 5× weight · 0% fee</small></button>
   </div>
 </section>`;
 
@@ -332,11 +332,6 @@ document.querySelector('#app').innerHTML = `
     <header class="feature-hero route-header staking-hero"><div><span class="eyebrow">SOL REWARDS</span><h1>Stake.</h1><p class="staking-hero-subtitle">8% of all mining volume is paid to stakers in SOL.</p></div></header>
     <section class="feature-metrics staking-metrics"><article class="staking-yield-metric"><span>STAKING APY</span><strong id="metric-apr">—</strong><small>LAST 30 MINUTES</small></article><article><span>TOTAL STAKED</span><strong><img src="/gld-icon-transparent.png" alt=""/> <b id="metric-staked">—</b></strong></article><article><span>SOL REWARDS POOL</span><strong class="staking-sol-pool">${solIcon()} <b id="metric-pool">—</b></strong></article><article><span>STAKERS</span><strong id="metric-stakers">—</strong></article></section>
     <div class="staking-dashboard" data-mobile-view="overview">
-      <section class="staking-history panel" data-staking-chart aria-label="Total MYNE staked over time">
-    <header><div><span>STAKED MYNE · 30 DAYS</span><strong data-staking-chart-total>—</strong></div><small>PAST 30 DAYS · ON-CHAIN</small></header>
-      <div class="staking-history-plot" data-staking-chart-plot><span>Loading staking history…</span></div>
-      <footer><span data-staking-chart-start>—</span><span>NOW</span></footer>
-      </section>
       <nav class="dashboard-view-tabs stake-dashboard-tabs" role="tablist" aria-label="Staking dashboard view">
         <button class="active" id="stake-overview-tab" type="button" role="tab" aria-selected="true" aria-controls="stake-overview-view" data-dashboard-view="overview">Rewards</button>
         <button id="stake-actions-tab" type="button" role="tab" aria-selected="false" aria-controls="stake-actions-view" data-dashboard-view="actions" tabindex="-1">Stake / Unstake</button>
@@ -1783,7 +1778,6 @@ const refreshStakingMetrics = async () => {
 
 const refreshStaking = async () => {
   void refreshStakingMetrics();
-  void refreshStakingHistory();
   try {
     stakingState = await readStaking(chain.state.account);
     updateStake();
@@ -2502,6 +2496,7 @@ const setAboutSection = (name) => {
   const label = aboutNavToggle.querySelector('b');
   const active = document.querySelector(`[data-about-section="${target}"]`);
   if (label && active) label.textContent = active.textContent;
+  if (target === 'staking-model') void refreshStakingHistory();
   if (target === 'stats') void refreshProtocolStats();
   if (target === 'addresses') void renderTransparencyAddresses();
 };
@@ -3819,6 +3814,7 @@ const renderChain = (state) => {
   setRow('#mined-chip-value', chain.format.solIcon(state.unclaimed + claimableTotals.bullion));
   const ethBtn = document.querySelector('#claim-eth-only');
   const allBtn = document.querySelector('#claim-all');
+  const burnBtn = document.querySelector('#rewards-stake');
   if (ethBtn) ethBtn.disabled = claimableTotals.count === 0;
   // "Claim All" covers BOTH exits, because from the user's side they are one intent: take what
   // I have earned. There are two on-chain paths and which applies is an implementation detail:
@@ -3836,10 +3832,12 @@ const renderChain = (state) => {
     // because passive MYNE is paid whole and carries no fee. Two different numbers on adjacent
     // controls, with no button next to the bigger one, reads as "the passive part is not included" —
     // it is, in the same single transfer.
-    allBtn.textContent = hasRounds
+    const label = allBtn.querySelector('[data-reward-action-label]');
+    if (label) label.textContent = hasRounds
       ? 'Claim All'
-      : (refinable > 0n ? `Refine → ${chain.format.solIcon(netReceivable)} MYNE` : 'Claim All');
+      : (refinable > 0n ? 'Claim MYNE' : 'Claim All');
   }
+  if (burnBtn) burnBtn.disabled = claimableTotals.count === 0 && refinable === 0n;
   const headStrong = document.querySelector('.claim-heading > strong');
   if (headStrong) headStrong.innerHTML = headline;
   // ...and the label says which of the two it is, so the number is never ambiguous.
@@ -4433,34 +4431,30 @@ document.querySelector('#auto-plan').addEventListener('click', (event) => {
   if (event.target.closest('#approve-delegate')) chain.approveAutoClaim();
 });
 
-// Claim buttons inside the Refine panel (delegated — the list is re-rendered on refresh).
+// Reward actions are delegated because their balances and disabled states update after every
+// settlement. Each control maps to a distinct protocol intent; never alias Claim All to SOL-only.
 document.querySelector('.claim-panel').addEventListener('click', async (event) => {
-  const all = event.target.closest('#claim-all');
-  const ethOnly = event.target.closest('#claim-eth-only');
-  if (!all && !ethOnly) return;
+  const action = event.target.closest('[data-reward-action]');
+  if (!action || action.disabled) return;
 
   const ids = claimableRounds.map((r) => r.roundId);
-  (all || ethOnly).disabled = true;
+  const buttons = [...document.querySelectorAll('.claim-panel [data-reward-action]')];
+  buttons.forEach((button) => { button.disabled = true; });
+  action.classList.add('is-busy');
+  action.setAttribute('aria-busy', 'true');
   try {
-    if (all) {
-      // Two on-chain exits, one user intent. Unclaimed ROUNDS settle through claimMany (SOL+MYNE);
-      // MYNE already sitting in miner state — what an SOL-only claim leaves behind, which is every
-      // claim made during premine — only comes out through withdrawUnrefinedBullion. Pick whichever
-      // actually applies rather than greying the button out and stranding a visible balance.
-      if (ids.length > 0) {
-        // One signature per 15 rounds — a single one for any normal backlog, batched only when the
-        // list is long enough that one transaction would not fit.
-        await chain.claimMany(ids);
-      } else {
-        await chain.refine();
-      }
-    } else {
+    if (action.dataset.rewardAction === 'sol') {
       await chain.claimEthOnly(ids);
+    } else if (action.dataset.rewardAction === 'all') {
+      await chain.claimAll(ids);
+    } else if (action.dataset.rewardAction === 'burn') {
+      await chain.stakeAndBurnRewards(ids);
     }
   } finally {
-    (all || ethOnly).disabled = false;
+    action.classList.remove('is-busy');
+    action.removeAttribute('aria-busy');
+    await refreshRoundHistory({ force: true });
   }
-  await refreshRoundHistory();
 });
 roundResults.addEventListener('click', async (event) => {
   const button = event.target.closest('[data-claim-round]');
@@ -4683,6 +4677,11 @@ const minerRoundResult = (miner) => {
   };
 };
 
+const formatBpsPercent = (basisPoints) => {
+  const value = BigInt(basisPoints);
+  return `${value / 100n}.${String(value % 100n).padStart(2, '0')}%`;
+};
+
 const closeRoundMinerCard = () => {
   window.clearTimeout(roundMinerCloseTimer);
   roundMinerCard?.remove();
@@ -4725,10 +4724,14 @@ const openRoundMinerCard = (wallet, anchor) => {
     ? `<img src="/gld-icon-transparent.png" alt=""/><b>${chain.format.solIcon(result.gldWon, 2)}</b>`
     : '<em>Pending result</em>';
   const deployedTitle = 'Total SOL deployed across every tile';
+  const winningShare = winningTileShareBps(result.winningStake, result.winningTileTotal);
+  const winningStakeTitle = result.winningTileTotal > 0n
+    ? `${formatBpsPercent(winningShare)} of all SOL committed to winning tile #${result.winningSquare + 1}`
+    : `No SOL committed to winning tile #${result.winningSquare + 1}`;
   const rewardTitle = result.winningTileTotal > 0n
     ? `88% of all round deployments × ${chain.format.ethSmart(result.winningStake)} SOL on the winning tile ÷ ${chain.format.ethSmart(result.winningTileTotal)} SOL on that tile`
     : 'No winning-tile deployment';
-  card.innerHTML = `<header><span>ROUND #${roundNo(miner.roundId)}</span><code title="${miner.address}">${chain.format.short(miner.address)}</code></header><div class="round-miner-grid">${grid}</div><footer><span title="${deployedTitle}">DEPLOYED</span><strong title="${deployedTitle}">${solIcon('miner-card-eth')}<b>${chain.format.ethSmart(miner.deployed)}</b></strong><span title="${rewardTitle}">SOL REWARD</span><strong title="${rewardTitle}">${solReward}</strong><span>MYNE REWARD</span><strong>${myneReward}</strong></footer>`;
+  card.innerHTML = `<header><span>ROUND #${roundNo(miner.roundId)}</span><code title="${miner.address}">${chain.format.short(miner.address)}</code></header><div class="round-miner-grid">${grid}</div><footer><span title="${deployedTitle}">TOTAL DEPLOYED</span><strong title="${deployedTitle}">${solIcon('miner-card-eth')}<b>${chain.format.ethSmart(miner.deployed)}</b></strong><span title="${winningStakeTitle}">WINNING TILE</span><strong title="${winningStakeTitle}" class="winning-stake-value">${solIcon('miner-card-eth')}<b>${chain.format.ethSmart(result.winningStake)}</b><em>${formatBpsPercent(winningShare)}</em></strong><span title="${rewardTitle}">SOL REWARD</span><strong title="${rewardTitle}">${solReward}</strong><span>MYNE REWARD</span><strong>${myneReward}</strong></footer>`;
   document.body.appendChild(card);
   roundMinerCard = card;
   positionRoundMinerCard(anchor);
@@ -4779,7 +4782,7 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
     Math.max(0, Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE) - 1),
   );
   if (roundMinersLabel) {
-    roundMinersLabel.textContent = `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · ${confirmedMiners.length} MINER${confirmedMiners.length === 1 ? '' : 'S'}`;
+    roundMinersLabel.textContent = `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · ${confirmedMiners.length} MINER${confirmedMiners.length === 1 ? '' : 'S'} · SOL DEPLOYED`;
   }
   roundMinersList.textContent = '';
   const pageCount = Math.max(1, Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE));
@@ -4810,7 +4813,8 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
     );
     row.classList.toggle('auto-burn', isAutoBurn);
     const soloMyneWinner = Boolean(miner.isSoloWinner);
-    row.setAttribute('aria-label', `${chain.format.short(miner.address)}${isAutoBurn ? ', auto-burn participant' : ''}${soloMyneWinner ? ', solo MYNE winner' : ''}, deployed ${chain.format.ethSmart(miner.deployed)} SOL. Open for round rewards.`);
+    const winningShare = winningTileShareBps(miner.winningStake ?? 0n, miner.winningTileTotal ?? 0n);
+    row.setAttribute('aria-label', `${chain.format.short(miner.address)}${isAutoBurn ? ', auto-burn participant' : ''}${soloMyneWinner ? ', solo MYNE winner' : ''}, total deployed ${chain.format.ethSmart(miner.deployed)} SOL, winning tile ${chain.format.ethSmart(miner.winningStake ?? 0n)} SOL, ${formatBpsPercent(winningShare)} pool share. Open for exact rewards.`);
     const soloMyneBadge = soloMyneWinner
       ? '<span class="solo-myne-badge" aria-label="Solo MYNE reward"><b aria-hidden="true">+</b><img src="/gld-icon-transparent.png" alt=""/></span>'
       : '';

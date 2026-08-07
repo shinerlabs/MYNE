@@ -1,7 +1,7 @@
 export const FEATURE_REQUIREMENTS = Object.freeze({
   configuration: ['initialize_protocol', 'initialize_liquidity_gate', 'set_paused', 'propose_admin', 'accept_admin', 'set_randomness_authority'],
   mining: ['open_round', 'bind_round_randomness', 'register_miner', 'deploy', 'settle_round_verified', 'claim_receipt', 'refund_receipt', 'claim_myne'],
-  staking: ['stake_standard', 'burn_stake', 'request_unstake', 'withdraw_unstaked', 'claim_staking_rewards', 'fund_staking_rewards'],
+  staking: ['stake_standard', 'burn_stake', 'burn_unclaimed_myne', 'request_unstake', 'withdraw_unstaked', 'claim_staking_rewards', 'fund_staking_rewards'],
   referrals: ['register_miner', 'claim_myne'],
   autoRound: ['create_auto_plan', 'configure_auto_plan', 'fund_auto_plan', 'cancel_auto_plan', 'execute_auto_plan', 'claim_auto_burn_receipt'],
   // Trading is deliberately external to MYNE. This remains unavailable until a concrete Meteora

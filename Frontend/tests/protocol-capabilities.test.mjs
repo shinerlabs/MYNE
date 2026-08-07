@@ -20,6 +20,7 @@ test('feature detection fails closed when an instruction is absent', () => {
   const capabilities = capabilitiesFromIdl({ instructions: [{ name: 'stake_standard' }] });
   assert.deepEqual(capabilities.staking.missing, [
     'burn_stake',
+    'burn_unclaimed_myne',
     'request_unstake',
     'withdraw_unstaked',
     'claim_staking_rewards',

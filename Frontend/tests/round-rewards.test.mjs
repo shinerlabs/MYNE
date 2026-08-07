@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { displayedMotherlodeSol, intervalReward, settledSolReward, sharedRoundReward } from '../src/chain/round-rewards.js';
+import {
+  displayedMotherlodeSol, intervalReward, settledSolReward, sharedRoundReward, winningTileShareBps,
+} from '../src/chain/round-rewards.js';
 
 test('winning miners share the settled 88% SOL prize pool by winning-tile stake', () => {
   const grossRound = 1_000_000_000n;
@@ -18,6 +20,17 @@ test('a 90% winning-tile contribution receives exactly 90% of SOL', () => {
   const winningTileTotal = 1_000_000_000n;
   assert.equal(settledSolReward(prize, 900_000_000n, winningTileTotal), 792_000_000n);
   assert.equal(settledSolReward(prize, 100_000_000n, winningTileTotal), 88_000_000n);
+});
+
+test('five equal winning-tile bids receive five equal SOL rewards', () => {
+  const prize = 1_100_000_000n;
+  const stake = 15_000_000n;
+  const winningTileTotal = stake * 5n;
+  const rewards = Array.from({ length: 5 }, () => settledSolReward(prize, stake, winningTileTotal));
+
+  assert.deepEqual(rewards, Array(5).fill(220_000_000n));
+  assert.equal(winningTileShareBps(stake, winningTileTotal), 2_000n);
+  assert.equal(rewards.reduce((sum, value) => sum + value, 0n), prize);
 });
 
 test('losing-tile deployments remain in the prize pool', () => {

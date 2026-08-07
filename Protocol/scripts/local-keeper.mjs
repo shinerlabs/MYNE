@@ -7,6 +7,8 @@ import anchor from '@anchor-lang/core';
 import web3 from '@solana/web3.js';
 import * as splToken from '@solana/spl-token';
 
+import { demoCoverageBids } from './demo-miner-bids.mjs';
+
 const { AnchorProvider, BN, Program, setProvider } = anchor;
 const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } = web3;
 const { TOKEN_PROGRAM_ID, getOrCreateAssociatedTokenAccount, transfer } = splToken;
@@ -90,9 +92,9 @@ const demoMiners = Array.from({ length: 10 }, (_, index) => {
     ? Keypair.fromSecretKey(Uint8Array.from(savedMinerKeys[index]))
     : Keypair.generate();
   if (index < 5) {
-    // Five persistent demo miners cover every tile together. Each covers five tiles with a
-    // randomized 10x–20x amount over the 0.001 SOL minimum, keeping every round winnable while
-    // fitting inside a small Devnet test-wallet balance.
+    // Five persistent demo miners cover every local tile with the same per-tile amount. Devnet
+    // partitions the 25 tiles between them to control faucet spend. The shared amount still moves
+    // from 10x-20x between rounds, but equal-looking winning bids are now exactly equal.
     return { keypair, coverAll: true, bids: {} };
   }
   const firstTile = (index * 2) % 25;
@@ -240,10 +242,7 @@ async function deployDemoMiners(roundId) {
     const receipt = receiptPda(roundId, authority, nonce);
     if (submittedReceipts.has(receipt.toBase58())) continue;
     const bids = demo.coverAll
-      ? Object.fromEntries(Array.from({ length: isDevnet ? 5 : 25 }, (_, offset) => [
-        (isDevnet ? index * 5 + offset : offset) % 25,
-        (10 + (randomBytes(1)[0] % (isDevnet ? 6 : 11))) * 1_000_000,
-      ]))
+      ? demoCoverageBids(roundId, index, isDevnet)
       : demo.bids;
     const amounts = Array.from({ length: 25 }, (_, tile) => new BN(String(bids[tile] ?? 0)));
     try {

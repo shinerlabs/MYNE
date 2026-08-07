@@ -248,3 +248,115 @@ body[data-route="mine"] .round-miner-avatar,
 body[data-route="mine"] .chat-reopen {
   background: var(--surface-control) !important;
 }
+
+/* Mining rewards use the same flat control hierarchy as the current dashboard. The three actions
+   remain visually distinct because they have different on-chain consequences: SOL-only is
+   secondary, a liquid MYNE claim is primary, and permanent 5x burn stake carries the brand ring. */
+body[data-route="mine"] .rewards-actions {
+  gap: 10px !important;
+  margin-bottom: 10px !important;
+}
+
+body[data-route="mine"] .reward-action {
+  position: relative;
+  min-width: 0;
+  min-height: 52px !important;
+  padding: 9px 14px !important;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  overflow: hidden;
+  border: 1px solid transparent !important;
+  border-radius: 14px !important;
+  box-shadow: none !important;
+  font-family: var(--font-sans);
+  text-align: left;
+  transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease, transform 150ms ease;
+}
+
+body[data-route="mine"] .reward-action > span {
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  letter-spacing: -.01em;
+}
+
+body[data-route="mine"] .reward-action > small {
+  color: var(--surface-text-tertiary);
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: .035em;
+  white-space: nowrap;
+}
+
+body[data-route="mine"] .claim-eth-only {
+  background: var(--surface-control) !important;
+  color: #f1f1f3 !important;
+}
+
+body[data-route="mine"] .claim-all {
+  background: #f3f3f4 !important;
+  color: #111113 !important;
+}
+
+body[data-route="mine"] .claim-all > small {
+  color: #606066 !important;
+}
+
+body[data-route="mine"] .rewards-stake {
+  width: 100%;
+  align-items: center;
+  background:
+    linear-gradient(var(--surface-control), var(--surface-control)) padding-box,
+    var(--tile-pearl-border) border-box !important;
+  color: #f4f4f5 !important;
+  text-align: center;
+}
+
+body[data-route="mine"] .reward-action:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+body[data-route="mine"] .claim-eth-only:not(:disabled):hover {
+  background: var(--surface-control-hover) !important;
+}
+
+body[data-route="mine"] .claim-all:not(:disabled):hover {
+  background: #ffffff !important;
+}
+
+body[data-route="mine"] .reward-action:focus-visible {
+  outline: 2px solid #ffffff !important;
+  outline-offset: 2px;
+}
+
+body[data-route="mine"] .reward-action:disabled {
+  opacity: .32 !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
+body[data-route="mine"] .reward-action.is-busy::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: reward-action-spin .7s linear infinite;
+}
+
+@keyframes reward-action-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 420px) {
+  body[data-route="mine"] .reward-action {
+    min-height: 48px !important;
+    padding-inline: 11px !important;
+  }
+  body[data-route="mine"] .reward-action > small { font-size: 7px; }
+}
