@@ -111,8 +111,13 @@ test -f scripts/round-archive-policy.mjs
 test -f scripts/prepare-admin-fallback-ata.mjs
 test -f scripts/derive-mainnet-addresses.mjs
 test -f scripts/provision-chat-admin.mjs
+test -f scripts/create-mainnet-mint.mjs
 test -f scripts/create-mainnet-token-metadata.mjs
 test -f scripts/migrate-fee-schedule-v6.mjs
+grep -q 'CONFIRM_CREATE_MYNE_MINT' scripts/create-mainnet-mint.mjs
+grep -q 'CONFIRM_LIQUIDITY_DESTINATION' scripts/create-mainnet-mint.mjs
+grep -q 'SUBMIT_MAINNET_MINT' scripts/create-mainnet-mint.mjs
+grep -q 'simulateTransaction' scripts/create-mainnet-mint.mjs
 grep -q 'CONFIRM_MAINNET_TOKEN_METADATA' scripts/create-mainnet-token-metadata.mjs
 grep -q 'SUBMIT_MAINNET_TOKEN_METADATA' scripts/create-mainnet-token-metadata.mjs
 grep -q 'simulateTransaction' scripts/create-mainnet-token-metadata.mjs

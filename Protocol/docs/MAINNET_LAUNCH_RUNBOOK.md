@@ -9,20 +9,21 @@ This is an ordered, controlled launch procedure—not an automatic deployment sc
 Mainnet must initialize fresh version-6 state. An existing version-5 config may use the reviewed
 one-way paused migration, but an older Devnet layout is not a Mainnet migration source.
 
-## 1. Prepare exactly three funded roles
+## 1. Prepare three continuously funded roles and one offline authority
 
-1. **Admin role:** deployer, upgrade authority, protocol admin, direct SOL-fee receiver, fallback
-   referral-fee owner and reserved Motherlode layout address. It receives the direct 1% round
+1. **Admin-fee role:** direct SOL-fee receiver, fallback referral-fee owner and reserved Motherlode
+   layout address. It receives the direct 1% round
    allocation plus 10% of the gross staking allocation (0.8% of volume), for 1.8% direct admin
-   revenue before integer dust. Keep this key hardware-backed/offline except for reviewed
-   administration.
+   revenue before integer dust.
 2. **Randomness role:** Switchboard authority, round rent payer, archive attestor, indexer and lifecycle keeper.
 3. **Buyback role:** receives only the 1% allocations, performs the registered-pool swaps and burns, and marks completion.
 
-All three addresses must be distinct, controlled and verified before initialization; verify the SOL
-fee receivers are System Program accounts and pre-create the admin fallback MYNE ATA. Use separate
-service credentials for Supabase/RPC. They are not funded Solana roles and must never enter the
-repository.
+The deployer remains a fourth, separate offline key for deployment, upgrades and protocol
+administration. Fund it only for a reviewed administrative transaction, then return excess SOL to
+controlled custody. The three continuously funded role addresses must be distinct, controlled and
+verified before initialization; verify the SOL fee receivers are System Program accounts and
+pre-create the admin fallback MYNE ATA. Use separate service credentials for Supabase/RPC. They are
+not funded Solana roles and must never enter the repository.
 
 Keep the operational mapping in an ignored local environment file. Set
 `MAINNET_ADMIN_FEE_WALLET` to the reviewed fee recipient; the protocol intentionally uses that
@@ -104,6 +105,23 @@ upgrade authority and deployed bytecode hash. Create the canonical legacy SPL mi
 the deployer temporarily acting as mint authority and no freeze authority. Mint exactly 100 MYNE to
 the reviewed launch account. Do not transfer mint authority yet: the Metaplex metadata instruction
 must be signed by the current mint authority.
+
+Generate the mint keypair outside the repository and record its public address. Run the guarded
+atomic mint preparation first without `SUBMIT_MAINNET_MINT`; it verifies the Mainnet genesis hash,
+simulates creation of the mint and destination ATA, and mints the entire genesis supply directly to
+the reviewed liquidity wallet. Only repeat with `SUBMIT_MAINNET_MINT` equal to the exact mint
+address after reviewing every printed address:
+
+```bash
+MAINNET_RPC_URL=<reviewed Mainnet RPC> \
+ANCHOR_WALLET=<reviewed deployer keypair path> \
+MYNE_MINT_KEYPAIR=<offline mint keypair path> \
+MAINNET_LIQUIDITY_WALLET=<reviewed launch wallet> \
+CONFIRM_SOLANA_GENESIS_HASH=5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2Nbd \
+CONFIRM_CREATE_MYNE_MINT=<reviewed mint address> \
+CONFIRM_LIQUIDITY_DESTINATION=<reviewed launch wallet> \
+pnpm prepare:mainnet-mint
+```
 
 Publish and independently fetch these exact release assets before creating metadata:
 

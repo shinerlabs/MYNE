@@ -12,6 +12,7 @@
     "local:keeper": "node scripts/local-keeper.mjs",
     "round:indexer": "node scripts/round-indexer.mjs",
     "round:lifecycle": "node scripts/round-lifecycle-keeper.mjs",
+    "prepare:mainnet-mint": "node scripts/create-mainnet-mint.mjs",
     "prepare:mainnet-metadata": "node scripts/create-mainnet-token-metadata.mjs",
     "addresses:mainnet": "node scripts/derive-mainnet-addresses.mjs",
     "prepare:admin-ata": "node scripts/prepare-admin-fallback-ata.mjs",

@@ -37,6 +37,8 @@ evidence only after the final clean artifact is built, hashed and exercised by t
 - The buyback keeper is dry-run by default, accepts only a direct Jupiter route through the registered Meteora DLMM pool, simulates swaps/burns, persists crash-recovery state and indexes each swap/burn signature before round archival.
 - The web client, round keeper and lifecycle keeper no longer use production-wide program account scans. Indexed addresses are fetched in bounded batches and all identities are revalidated on-chain.
 - A guarded script creates the one canonical fallback token account for the admin role after the Mainnet mint exists.
+- A guarded atomic mint script simulates first, creates a 9-decimal mint with no freeze authority,
+  and mints the entire 100 MYNE genesis supply directly to the exact confirmed liquidity wallet.
 - Canonical Metaplex fungible-token metadata is prepared by a simulation-first guarded script. It
   requires the exact 9-decimal/100-MYNE/no-freeze mint state, publishes name and symbol `MYNE`, and
   verifies byte-for-byte hosted artwork plus `myne.supply` and `@myne_solana` links before submission.
@@ -44,10 +46,10 @@ evidence only after the final clean artifact is built, hashed and exercised by t
   default/Devnet randomness and makes every settlement liquidity-gated. The manifest and preflight
   inspect the compiled SBF marker rather than trusting a source grep.
 - The zero-byte Agave 3.1.10 syscall metadata was repaired from a version-locked repository file. A clean Anchor SBF build now emits neither the syscall warning nor the earlier stack-overflow warning.
-- The operational model remains three distinct controlled funded roles: (1)
-  deployer/upgrade/admin/direct-fee/fallback, (2) Switchboard/round/indexer/lifecycle, and (3)
-  buyback. Temporary-account closure and batching provide the savings; keys are not aliased or
-  consolidated further.
+- The operational model uses three distinct continuously funded roles: (1) admin-fee/fallback,
+  (2) Switchboard/round/indexer/lifecycle and (3) buyback. The deployer/upgrade/admin key is a
+  separate offline authority funded only for reviewed administrative transactions. Temporary-account
+  closure and batching provide the savings; revenue and keeper roles are not aliased.
 - Canonical PDAs are derived offline and created by their initialization instructions; they are
   never pre-funded. The configured admin-fee wallet is also the no-referrer MYNE fallback owner,
   is supplied through ignored launch configuration, and is intentionally omitted from the curated

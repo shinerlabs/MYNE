@@ -59,6 +59,7 @@ test('administrative transaction scripts require an exact RPC genesis acknowledg
   for (const relative of [
     '../scripts/prepare-admin-fallback-ata.mjs',
     '../scripts/migrate-fee-schedule-v6.mjs',
+    '../scripts/create-mainnet-mint.mjs',
     '../scripts/create-mainnet-token-metadata.mjs',
   ]) {
     const source = await readFile(new URL(relative, import.meta.url), 'utf8');
@@ -80,6 +81,22 @@ test('MYNE metadata creation is fixed, hosted, simulated, and explicitly submitt
   assert.match(source, /sellerFeeBasisPoints: percentAmount\(0\)/);
   assert.match(source, /simulateTransaction/);
   assert.match(source, /SUBMIT_MAINNET_TOKEN_METADATA !== mintAddress/);
+});
+
+test('MYNE genesis mint is atomic, simulation-first, and exact-address guarded', async () => {
+  const source = await readFile(
+    new URL('../scripts/create-mainnet-mint.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /GENESIS_BASE_UNITS = 100_000_000_000n/);
+  assert.match(source, /createInitializeMint2Instruction\([\s\S]*null,[\s\S]*TOKEN_PROGRAM_ID/);
+  assert.match(source, /createAssociatedTokenAccountIdempotentInstruction/);
+  assert.match(source, /createMintToCheckedInstruction/);
+  assert.match(source, /CONFIRM_CREATE_MYNE_MINT/);
+  assert.match(source, /CONFIRM_LIQUIDITY_DESTINATION/);
+  assert.match(source, /SUBMIT_MAINNET_MINT/);
+  assert.match(source, /simulateTransaction/);
+  assert.match(source, /getGenesisHash/);
 });
 
 test('Mainnet artifact provenance requires the production feature in the binary', async () => {
