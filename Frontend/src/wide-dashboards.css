@@ -3,10 +3,36 @@
 body[data-route="stake"] .staking-shell.page-view.active,
 body[data-route="referrals"] .feature-shell.page-view.active {
   display: block !important;
-  width: min(1320px, calc(100vw - 48px)) !important;
+  width: min(1320px, calc(100% - 48px)) !important;
   max-width: 1320px !important;
   height: auto !important;
   margin-inline: auto !important;
+  box-sizing: border-box;
+}
+
+body[data-route="stake"] :is(.staking-hero, .staking-metrics, .staking-dashboard) {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box;
+}
+
+body[data-route="stake"] .staking-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+body[data-route="stake"] .staking-metrics article {
+  min-width: 0;
+  overflow: hidden;
+}
+
+body[data-route="stake"] .staking-metrics strong {
+  max-width: 100%;
+  min-width: 0;
+  justify-content: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .staking-dashboard,
@@ -95,6 +121,15 @@ body[data-route="stake"] .staking-dashboard .eth-claim-main,
 body[data-route="stake"] .staking-dashboard .eth-claim-actions {
   width: 100%;
   min-width: 0;
+}
+
+/* A retired card-header treatment targeted the reward card's first div and introduced negative
+   horizontal margins. In the current composition that first div is the balance itself, so those
+   offsets pull the balance outside its grid track unless they are explicitly cleared here. */
+body[data-route="stake"] .staking-dashboard .eth-claim-main {
+  margin: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
 }
 
 body[data-route="stake"] .staking-dashboard .eth-claim-actions {
@@ -212,7 +247,7 @@ body[data-route="referrals"] .referral-row {
 @media (max-width: 900px) {
   body[data-route="stake"] .staking-shell.page-view.active,
   body[data-route="referrals"] .feature-shell.page-view.active {
-    width: min(100% - 24px, 720px) !important;
+    width: min(calc(100% - 24px), 720px) !important;
     max-width: 720px !important;
   }
 
@@ -226,20 +261,65 @@ body[data-route="referrals"] .referral-row {
     grid-row: auto;
   }
 
+  body[data-route="stake"] .staking-dashboard .eth-claim-hero {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    grid-template-rows: auto 44px !important;
+  }
+
   body[data-route="referrals"] .referral-table-head,
   body[data-route="referrals"] .referral-list { min-width: 700px; }
 
   body[data-route="referrals"] .referrals-secondary { overflow-x: auto; }
 }
 
+@media (max-width: 760px) {
+  body[data-route="stake"] .staking-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  body[data-route="stake"] .staking-metrics article:nth-child(3) {
+    border-left: 0 !important;
+  }
+
+  body[data-route="stake"] .staking-metrics article:nth-child(n + 3) {
+    border-top: 1px solid var(--surface-rule, rgba(255,255,255,.065)) !important;
+  }
+}
+
 @media (max-width: 560px) {
   body[data-route="stake"] .staking-shell.page-view.active,
   body[data-route="referrals"] .feature-shell.page-view.active {
-    width: calc(100vw - 20px) !important;
+    width: calc(100% - 20px) !important;
     max-width: none !important;
   }
 
-  body[data-route="stake"] .staking-dashboard .eth-claim-hero { padding: 22px 20px; }
+  body[data-route="stake"] .staking-dashboard .eth-claim-hero {
+    gap: 18px !important;
+    padding: 22px 20px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-main {
+    justify-content: center !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto 44px !important;
+    gap: 9px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > :is(.eth-lifetime, .staking-share-group, #claim-stake-rewards) {
+    grid-column: 1 !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-share-group {
+    justify-content: center;
+  }
+
   body[data-route="stake"] .staking-dashboard .staking-position-strip { grid-template-columns: 1fr 1fr; }
   body[data-route="referrals"] .feature-shell[data-page="referrals"] .referral-performance {
     grid-template-columns: 1fr !important;

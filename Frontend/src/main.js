@@ -1689,7 +1689,7 @@ const refreshStakingMetrics = async () => {
         ? `On-chain SOL migration pending · ${m.queuedLegacyStockEth.toFixed(6)} SOL remains in the legacy queue.`
         : 'On-chain SOL reward migration pending.';
     }
-    setMetric('#metric-stakers', String(m.stakers));
+    setMetric('#metric-stakers', Number(m.stakers).toLocaleString());
     const apr = document.querySelector('#metric-apr')?.closest('article');
     const headerApr = document.querySelector('.header-apr');
     if (headerApr) {
