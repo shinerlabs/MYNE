@@ -229,7 +229,20 @@ async function processRound(indexedRound) {
   const randomness = await maybeCloseRandomness(indexedRound);
   if (!roundState) return { round: String(indexedRound.round_id), randomness, state: 'round-already-closed' };
   const receipts = await indexedReceipts(indexedRound.round_id);
-  assert.equal(receipts.length, Number(roundState.totalReceipts.toString()), 'Indexed receipt count does not match chain');
+  const chainReceiptCount = Number(roundState.totalReceipts.toString());
+  assert.ok(
+    receipts.length <= chainReceiptCount,
+    'Indexed receipt count exceeds the authoritative chain count',
+  );
+  if (receipts.length < chainReceiptCount) {
+    return {
+      round: String(indexedRound.round_id),
+      randomness,
+      state: 'awaiting-indexed-receipts',
+      indexedReceipts: receipts.length,
+      chainReceipts: chainReceiptCount,
+    };
+  }
   const now = Math.floor(Date.now() / 1000);
   let processed = [];
   if (asBig(roundState.processedReceipts) < asBig(roundState.totalReceipts)

@@ -11,6 +11,9 @@ test('receipt and randomness cleanup require a verified canonical archive', asyn
   assert.match(lifecycle, /archive_verified=eq\.true/);
   assert.match(lifecycle, /program\.methods\.closeReceipt/);
   assert.match(lifecycle, /program\.methods\.closeRound/);
+  assert.match(lifecycle, /receipts\.length <= chainReceiptCount/);
+  assert.match(lifecycle, /state: 'awaiting-indexed-receipts'/);
+  assert.match(lifecycle, /Indexed receipt count exceeds the authoritative chain count/);
 });
 
 test('indexer compares canonical history to the on-chain archive attestation', async () => {
