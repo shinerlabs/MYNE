@@ -1,9 +1,9 @@
 /**
  * Live SOL/USD, and the hover tooltip that puts a dollar figure on any SOL amount.
  *
- * The preferred price comes from our cached backend (`/rounds/api/sol-price`). Local development
- * and backend outages fall back to validated CoinGecko and Kraken responses; the last good quote
- * stays rendered until a later poll succeeds.
+ * An optional cached endpoint can be configured with VITE_SOL_PRICE_URL. Otherwise the browser
+ * queries validated CoinGecko and Kraken responses directly; the last good quote stays rendered
+ * until a later poll succeeds.
  *
  * Values are NOT rewritten in place. Every SOL figure on the site is rendered by a different piece
  * of code on its own refresh cycle, so injecting a dollar amount into the markup would mean
@@ -13,8 +13,9 @@
  */
 import { fetchSolPrice } from './chain/sol-price-feed.js';
 
-const ENDPOINT = `${window.location.origin}/rounds/api/sol-price`;
+const ENDPOINT = import.meta.env.VITE_SOL_PRICE_URL || '';
 const POLL_MS = 60_000;
+export const LIVE_MYNE_QUOTE_MAX_AGE_MS = POLL_MS * 2;
 
 let price = null;      // { usd, at, stale } | null
 let timer = null;
@@ -78,6 +79,7 @@ function paintHeader() {
     pill.setAttribute('aria-label', usd == null ? 'SOL price unavailable' : `SOL price ${fmtUsd(usd)}`);
     pill.classList.toggle('is-stale', Boolean(price?.stale));
   }
+  paintLiveMyneHeader();
 }
 
 /**
@@ -86,14 +88,23 @@ function paintHeader() {
  * swap module already reads that state on its own cycle.
  */
 export function setMynePerSol(mynePerSol) {
-  const el = document.querySelector('#gld-price');
-  if (!el) return;
   const usd = getSolUsd();
-  const ok = usd != null && Number.isFinite(mynePerSol) && mynePerSol > 0;
-  myneUsd = ok ? usd / mynePerSol : null;
-  paintMynePrice(ok ? fmtUsd(usd / mynePerSol) : '—');
+  const quoteOk = Number.isFinite(mynePerSol) && mynePerSol > 0;
+  liveMynePerSol = quoteOk ? mynePerSol : null;
+  liveMyneQuoteAt = quoteOk ? Date.now() : 0;
+  myneUsdSource = quoteOk ? 'live' : null;
+  myneUsd = usd != null && quoteOk ? usd / mynePerSol : null;
+  if (quoteOk) {
+    paintLiveMyneHeader();
+    return;
+  }
+  paintMynePrice('—');
   const pill = document.querySelector('#gld-price-pill');
-  if (pill) pill.setAttribute('aria-label', ok ? `MYNE price ${fmtUsd(usd / mynePerSol)}` : 'MYNE price unavailable');
+  if (pill) {
+    pill.classList.remove('is-stale');
+    pill.setAttribute('aria-label', 'MYNE price unavailable');
+    pill.setAttribute('title', 'Live MYNE/SOL pool quote unavailable');
+  }
 }
 
 /**
@@ -102,8 +113,51 @@ export function setMynePerSol(mynePerSol) {
  * module and every reader wants "whatever MYNE is currently worth" without caring which it is.
  */
 let myneUsd = null;
+let myneUsdSource = null;
+// Live pool quote only. Unlike `myneUsd`, this is never populated by the
+// pre-launch reference price, so financial metrics cannot mistake a marketing
+// placeholder for an executable market price.
+let liveMynePerSol = null;
+let liveMyneQuoteAt = 0;
 
-export const getMyneUsd = () => myneUsd;
+const liveMyneQuoteIsCurrent = (now = Date.now()) => liveMynePerSol != null
+  && Number.isFinite(now) && now >= liveMyneQuoteAt
+  && now - liveMyneQuoteAt <= LIVE_MYNE_QUOTE_MAX_AGE_MS;
+
+export const getMyneUsd = (now = Date.now()) => (
+  myneUsdSource === 'live' && !liveMyneQuoteIsCurrent(now) ? null : myneUsd
+);
+export const getLiveMynePerSol = (now = Date.now()) => (
+  liveMyneQuoteIsCurrent(now) ? liveMynePerSol : null
+);
+
+/** Keep the displayed USD leg current without pretending an expired pool quote is live. */
+function paintLiveMyneHeader() {
+  if (myneUsdSource !== 'live') return;
+  const mynePerSol = getLiveMynePerSol();
+  const usd = getSolUsd();
+  const mynePill = document.querySelector('#gld-price-pill');
+  if (mynePerSol == null) {
+    paintMynePrice('—');
+    if (mynePill) {
+      mynePill.classList.remove('is-stale');
+      mynePill.setAttribute('aria-label', 'MYNE price unavailable — live pool quote expired');
+      mynePill.setAttribute('title', 'Live MYNE/SOL pool quote unavailable');
+    }
+    return;
+  }
+  myneUsd = usd == null ? null : usd / mynePerSol;
+  paintMynePrice(myneUsd == null ? '—' : fmtUsd(myneUsd));
+  if (mynePill) {
+    mynePill.classList.toggle('is-stale', Boolean(price?.stale));
+    mynePill.setAttribute('aria-label', myneUsd == null
+      ? 'MYNE USD price unavailable'
+      : `MYNE price ${fmtUsd(myneUsd)} from the registered MYNE/SOL pool`);
+    mynePill.setAttribute('title', price?.stale
+      ? 'Registered MYNE/SOL pool quote · SOL/USD reference is stale'
+      : 'Registered MYNE/SOL pool spot quote');
+  }
+}
 
 /**
  * USD value of a pot holding BOTH legs — the Motherlode is SOL and MYNE together, and a headline
@@ -118,7 +172,11 @@ export function usdForSolAndMyne(solAmount, myneAmount) {
   const solUsd = getSolUsd();
   if (solUsd == null || !Number.isFinite(solAmount)) return null;
   let value = solAmount * solUsd;
-  if (myneUsd != null && Number.isFinite(myneAmount)) value += myneAmount * myneUsd;
+  // Route through the freshness-aware accessor. The header already hides an
+  // expired pool quote; combined-value tooltips must not keep valuing MYNE from
+  // the same stale internal number after the visible quote has disappeared.
+  const currentMyneUsd = getMyneUsd();
+  if (currentMyneUsd != null && Number.isFinite(myneAmount)) value += myneAmount * currentMyneUsd;
   return fmtUsd(value);
 }
 
@@ -140,6 +198,9 @@ export function showPremineMynePrice() {
   const el = document.querySelector('#gld-price');
   if (!el) return;
   myneUsd = PREMINE_MYNE_USD;
+  myneUsdSource = 'premine';
+  liveMynePerSol = null;
+  liveMyneQuoteAt = 0;
   // Written flat ("$100"), not through fmtUsd's two decimals: this is a round, chosen number, and
   // "$100.00" claims a precision to the cent that a placeholder does not have.
   paintMynePrice(`$${PREMINE_MYNE_USD.toLocaleString()}`);

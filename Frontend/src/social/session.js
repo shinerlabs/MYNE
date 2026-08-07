@@ -1,7 +1,8 @@
 import { getProvider } from '../chain/client.js';
 import { FUNCTIONS_URL, fetchJson } from './config.js';
 
-const CHAT_SESSION_KEY = 'gld-solana-chat-session';
+const CHAT_SESSION_KEY = 'myne-solana-chat-session-v1';
+const LEGACY_CHAT_SESSION_KEY = 'gld-solana-chat-session';
 let session = loadStoredSession();
 let getConnectedWallet = () => null;
 let notify = () => {};
@@ -11,19 +12,28 @@ export const configureSession = (opts) => {
   if (opts.notify) notify = opts.notify;
 };
 function loadStoredSession() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(CHAT_SESSION_KEY));
-    return stored?.token && new Date(stored.expiresAt).getTime() >= Date.now() ? stored : null;
-  } catch { return null; }
+  for (const key of [CHAT_SESSION_KEY, LEGACY_CHAT_SESSION_KEY]) {
+    try {
+      const stored = JSON.parse(localStorage.getItem(key));
+      if (stored?.token && new Date(stored.expiresAt).getTime() >= Date.now()) return stored;
+    } catch { /* ignore malformed or unavailable storage */ }
+  }
+  return null;
 }
 export const getSession = () => session;
 const saveSession = (next) => {
   session = next;
-  try { localStorage.setItem(CHAT_SESSION_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+  try {
+    localStorage.setItem(CHAT_SESSION_KEY, JSON.stringify(next));
+    localStorage.removeItem(LEGACY_CHAT_SESSION_KEY);
+  } catch { /* private mode */ }
 };
 export const clearSession = () => {
   session = null;
-  try { localStorage.removeItem(CHAT_SESSION_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(CHAT_SESSION_KEY);
+    localStorage.removeItem(LEGACY_CHAT_SESSION_KEY);
+  } catch { /* ignore */ }
 };
 const signatureBase64 = (signature) => {
   const bytes = signature instanceof Uint8Array ? signature : new Uint8Array(signature || []);

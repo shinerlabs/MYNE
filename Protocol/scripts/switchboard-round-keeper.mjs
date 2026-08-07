@@ -1,8 +1,10 @@
 /*
  * Switchboard round keeper for one-shot rehearsals and supervised production runs.
  *
- * Flow: create randomness account -> commit + open + bind -> deploys happen
- * externally -> reveal + verified settlement in the same transaction slot.
+ * Flow: create + open + bind an uncommitted randomness account -> deployments
+ * happen externally -> after betting closes, commit + record the commitment in
+ * one transaction -> wait for the seed slot -> reveal + verified settlement in
+ * the same transaction slot.
  * A production supervisor should run this script once per scheduled round with
  * the same instruction ordering. Keep the randomness keypair and payer in a
  * secret manager, never in the repository.
@@ -11,7 +13,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import anchor from '@anchor-lang/core';
 import * as sb from '@switchboard-xyz/on-demand';
-import { ComputeBudgetProgram, PublicKey, SystemProgram } from '@solana/web3.js';
+import { ComputeBudgetProgram, Keypair, PublicKey, SystemProgram } from '@solana/web3.js';
+import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 
 const { AnchorProvider, Program } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
@@ -33,6 +36,7 @@ const pda = (seed, ...extra) => PublicKey.findProgramAddressSync(
 )[0];
 const config = pda('config');
 const configState = await myne.account.protocolConfig.fetch(config);
+assert.equal(Number(configState.version), 6, 'Round keeper requires protocol fee schedule v6');
 assert.equal(
   configState.randomnessAuthority.toBase58(),
   keypair.publicKey.toBase58(),
@@ -43,7 +47,11 @@ assert.equal(
   switchboardProgram.programId.toBase58(),
   'RPC network, configured randomness program, and Switchboard SDK program do not match',
 );
-const isMainnet = configState.randomnessProgram.toBase58() === sb.ON_DEMAND_MAINNET_PID.toBase58();
+const network = requireMatchingSolanaNetwork({
+  genesisHash: await connection.getGenesisHash(),
+  randomnessProgram: configState.randomnessProgram.toBase58(),
+});
+const isMainnet = network === 'mainnet-beta';
 const queue = sb.getDefaultQueueAddress(isMainnet);
 const scheduledRound = Math.floor(
   (Math.floor(Date.now() / 1000) - Number(configState.initializedAt.toString()))
@@ -102,13 +110,30 @@ const sendKeeperInstructions = async (ixs, extraSigners = []) => {
   return { signature, measuredUnits, computeLimit };
 };
 
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const chainTimeSeconds = async () => {
+  const slot = await connection.getSlot(commitment);
+  const blockTime = await connection.getBlockTime(slot);
+  assert.ok(Number.isInteger(blockTime), `Confirmed block time is unavailable at slot ${slot}`);
+  return blockTime;
+};
+const waitForChainTimestamp = async (target) => {
+  for (;;) {
+    const remaining = target - await chainTimeSeconds();
+    if (remaining <= 0) return;
+    await sleep(Math.min(5_000, Math.max(400, remaining * 1_000)));
+  }
+};
+
 let roundState = await myne.account.round.fetchNullable(round);
 let randomnessPubkey = roundState?.randomnessAccount ?? null;
-let createSig = null;
+let bindSig = null;
 let commitSig = null;
 if (!roundState) {
-  const [randomness, randomnessKeypair, [createIx, commitIx]] = await sb.Randomness.createAndCommitIxs(
+  const randomnessKeypair = Keypair.generate();
+  const [randomness, createIx] = await sb.Randomness.create(
     switchboardProgram,
+    randomnessKeypair,
     queue,
     keypair.publicKey,
   );
@@ -122,23 +147,47 @@ if (!roundState) {
     .accounts({ config, round, randomnessAccount: randomnessPubkey, authority: keypair.publicKey })
     .instruction();
 
-  createSig = (await sendKeeperInstructions([createIx], [randomnessKeypair])).signature;
-
-  // Commit, open and bind are atomic: no deployment can be accepted without
-  // the future seed slot already fixed by Switchboard.
-  commitSig = (await sendKeeperInstructions([commitIx, openIx, bindIx])).signature;
+  // The request is created, the scheduled round is opened, and the still-
+  // uncommitted request is bound atomically. No deployment can be accepted in
+  // the gap, and no future seed slot exists while betting remains open.
+  bindSig = (await sendKeeperInstructions(
+    [createIx, openIx, bindIx],
+    [randomnessKeypair],
+  )).signature;
   roundState = await myne.account.round.fetch(round);
 } else {
   assert.ok(!randomnessPubkey.equals(PublicKey.default), 'Existing round has no bound randomness account');
+}
+
+const randomnessClient = new sb.Randomness(switchboardProgram, randomnessPubkey);
+const asBigInt = (value) => BigInt(value?.toString?.() ?? value ?? 0);
+const bettingEndsAt = Number(roundState.bettingEndsAt.toString());
+const initialRandomness = await randomnessClient.loadData();
+if (asBigInt(roundState.randomnessCommitSlot) === 0n) {
+  assert.equal(asBigInt(initialRandomness.seedSlot), 0n, 'Bound randomness was committed without an atomic MYNE record');
+  assert.equal(asBigInt(initialRandomness.revealSlot), 0n, 'Bound randomness was revealed before betting closed');
+} else if (!roundState.settled) {
+  assert.equal(
+    asBigInt(initialRandomness.seedSlot),
+    asBigInt(roundState.randomnessCommitSlot),
+    'Switchboard seed slot does not match the MYNE commitment record',
+  );
+  assert.equal(
+    asBigInt(initialRandomness.revealSlot),
+    0n,
+    'Randomness was revealed without atomic settlement; wait for permissionless refunds',
+  );
 }
 
 console.log(JSON.stringify({
   ok: true,
   round: ROUND_ID.toString(),
   randomnessAccount: randomnessPubkey.toBase58(),
-  createSignature: createSig,
+  bindSignature: bindSig,
   commitSignature: commitSig,
-  status: 'committed-awaiting-deployments-and-reveal',
+  status: asBigInt(roundState.randomnessCommitSlot) === 0n
+    ? 'bound-uncommitted-accepting-deployments'
+    : 'committed-awaiting-reveal',
 }, null, 2));
 
 // Execute every funded active Auto-round plan during the betting window. The
@@ -146,50 +195,117 @@ console.log(JSON.stringify({
 // the keeper cannot change tile amounts or redirect funds.
 const autoExecutions = [];
 const receiptRent = BigInt(await connection.getMinimumBalanceForRentExemption(468));
-const activePlanIndex = await indexedRows('mine_auto_plans?active=eq.true&select=authority&order=authority.asc');
+let activePlanIndex = [];
+if ((await chainTimeSeconds()) < bettingEndsAt && asBigInt(roundState.randomnessCommitSlot) === 0n) {
+  try {
+    activePlanIndex = await indexedRows('mine_auto_plans?active=eq.true&select=authority&order=authority.asc');
+  } catch (error) {
+    // Auto-round availability may degrade when the index is unavailable, but
+    // the randomness lifecycle must still commit and settle the round.
+    console.error(JSON.stringify({
+      event: 'auto-plan-index-unavailable',
+      round: ROUND_ID.toString(),
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
 const executable = [];
 for (const indexed of activePlanIndex) {
-  const authority = new PublicKey(indexed.authority);
-  const autoPlan = pda('auto_plan', authority.toBuffer());
-  const plan = await myne.account.autoPlan.fetchNullable(autoPlan);
-  if (!plan || !plan.authority.equals(authority)) continue;
-  const perRound = plan.amounts.reduce((sum, amount) => sum + BigInt(amount.toString()), 0n);
-  if (!plan.active || BigInt(plan.balanceLamports.toString()) < perRound + receiptRent
-      || BigInt(plan.lastRound.toString()) === ROUND_ID) continue;
-  const nonce = BigInt(plan.nextNonce.toString());
-  const nonceSeed = Buffer.alloc(8);
-  nonceSeed.writeBigUInt64LE(nonce);
-  const miner = pda('miner', authority.toBuffer());
-  const receipt = pda('bet', roundSeed, authority.toBuffer(), nonceSeed);
-  const ix = await myne.methods.executeAutoPlan(ROUND_ID, new anchor.BN(nonce.toString())).accounts({
-    config, autoPlan, miner, round, receipt, executor: keypair.publicKey,
-    systemProgram: SystemProgram.programId,
-  }).instruction();
-  executable.push({ authority: authority.toBase58(), ix });
+  try {
+    const authority = new PublicKey(indexed.authority);
+    const autoPlan = pda('auto_plan', authority.toBuffer());
+    const plan = await myne.account.autoPlan.fetchNullable(autoPlan);
+    if (!plan || !plan.authority.equals(authority)) continue;
+    const perRound = plan.amounts.reduce((sum, amount) => sum + BigInt(amount.toString()), 0n);
+    if (!plan.active || BigInt(plan.balanceLamports.toString()) < perRound + receiptRent
+        || BigInt(plan.lastRound.toString()) === ROUND_ID) continue;
+    const nonce = BigInt(plan.nextNonce.toString());
+    const nonceSeed = Buffer.alloc(8);
+    nonceSeed.writeBigUInt64LE(nonce);
+    const miner = pda('miner', authority.toBuffer());
+    const receipt = pda('bet', roundSeed, authority.toBuffer(), nonceSeed);
+    const ix = await myne.methods.executeAutoPlan(ROUND_ID, new anchor.BN(nonce.toString())).accounts({
+      config, autoPlan, miner, round, receipt, executor: keypair.publicKey,
+      randomnessAccount: randomnessPubkey,
+      systemProgram: SystemProgram.programId,
+    }).instruction();
+    executable.push({ authority: authority.toBase58(), ix });
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: 'auto-plan-invalid-index-entry',
+      round: ROUND_ID.toString(),
+      authority: indexed?.authority ?? null,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
 }
 const AUTO_BATCH_SIZE = Math.max(1, Math.min(6, Number(process.env.AUTO_PLAN_BATCH_SIZE || 4)));
 for (let offset = 0; offset < executable.length; offset += AUTO_BATCH_SIZE) {
   const batch = executable.slice(offset, offset + AUTO_BATCH_SIZE);
-  const sent = await sendKeeperInstructions(batch.map((entry) => entry.ix));
-  autoExecutions.push({
-    authorities: batch.map((entry) => entry.authority),
-    signature: sent.signature,
-    measuredUnits: sent.measuredUnits,
-    computeLimit: sent.computeLimit,
-  });
+  try {
+    const sent = await sendKeeperInstructions(batch.map((entry) => entry.ix));
+    autoExecutions.push({
+      authorities: batch.map((entry) => entry.authority),
+      signature: sent.signature,
+      measuredUnits: sent.measuredUnits,
+      computeLimit: sent.computeLimit,
+    });
+  } catch (error) {
+    // A user may cancel or reconfigure between the indexed read and execution.
+    // That race must not prevent the round's post-close commit and settlement.
+    console.error(JSON.stringify({
+      event: 'auto-plan-batch-skipped',
+      round: ROUND_ID.toString(),
+      authorities: batch.map((entry) => entry.authority),
+      error: error instanceof Error ? error.message : String(error),
+    }));
+  }
 }
 if (autoExecutions.length) console.log(JSON.stringify({ event: 'auto-plans-executed', round: ROUND_ID.toString(), executions: autoExecutions }));
 
-// Wait until the round's settlement window, then reveal and settle atomically.
+// Betting must close before the provider request is committed. Commit and the
+// MYNE callback are atomic so the recorded slot can never come from an older
+// request selected after the deployment set was known.
+await waitForChainTimestamp(bettingEndsAt);
+
+roundState = await myne.account.round.fetch(round);
+if (!roundState.settled && asBigInt(roundState.randomnessCommitSlot) === 0n) {
+  const latestRandomness = await randomnessClient.loadData();
+  assert.equal(asBigInt(latestRandomness.seedSlot), 0n, 'Refusing to record a non-atomic or stale Switchboard commitment');
+  assert.equal(asBigInt(latestRandomness.revealSlot), 0n, 'Refusing an already revealed randomness request');
+  const commitIx = await randomnessClient.commitIx(queue, keypair.publicKey);
+  const recordIx = await myne.methods
+    .recordRoundRandomnessCommit(ROUND_ID)
+    .accounts({ config, round, randomnessAccount: randomnessPubkey, authority: keypair.publicKey })
+    .instruction();
+  commitSig = (await sendKeeperInstructions([commitIx, recordIx])).signature;
+  roundState = await myne.account.round.fetch(round);
+  assert.ok(asBigInt(roundState.randomnessCommitSlot) > 0n, 'MYNE did not record the Switchboard commitment');
+  console.log(JSON.stringify({
+    event: 'randomness-committed',
+    round: ROUND_ID.toString(),
+    randomnessAccount: randomnessPubkey.toBase58(),
+    randomnessCommitSlot: roundState.randomnessCommitSlot.toString(),
+    signature: commitSig,
+  }));
+}
+
+// Wait until both the scheduled settlement time and the committed seed slot
+// have passed, then reveal and settle atomically.
 // The verified instruction requires reveal_slot == the current slot, so the
 // reveal and settlement instructions must be in the same transaction.
-const settlesAt = Number(roundState.settlesAt.toString()) * 1000;
-const waitMs = Math.max(0, settlesAt - Date.now() + 500);
-if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+const settlesAt = Number(roundState.settlesAt.toString());
+await waitForChainTimestamp(settlesAt);
+
+const commitSlot = Number(roundState.randomnessCommitSlot.toString());
+assert.ok(commitSlot > 0, 'Round has no recorded Switchboard commitment');
+while ((await connection.getSlot(commitment)) <= commitSlot) {
+  assert.ok((await chainTimeSeconds()) < Number(roundState.refundAt.toString()), 'Randomness seed slot was not reached before the refund window');
+  await sleep(400);
+}
 
 let settleSig = null;
 if (!roundState.settled) {
-const randomnessClient = new sb.Randomness(switchboardProgram, randomnessPubkey);
 const revealIx = await randomnessClient.revealIx(keypair.publicKey);
 const devnetNoPool = configState.randomnessProgram.toBase58() === 'Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2';
 const gateState = devnetNoPool ? null : await myne.account.liquidityGate.fetch(liquidityGate);
@@ -209,6 +325,7 @@ const settleIx = await myne.methods
     solVault: devnetNoPool ? null : gateState.solVault,
     randomnessAccount: randomnessPubkey,
     buybackWallet: configState.buybackWallet,
+    adminFeeWallet: configState.adminFeeWallet,
   })
   .instruction();
 settleSig = (await sendKeeperInstructions([revealIx, settleIx])).signature;

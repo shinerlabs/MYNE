@@ -8,24 +8,22 @@
     "sync:solana": "node scripts/sync-solana-idl.mjs",
     "test": "node --test tests/*.test.mjs",
     "dev": "vite",
-    "build": "vite build && node scripts/compress-assets.mjs",
-    "build:hosted": "vite build --mode hosted && node scripts/compress-assets.mjs"
+    "build": "vite build && node scripts/compress-assets.mjs"
   },
   "dependencies": {
     "@anchor-lang/core": "1.0.2",
-    "@fontsource-variable/dm-sans": "latest",
-    "@fontsource-variable/roboto-mono": "latest",
+    "@fontsource-variable/dm-sans": "5.3.0",
+    "@fontsource-variable/roboto-mono": "5.3.0",
     "@solana/wallet-standard-features": "^1.4.0",
     "@solana/web3.js": "^1.98.4",
     "@supabase/supabase-js": "^2.110.7",
     "@wallet-standard/app": "^1.1.1",
     "@wallet-standard/features": "^1.1.1",
     "bs58": "^6.0.0",
-    "buffer": "6.0.3",
-    "viem": "^2.55.4"
+    "buffer": "6.0.3"
   },
   "devDependencies": {
-    "vite": "latest"
+    "vite": "8.2.0"
   },
   "pnpm": {
     "ignoredBuiltDependencies": [

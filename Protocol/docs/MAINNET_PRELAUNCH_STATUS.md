@@ -1,5 +1,10 @@
 # MYNE Mainnet prelaunch status
 
+> **Superseded version-5 record.** This dated artifact record is retained for provenance only. The
+> active candidate uses protocol version 6 and the revised 12% fee routing. None of the binary hash,
+> byte length or passing-test claims below is evidence for version 6. A clean rebuild, fresh hash,
+> synchronized IDLs and repeated full test/security review are required before deployment.
+
 **Recorded:** 2026-08-07
 **Public site:** https://www.myne.supply
 **Status:** prelaunch; no Mainnet activation was performed by this review.

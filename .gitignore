@@ -4,16 +4,23 @@
 
 # Local tooling and dependency caches
 .plugin-build/
+.codex/
+.agents/
 .pnpm-store/
 node_modules/
 
 # Solana/Anchor generated output and local validators
 **/target/
+**/target/deploy/*-keypair.json
 **/.anchor/
 **/.localnet/
 **/test-ledger/
 **/.surfpool/
 *.log
+*keypair*.json
+*.pem
+*.p12
+*.keystore
 
 # Environment files (keep documented templates)
 .env
@@ -24,6 +31,3 @@ node_modules/
 # Supabase CLI local project metadata
 supabase/.temp/
 .vercel
-.env*
-!.env.example
-!.env.local.example

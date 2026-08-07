@@ -6,41 +6,138 @@ This is an ordered, controlled launch procedure—not an automatic deployment sc
 ./scripts/check-mainnet-readiness.sh
 ```
 
-Mainnet must initialize fresh version-5 state. The existing version-3 Devnet state is not a Mainnet migration source.
+Mainnet must initialize fresh version-6 state. An existing version-5 config may use the reviewed
+one-way paused migration, but an older Devnet layout is not a Mainnet migration source.
 
 ## 1. Prepare exactly three funded roles
 
-1. **Admin role:** deployer, upgrade authority, protocol admin, fallback referral-fee owner and reserved Motherlode layout address. Keep this key hardware-backed/offline except for reviewed administration.
+1. **Admin role:** deployer, upgrade authority, protocol admin, direct SOL-fee receiver, fallback
+   referral-fee owner and reserved Motherlode layout address. It receives the direct 1% round
+   allocation plus 10% of the gross staking allocation (0.8% of volume), for 1.8% direct admin
+   revenue before integer dust. Keep this key hardware-backed/offline except for reviewed
+   administration.
 2. **Randomness role:** Switchboard authority, round rent payer, archive attestor, indexer and lifecycle keeper.
-3. **Buyback role:** receives only the 2% allocations, performs the registered-pool swaps and burns, and marks completion.
+3. **Buyback role:** receives only the 1% allocations, performs the registered-pool swaps and burns, and marks completion.
 
-Use separate service credentials for Supabase/RPC. They are not funded Solana roles and must never enter the repository.
+All three addresses must be distinct, controlled and verified before initialization; verify the SOL
+fee receivers are System Program accounts and pre-create the admin fallback MYNE ATA. Use separate
+service credentials for Supabase/RPC. They are not funded Solana roles and must never enter the
+repository.
 
 ## 2. Freeze and independently review the artifact
 
-Run all checks, record the Git commit and SBF hash, then stop rebuilding. Give the exact source and artifact to an unaffiliated Solana reviewer using `INDEPENDENT_SECURITY_REVIEW_SCOPE.md`. Resolve every critical/high finding and repeat the full suite after any change.
+Start from a clean tree and run the complete default and `--features production` Rust/keeper suites.
+Build the only eligible internal candidate with `pnpm build:mainnet`; do not use the default
+`anchor build` output. This local candidate is preflight evidence and must not itself be deployed
+even if the subsequent Docker verification build reproduces its hash; deploy only the Docker
+output.
+That release-build path invokes locked production-feature SBF and IDL builds, verifies the
+`MYNE_PRODUCTION_ARTIFACT_V1` marker inside the binary, and synchronizes both IDLs. Then print the release
+manifest with `pnpm release:manifest -- --print`, review it, and store it in signed/read-only release
+evidence outside the Git worktree (putting the current commit inside a committed manifest would be
+self-referential). Set `MAINNET_RELEASE_MANIFEST` to that frozen external file and rerun
+`./scripts/check-mainnet-readiness.sh`; it fails if the Git commit, SBF/IDL/lockfile hashes, byte
+length, toolchain, `buildProfile=production`, binary marker, or clean-worktree requirement differs.
+Then stop rebuilding. Confirm the IDL contains the version-6
+migration, `RoundFeesDistributed`, and the direct admin settlement account. Do not reuse any
+version-5 artifact, hash or test report. Give the exact source and artifact to an unaffiliated Solana
+reviewer using `INDEPENDENT_SECURITY_REVIEW_SCOPE.md`. Resolve every critical/high finding and
+repeat the entire Rust, Anchor/local-validator, keeper-policy and frontend suite after any change.
+
+The marker, manifest and local hash above are internal provenance evidence only. They are neither a
+Solana verified build nor an independent security audit. After the final reviewed source is
+committed and publicly reachable, perform the official deterministic-build sequence from the
+`Protocol/` workspace using a recorded, pinned `solana-verify` version and Docker:
+
+```bash
+# Run these two commands from Protocol/. Build the production feature in Docker.
+solana-verify build --library-name myne_protocol -- --features production
+solana-verify get-executable-hash target/deploy/myne_protocol.so
+
+# Deploy this exact file. Do not run anchor build, cargo build-sbf or build:mainnet afterward.
+solana program deploy -u <MAINNET_RPC_URL> target/deploy/myne_protocol.so \
+  --program-id D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e
+
+# Compare the on-chain executable with the artifact just deployed.
+solana-verify get-program-hash -u <MAINNET_RPC_URL> \
+  D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e
+
+# Reproduce it from the exact public commit and upload the verification record when prompted.
+solana-verify verify-from-repo -u <MAINNET_RPC_URL> \
+  --program-id D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e \
+  https://github.com/shinerlabs/MYNE \
+  --commit-hash <FULL_RELEASE_COMMIT_SHA> \
+  --library-name myne_protocol --mount-path Protocol -- --features production
+
+# After the verification PDA is uploaded, request independent remote reproduction.
+solana-verify remote submit-job \
+  --program-id D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e \
+  --uploader <UPGRADE_AUTHORITY_ADDRESS>
+```
+
+Record the CLI version, Docker image/digest, full commit, feature arguments, executable hash,
+on-chain hash, verification PDA, remote job ID and successful remote-verification result in
+immutable release evidence. A local `verify-from-repo` match alone is not the final public
+Explorer-status gate. If the
+Docker-built executable differs from the locally manifested candidate, stop: update the external
+manifest to the exact verified artifact, rerun all artifact checks against it, and repeat the
+independent review as required. Never deploy a locally rebuilt substitute. The current Solana
+procedure is maintained at <https://solana.com/docs/programs/verified-builds>; rehearse the exact
+CLI version and command syntax before funding a Mainnet deployment.
 
 ## 3. Deploy while inactive
 
-Deploy the recorded `.so` to the fixed program ID. Verify ProgramData, executable owner and upgrade authority. Create a 9-decimal mint with exactly 100 MYNE, no freeze authority and the config PDA as mint authority. Initialize paused with Switchboard Mainnet and the three reviewed role addresses.
+Deploy the recorded Docker-verified version-6 `.so` to the fixed program ID. Verify ProgramData,
+upgrade authority and deployed bytecode hash. Create a 9-decimal mint with exactly 100 MYNE, no
+freeze authority and the config PDA as mint authority. Initialize paused with Switchboard Mainnet
+and the three reviewed role addresses. Fetch the config back and verify version 6 plus every address
+before proceeding. This read-back is a hard stop: the production-feature binary rejects every
+randomness mode except Switchboard Mainnet and always enforces the production liquidity gate.
+Production keepers independently refuse a cluster/provider mismatch, and the administrator must
+still refuse to proceed on any disagreement.
 
-Run `pnpm prepare:admin-ata` with the explicit confirmation value after the mint/config exist. Verify that this creates exactly the canonical MYNE associated token account owned by the admin fallback role.
+Run `pnpm prepare:admin-ata` with both the program-ID confirmation and
+`CONFIRM_SOLANA_GENESIS_HASH=<mainnet-genesis-hash>` after the mint/config exist. Verify that this
+creates exactly the canonical MYNE associated token account owned by the admin fallback role.
 
 ## 4. Start the production index before protocol activity
 
-Apply `supabase/migrations/20260807090000_round_index.sql`. Run the event indexer from a recorded start slot with finalized reads and service-role credentials. Run the lifecycle keeper with the same randomness role. Set:
+Apply and verify all production migrations in order:
+
+```text
+supabase/migrations/20260807090000_round_index.sql
+supabase/migrations/20260807114500_round_fee_audit.sql
+supabase/migrations/20260807130000_round_archive_verification.sql
+supabase/migrations/20260807131500_keeper_leases.sql
+supabase/migrations/20260807133000_referral_read_model_v1.sql
+```
+
+Run the event indexer from a recorded start slot with finalized reads and service-role credentials.
+Before activation, prove that a synthetic `RoundFeesDistributed` event persists every allocation
+field. Confirm `archive_verified` remains false for an observed archive event until the canonical
+snapshot exists and its hash matches the on-chain `Round.archive_hash`; only then may the lifecycle
+keeper close receipts. Run the lifecycle keeper with the same randomness role. Set:
 
 ```text
 ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1
+REFERRAL_INDEXER_START_SLOT=<program deployment slot>
 RANDOMNESS_RETENTION_SECONDS=86400
 ```
 
-Supervise both processes with durable logs, restart policy and alerts. Confirm no production `getProgramAccounts` scan is made.
+The referral v1 cursor is intentionally independent from the existing round cursor. Keep its start
+slot at or before the first `MinerRegistered` event so the finalized-log backfill can prove every
+permanent attribution before it projects any legacy `MyneClaimed` credit.
+
+Supervise all indexer/keeper processes with durable logs, restart policy and alerts. Confirm no production `getProgramAccounts` scan is made.
+The live buyback keeper also requires the service-role-only database lease from the final migration;
+its 10-minute default fence prevents overlapping replicas from spending the same allocation. Keep
+its journal on one durable, backed-up volume and never bypass the lease during an unresolved swap.
 
 Switchboard also creates an auxiliary lookup table for each randomness request. `closeIx()` closes
 the randomness account after the verification window, but later LUT rent recovery requires the
 ephemeral request signer after Solana's lookup-table cooldown. Retain those ephemeral signers only
-in the production secret manager and add the audited post-cooldown `closeLutIx()` operation; never
+in the production secret manager and add a separately reviewed post-cooldown `closeLutIx()`
+operation; never
 write their private keys to the repository or an ordinary keeper journal.
 
 ## 5. Create and register the official Meteora pool
@@ -49,7 +146,14 @@ Create the MYNE/WSOL DLMM pool. Independently verify the Meteora program owner, 
 
 ## 6. Rehearse randomness and buyback while paused/controlled
 
-Run the exact Switchboard create/commit/open/bind/reveal/settle flow with measured compute. Confirm wrong owner/binding, stale reveal, duplicate settlement and missed-reveal paths fail safely. Run the buyback keeper in dry-run mode, then authorize one tiny direct-pool canary. Verify swap and burn signatures appear in `mine_buyback_executions`.
+Run the exact Switchboard sequence with measured compute: atomically create/open/bind a fresh
+uncommitted request; submit manual and Auto-round deployments with that bound account; wait for
+betting to close; atomically commit and call `record_round_randomness_commit`; wait for the seed
+slot; then atomically reveal and call `settle_round_verified`. Confirm early commit, missing/wrong
+deployment randomness account, wrong owner/binding, stale commit, stale reveal, duplicate
+settlement and missed-reveal paths fail safely. Run the buyback keeper in dry-run mode, then
+authorize one tiny direct-pool canary. Verify swap and burn signatures appear in
+`mine_buyback_executions`.
 
 ## 7. Activate once and observe one complete round
 
@@ -58,7 +162,8 @@ Only after all gates pass, submit `set_paused(false)` with the exact pool and re
 1. receipt creation;
 2. Switchboard settlement;
 3. permissionless accumulated and auto-burn reward processing;
-4. 2% swap/burn and indexed evidence;
+4. exact fee evidence: 8% gross staking split into 0.8% direct admin and 7.2% net stakers, 2%
+   Motherlode, 1% swap/burn and 1% direct admin, with the complete 12% conserved;
 5. deterministic archive commitment;
 6. receipt closure with rent returned to users;
 7. round closure with rent returned to the randomness role;

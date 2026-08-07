@@ -8,21 +8,31 @@ import {
 } from '@solana/wallet-standard-features';
 import bs58 from 'bs58';
 import { NETWORK, PROTOCOL_READY } from '../app-config.js';
+import { createClusterGenesisGuard } from './cluster-genesis.js';
+import { setChainSkew } from './round.js';
 
 export const connection = new Connection(NETWORK.rpcUrl, 'confirmed');
+const ENV = import.meta.env ?? {};
+const clusterGenesisGuard = createClusterGenesisGuard({
+  cluster: NETWORK.cluster,
+  fetchGenesisHash: () => connection.getGenesisHash(),
+  expectedLocalGenesisHash: ENV.VITE_SOLANA_GENESIS_HASH || '',
+});
+export const assertConfiguredCluster = (options) => clusterGenesisGuard.verify(options);
+export const getVerifiedCluster = () => clusterGenesisGuard.current();
 const unavailable = () => { throw new Error('Solana protocol programs have not been deployed yet'); };
 
 // Legacy chain modules consume this name. It intentionally cannot issue Solana calls.
 export const publicClient = new Proxy({}, { get: () => unavailable });
 export const withGasHeadroom = async (request) => request;
 export const syncChainClock = async () => {
+  await assertConfiguredCluster();
   const startedAt = Date.now() / 1000;
   const slot = await connection.getSlot('confirmed');
   const blockTime = await connection.getBlockTime(slot);
   if (blockTime === null) return null;
   const measuredAt = (startedAt + Date.now() / 1000) / 2;
   const skew = blockTime - measuredAt;
-  const { setChainSkew } = await import('./round.js');
   setChainSkew(skew);
   return skew;
 };
@@ -94,17 +104,19 @@ function standardCandidates() {
           if (!signature) throw new Error(`${wallet.name} did not return a message signature`);
           return signature;
         },
-        async signAndSendTransaction(transaction) {
+        async signAndSendTransaction(transaction, options = {}) {
           const signer = feature(wallet, SolanaSignAndSendTransaction);
           if (!signer?.signAndSendTransaction) {
             const signed = await this.signTransaction(transaction);
-            return connection.sendRawTransaction(signed.serialize());
+            return connection.sendRawTransaction(signed.serialize(), {
+              preflightCommitment: 'confirmed', maxRetries: 3, ...options,
+            });
           }
           const sent = await signer.signAndSendTransaction({
             account: selectedAccount ?? wallet.accounts?.[0],
             transaction: transaction.serialize({ requireAllSignatures: false, verifySignatures: false }),
             chain: standardChain(NETWORK),
-            options: { commitment: 'confirmed' },
+            options: { commitment: 'confirmed', ...options },
           });
           return bs58.encode(sent[0].signature);
         },

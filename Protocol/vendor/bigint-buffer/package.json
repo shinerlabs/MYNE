@@ -4,5 +4,5 @@
   "description": "Pure-JavaScript, bounds-safe bigint/buffer conversion shim for MYNE keepers",
   "main": "index.cjs",
   "types": "index.d.ts",
-  "license": "MIT"
+  "license": "UNLICENSED"
 }

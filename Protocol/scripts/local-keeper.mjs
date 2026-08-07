@@ -77,14 +77,20 @@ const receiptPda = (roundId, authority, nonce) => PublicKey.findProgramAddressSy
   authority.toBuffer(),
   u64Buffer(nonce),
 ], PROGRAM_ID)[0];
+const autoPlanPda = (authority) => PublicKey.findProgramAddressSync(
+  [Buffer.from('auto_plan'), authority.toBuffer()],
+  PROGRAM_ID,
+)[0];
+const BET_RECEIPT_ACCOUNT_BYTES = 468;
+const AUTO_REWARD_BURN = 1;
 
-const demoWalletPath = '.localnet/devnet-demo-wallets.json';
+const demoWalletPath = isDevnet
+  ? '.localnet/devnet-demo-wallets.json'
+  : '.localnet/local-demo-wallets.json';
 let savedDemoWallets = null;
-if (isDevnet) {
-  try {
-    savedDemoWallets = JSON.parse(await readFile(demoWalletPath, 'utf8'));
-  } catch { /* first run creates a fresh controlled set */ }
-}
+try {
+  savedDemoWallets = JSON.parse(await readFile(demoWalletPath, 'utf8'));
+} catch { /* first run on this cluster creates a fresh controlled set */ }
 const savedMinerKeys = Array.isArray(savedDemoWallets?.miners) ? savedDemoWallets.miners : [];
 const savedStakerKeys = Array.isArray(savedDemoWallets?.stakers) ? savedDemoWallets.stakers : [];
 const demoMiners = Array.from({ length: 10 }, (_, index) => {
@@ -95,7 +101,7 @@ const demoMiners = Array.from({ length: 10 }, (_, index) => {
     // Five persistent demo miners cover every local tile with the same per-tile amount. Devnet
     // partitions the 25 tiles between them to control faucet spend. The shared amount still moves
     // from 10x-20x between rounds, but equal-looking winning bids are now exactly equal.
-    return { keypair, coverAll: true, bids: {} };
+    return { keypair, coverAll: true, autoBurn: index < 4, bids: {} };
   }
   const firstTile = (index * 2) % 25;
   const secondTile = (index * 5 + 6) % 25;
@@ -111,7 +117,7 @@ const demoStakers = Array.from({ length: 3 }, (_, index) => ({
   amount: 5_000_000_000n,
 }));
 const submittedReceipts = new Set();
-if (isDevnet && !savedDemoWallets) {
+if (!savedDemoWallets) {
   await writeFile(demoWalletPath, JSON.stringify({
     miners: demoMiners.map(({ keypair }) => [...keypair.secretKey]),
     stakers: demoStakers.map(({ keypair }) => [...keypair.secretKey]),
@@ -144,7 +150,10 @@ async function fundDemoWallet(authority, amountSol) {
     return 'payer';
   }
   try {
-    const signature = await provider.connection.requestAirdrop(authority, amountSol * LAMPORTS_PER_SOL);
+    const signature = await provider.connection.requestAirdrop(
+      authority,
+      Math.round(amountSol * LAMPORTS_PER_SOL),
+    );
     await provider.connection.confirmTransaction(signature, 'confirmed');
     return 'faucet';
   } catch (error) {
@@ -180,6 +189,74 @@ async function prepareDemoMiners() {
     }
     log('demo-miner-ready', { index: index + 1, authority: authority.toBase58(), funding });
     await new Promise((resolve) => setTimeout(resolve, isDevnet ? 350 : 0));
+  }
+}
+
+/**
+ * Keep four real Auto-burn plans aligned with the controlled equal-bid cohort.
+ *
+ * These are not presentation flags: the plan commits reward_mode=1 into every
+ * receipt before the winner is known. Once that receipt is settled, the program
+ * adds its MYNE reward to both the owner's permanent burn principal and the
+ * pool-wide total_burn counter, with 5x added to total reward weight.
+ */
+async function prepareDemoAutoBurnPlans(roundId) {
+  const receiptRent = BigInt(await provider.connection.getMinimumBalanceForRentExemption(
+    BET_RECEIPT_ACCOUNT_BYTES,
+  ));
+  const fundingRounds = isDevnet ? 1n : 2n;
+  for (const [index, demo] of demoMiners.entries()) {
+    if (!demo.autoBurn) continue;
+    const authority = demo.keypair.publicKey;
+    const bids = demoCoverageBids(roundId, index, isDevnet);
+    const rawAmounts = Array.from({ length: 25 }, (_, tile) => BigInt(bids[tile] ?? 0));
+    const amounts = rawAmounts.map((amount) => new BN(amount.toString()));
+    const perRound = rawAmounts.reduce((sum, amount) => sum + amount, 0n);
+    const requiredBalance = perRound + receiptRent;
+    const targetBalance = requiredBalance * fundingRounds;
+    const autoPlan = autoPlanPda(authority);
+    let plan = await program.account.autoPlan.fetchNullable(autoPlan);
+
+    if (!plan) {
+      await fundDemoWallet(authority, Number(targetBalance) / LAMPORTS_PER_SOL + 0.05);
+      await program.methods
+        .createAutoPlan(amounts, new BN(targetBalance.toString()), AUTO_REWARD_BURN)
+        .accounts({ config, autoPlan, authority, systemProgram: SystemProgram.programId })
+        .signers([demo.keypair])
+        .rpc();
+      plan = await program.account.autoPlan.fetch(autoPlan);
+      log('demo-auto-burn-created', {
+        miner: index + 1,
+        authority: authority.toBase58(),
+        balanceLamports: plan.balanceLamports.toString(),
+      });
+    } else {
+      const currentAmounts = plan.amounts.map((amount) => BigInt(amount.toString()));
+      const amountsChanged = currentAmounts.some((amount, tile) => amount !== rawAmounts[tile]);
+      if (!plan.active || Number(plan.rewardMode?.toString()) !== AUTO_REWARD_BURN || amountsChanged) {
+        await program.methods
+          .configureAutoPlan(amounts, true, AUTO_REWARD_BURN)
+          .accounts({ config, autoPlan, authority })
+          .signers([demo.keypair])
+          .rpc();
+      }
+    }
+
+    const balance = BigInt(plan.balanceLamports.toString());
+    if (balance < requiredBalance) {
+      const topUp = targetBalance - balance;
+      await fundDemoWallet(authority, Number(topUp) / LAMPORTS_PER_SOL + 0.05);
+      await program.methods
+        .fundAutoPlan(new BN(topUp.toString()))
+        .accounts({ autoPlan, authority, systemProgram: SystemProgram.programId })
+        .signers([demo.keypair])
+        .rpc();
+      log('demo-auto-burn-funded', {
+        miner: index + 1,
+        authority: authority.toBase58(),
+        lamports: topUp.toString(),
+      });
+    }
   }
 }
 
@@ -235,8 +312,16 @@ async function ensureRound(roundId, now, configState) {
 
 async function deployDemoMiners(roundId) {
   const round = roundPda(roundId);
+  const roundState = await program.account.round.fetch(round);
+  const randomnessAccount = roundState.randomnessAccount.equals(PublicKey.default)
+    ? null
+    : roundState.randomnessAccount;
   const limit = Math.min(demoMiners.length, Number(process.env.DEMO_MINER_LIMIT || demoMiners.length));
   for (const [index, demo] of demoMiners.slice(0, limit).entries()) {
+    // The first four demo miners enter through execute_auto_plan below. Sending
+    // a normal deploy as well would create an accumulate receipt and make the
+    // UI's Auto-burn treatment dishonest.
+    if (demo.autoBurn) continue;
     const authority = demo.keypair.publicKey;
     const nonce = roundId;
     const receipt = receiptPda(roundId, authority, nonce);
@@ -251,6 +336,7 @@ async function deployDemoMiners(roundId) {
         miner: minerPda(authority),
         round,
         receipt,
+        randomnessAccount,
         authority,
         systemProgram: SystemProgram.programId,
       }).signers([demo.keypair]).rpc();
@@ -267,12 +353,64 @@ async function deployDemoMiners(roundId) {
   }
 }
 
+/**
+ * Localnet has no production Supabase indexer, so complete every settled
+ * receipt here. settle_receipt is permissionless, but all writable PDAs and
+ * the SOL beneficiary remain constrained to the immutable receipt authority.
+ * It handles both reward modes and is replay-safe through claimed/refunded.
+ */
+async function settleLocalReceipts(roundId) {
+  if (!isLocalnet || roundId < 0n) return;
+  const round = roundPda(roundId);
+  const roundState = await program.account.round.fetchNullable(round);
+  if (!roundState?.settled) return;
+  if (BigInt(roundState.processedReceipts.toString()) >= BigInt(roundState.totalReceipts.toString())) return;
+  const rows = await program.account.betReceipt.all();
+  const receipts = rows.filter(({ account }) => (
+    BigInt(account.roundId.toString()) === roundId
+    && !account.claimed
+    && !account.refunded
+  ));
+  for (const { publicKey: receipt, account } of receipts) {
+    const beneficiary = account.authority;
+    try {
+      await program.methods.settleReceipt().accounts({
+        config,
+        miningPool,
+        stakePool,
+        miner: minerPda(beneficiary),
+        stakePosition: stakePositionPda(beneficiary),
+        round,
+        receipt,
+        beneficiary,
+        executor: payer.publicKey,
+      }).rpc();
+      log('demo-receipt-settled', {
+        roundId: roundId.toString(),
+        authority: beneficiary.toBase58(),
+        rewardMode: Number(account.rewardMode),
+      });
+    } catch (error) {
+      log('demo-receipt-settle-error', {
+        roundId: roundId.toString(),
+        authority: beneficiary.toBase58(),
+        message: error instanceof Error ? error.message.split('\n')[0] : String(error),
+      });
+    }
+  }
+}
+
 async function executeAutoPlans(roundId) {
   const round = roundPda(roundId);
   const plans = await program.account.autoPlan.all();
+  const receiptRent = BigInt(await provider.connection.getMinimumBalanceForRentExemption(
+    BET_RECEIPT_ACCOUNT_BYTES,
+  ));
   for (const { publicKey: autoPlan, account: plan } of plans) {
     const total = plan.amounts.reduce((sum, amount) => sum + BigInt(amount.toString()), 0n);
-    if (!plan.active || BigInt(plan.balanceLamports.toString()) < total || BigInt(plan.lastRound.toString()) === roundId) continue;
+    if (!plan.active
+        || BigInt(plan.balanceLamports.toString()) < total + receiptRent
+        || BigInt(plan.lastRound.toString()) === roundId) continue;
     const nonce = BigInt(plan.nextNonce.toString());
     const receipt = receiptPda(roundId, plan.authority, nonce);
     if (await provider.connection.getAccountInfo(receipt, 'confirmed')) continue;
@@ -282,6 +420,7 @@ async function executeAutoPlans(roundId) {
       miner: minerPda(plan.authority),
       round,
       receipt,
+      randomnessAccount: null,
       executor: payer.publicKey,
       systemProgram: SystemProgram.programId,
     }).rpc();
@@ -308,6 +447,7 @@ async function settleReadyRound(roundId, now, configState) {
     liquidityPool: poolGated ? (await program.account.liquidityGate.fetch(liquidityGate)).pool : null,
     randomnessAuthority: payer.publicKey,
     buybackWallet: configState.buybackWallet,
+    adminFeeWallet: configState.adminFeeWallet,
   }).rpc();
   const settled = await program.account.round.fetch(round);
   log('round-settled', {
@@ -328,6 +468,7 @@ async function tick() {
       chainTime(),
     ]);
     assert.equal(configState.paused, false, 'Protocol is paused');
+    assert.equal(Number(configState.version), 6, 'Local keeper requires protocol fee schedule v6');
     const initializedAt = BigInt(configState.initializedAt.toString());
     const duration = BigInt(configState.roundDurationSeconds.toString());
     const nowBig = BigInt(now);
@@ -338,7 +479,16 @@ async function tick() {
       : await ensureRound(currentRoundId, now, configState);
     await settleReadyRound(currentRoundId, now, configState);
     if (currentRoundId > 0n) await settleReadyRound(currentRoundId - 1n, now, configState);
+    // Settle the newest completed rounds before preparing the next deployments.
+    // This is what makes pool.total_burn—and therefore every staking stat—rise
+    // as Auto-burn miners earn MYNE.
+    if (isLocalnet) {
+      for (let offset = 0n; offset < 4n && currentRoundId >= offset; offset += 1n) {
+        await settleLocalReceipts(currentRoundId - offset);
+      }
+    }
     if (!round || now >= Number(round.bettingEndsAt)) return;
+    await prepareDemoAutoBurnPlans(currentRoundId);
     await deployDemoMiners(currentRoundId);
     if (!isDevnet) await executeAutoPlans(currentRoundId);
   } catch (error) {

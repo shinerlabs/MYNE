@@ -3,8 +3,8 @@
 The mining, staking, referral, claim, and auto-round bundles are implemented for local and Devnet
 testing. Devnet uses the Switchboard Devnet provider mode and intentionally does not require a
 Meteora pool, so the full mining/staking flow can be exercised without liquidity. The program
-still starts paused and must be explicitly unpaused by the admin. The 2% buyback allocation is
-accounted for on-chain, but the buyback keeper skips swaps until a pool is registered.
+still starts paused and must be explicitly unpaused by the admin. The version-6 1% buyback
+allocation is accounted for on-chain, but the buyback keeper skips swaps until a pool is registered.
 
 Mainnet remains pool-gated: the official Meteora pool must be created and registered before
 activation or settlement.
@@ -27,7 +27,7 @@ pnpm run devnet:register-liquidity
 The registration script is fail-closed if the exact account is absent, is not owned by the
 canonical Meteora DLMM program, or its MYNE/WSOL vault balances are below threshold. It does not
 create a pool or move funds. Activation and every verified round settlement re-check the exact
-pool, vault addresses, mints and balances before moving the 2% buyback/burn allocation. If the
+pool, vault addresses, mints and balances before moving the 1% buyback/burn allocation. If the
 account or reserves are invalid, activation or settlement fails closed.
 
 ## What has been verified locally
@@ -41,7 +41,9 @@ authority. The integration test then proves:
 - pause changes require the admin signer;
 - admin ownership transfers through propose/accept and the former admin loses access.
 - multiple manual receipts and one balance-funded auto-plan can deploy into the same round;
-- Split settlement, per-receipt SOL/MYNE claims, the 12% mining allocation and the 10% claim fee;
+- Split settlement, per-receipt SOL/MYNE claims, the version-6 12% mining allocation and the 10%
+  claim fee. The round allocation must reconcile to 8% gross staking (0.8% direct admin and 7.2%
+  net stakers), 2% Motherlode, 1% buyback/burn and 1% direct admin;
 - standard staking and both operator-funded and mining-funded SOL reward distribution.
 - the local staking smoke stakes MYNE, funds SOL, claims it, and verifies principal, weight,
   token-balance, and pool-account deltas.
@@ -61,6 +63,11 @@ solana balance .localnet/test-wallet.json
 The committed configuration pins Anchor CLI/crates, Solana CLI, the program ID and lockfiles. The
 `.localnet` wallet is ignored and suitable only for local/devnet testing. Back it up before a deploy;
 never use it as a mainnet authority.
+
+Build the version-6 program from a clean tree, regenerate both protocol and frontend IDLs, and
+record the Git commit plus fresh SBF SHA-256. Old version-5 binaries, hashes and test output are not
+evidence for this candidate. Repeat Rust, Anchor/local-validator, keeper-policy and frontend tests
+after every source or dependency change.
 
 Run the frontend checks separately from `Frontend/`:
 
@@ -100,6 +107,27 @@ The initializer verifies the devnet genesis hash and upgrade authority before su
 It persists an ignored `.localnet/devnet-mint.json` so an interrupted mint setup can be resumed
 without producing a different mint. It exits without mutation when the config already exists.
 
+Fresh state must initialize at version 6. An existing version-5 config must remain paused and use
+the reviewed one-way `migrate_fee_schedule_v6` instruction before settlement; older account layouts
+must use a separately reviewed migration or a fresh rehearsal deployment.
+
+If the Devnet rehearsal uses the production indexer, apply all migrations in order and verify their
+schemas before starting it:
+
+```text
+supabase/migrations/20260807090000_round_index.sql
+supabase/migrations/20260807114500_round_fee_audit.sql
+supabase/migrations/20260807130000_round_archive_verification.sql
+supabase/migrations/20260807131500_keeper_leases.sql
+supabase/migrations/20260807133000_referral_read_model_v1.sql
+```
+
+Set `REFERRAL_INDEXER_START_SLOT` at or before the rehearsal program's first
+`MinerRegistered` event; using a later round-only cursor cannot reconstruct lifetime referrals.
+
+Use three distinct controlled Solana roles in the rehearsal: admin/direct-fee/fallback, Switchboard
+randomness/lifecycle, and buyback. Do not alias their addresses merely to save Devnet SOL.
+
 Do not reuse `tests/local-protocol.mjs` on devnet: it deliberately rotates admin to an ephemeral key
 to test authorization. After initialization, run the read-only smoke test instead:
 
@@ -109,6 +137,22 @@ ANCHOR_WALLET=.localnet/test-wallet.json \
 pnpm run test:devnet:smoke
 ```
 
+Run each provider-backed round with the guarded Switchboard keeper. It atomically creates, opens
+and binds an uncommitted request, executes indexed Auto-round plans with that bound account, waits
+for betting to close, atomically commits and records the commitment, waits for the seed slot, then
+atomically reveals and settles. Manual deployments must also pass the same bound randomness
+account. Never replace this with the old commit-before-betting sequence.
+
+```bash
+ANCHOR_PROVIDER_URL=https://api.devnet.solana.com \
+ANCHOR_WALLET=<switchboard-randomness-role-keypair> \
+SUPABASE_URL=<devnet-index-url> \
+SUPABASE_SERVICE_ROLE_KEY=<restricted-devnet-service-role> \
+CONFIRM_SWITCHBOARD_KEEPER=<scheduled-round-id> \
+MYNE_ROUND_ID=<scheduled-round-id> \
+pnpm run devnet:switchboard-round
+```
+
 For the viewer, set `VITE_SOLANA_RPC_URL=https://api.devnet.solana.com` in `Frontend/.env.local`,
 restart Vite, and open `/local.html`.
 
@@ -116,7 +160,9 @@ restart Vite, and open `/local.html`.
 
 After the admin wallet has been deliberately funded with Devnet SOL, the demo keeper can create
 ten ephemeral miners and three ephemeral stakers, deploy controlled 10x-20x demo amounts, and
-settle rounds. Devnet partitions the 25-tile coverage between five miners to control faucet spend;
+submit their manual deployments against a round already bound by the Switchboard keeper. The
+Switchboard keeper, not this fixture, commits/reveals and settles provider-backed rounds. Devnet
+partitions the 25-tile coverage between five miners to control faucet spend;
 the localhost fixture places all five on every tile with the same exact bid for equal-share payout
 audits. It is guarded against accidental use on any non-local/non-Devnet endpoint and requires an
 explicit program-id confirmation:
@@ -133,7 +179,9 @@ ephemeral wallets and Devnet SOL for this demo.
 
 ## Stop conditions
 
-Do not continue if the program ID, upgrade authority, mint, config PDA, supply, decimals, or freeze
-authority differs from the expected value. Do not unpause this milestone. Before implementing value
-movement, resolve the randomness source, round settlement invariants, liquidity-tax destination,
-oracle failure behavior, and production authority/governance model, then perform a dedicated audit.
+Do not continue if the program ID, upgrade authority, mint, config PDA, state version, supply,
+decimals, freeze authority, fee destinations or three role addresses differ from the reviewed
+values. Pause immediately if any fee event fails conservation, any receiver can be redirected, or
+any randomness request commits before betting closes, any deploy omits the bound request, or any
+test evidence was produced from a different artifact. Devnet success is rehearsal evidence,
+not Mainnet authorization; follow the Mainnet gates and obtain the independent review.

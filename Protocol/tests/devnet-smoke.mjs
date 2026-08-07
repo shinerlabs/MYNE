@@ -11,16 +11,25 @@ const { getMint } = splToken;
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const GENESIS_BASE_UNITS = 100_000_000_000n;
+const DEVNET_GENESIS_HASH = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
+const SWITCHBOARD_DEVNET_PROGRAM = new PublicKey('Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2');
 const idl = JSON.parse(
   await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'),
 );
 
 const provider = AnchorProvider.env();
 setProvider(provider);
-assert.ok(!/127\.0\.0\.1|localhost/.test(provider.connection.rpcEndpoint), 'Use this smoke test only against devnet');
+const genesisHash = await provider.connection.getGenesisHash();
+assert.equal(genesisHash, DEVNET_GENESIS_HASH, 'Use this smoke test only against Solana Devnet');
 
 const program = new Program(idl, provider);
 assert.ok(program.programId.equals(PROGRAM_ID), 'IDL and configured program IDs differ');
+const instructions = new Map(idl.instructions.map((instruction) => [instruction.name, instruction]));
+assert.ok(instructions.has('record_round_randomness_commit'), 'Devnet IDL lacks the post-close randomness commit callback');
+for (const instructionName of ['deploy', 'execute_auto_plan']) {
+  const accounts = new Set(instructions.get(instructionName)?.accounts.map((account) => account.name));
+  assert.ok(accounts.has('randomness_account'), `${instructionName} does not require the bound randomness account`);
+}
 const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID);
 const [miningPool] = PublicKey.findProgramAddressSync([Buffer.from('mining_pool')], PROGRAM_ID);
 const [stakePool] = PublicKey.findProgramAddressSync([Buffer.from('stake_pool')], PROGRAM_ID);
@@ -32,11 +41,13 @@ const [programAccount, state, miningState, stakingState] = await Promise.all([
 ]);
 assert.ok(programAccount?.executable, 'Program is not executable on the selected cluster');
 assert.equal(
-  state.version,
-  5,
-  `Devnet runs state version ${state.version}; use a reviewed migration or fresh v5 rehearsal before testing`,
+  Number(state.version),
+  6,
+  `Devnet runs state version ${Number(state.version)}; run the guarded v5 -> v6 migration or initialize fresh v6 state`,
 );
-assert.ok(state.paused, 'Devnet version 5 must remain paused during the pre-activation smoke test');
+assert.ok(state.paused, 'Devnet version 6 must remain paused during the pre-activation smoke test');
+assert.ok(state.randomnessProgram.equals(SWITCHBOARD_DEVNET_PROGRAM), 'Devnet config is not pinned to Switchboard Devnet');
+assert.ok(!state.adminFeeWallet.equals(PublicKey.default), 'Admin fee wallet cannot be the default key');
 assert.ok(BigInt(state.motherlodeLamports.toString()) >= 0n);
 assert.equal(state.genesisTokens.toString(), '100');
 assert.equal(state.maxTokens.toString(), '2000000');
@@ -58,12 +69,14 @@ assert.equal(mint.freezeAuthority, null);
 
 console.log(JSON.stringify({
   ok: true,
-  cluster: provider.connection.rpcEndpoint,
+  cluster: 'devnet',
+  genesisHash,
   programId: PROGRAM_ID.toBase58(),
   config: config.toBase58(),
   miningPool: miningPool.toBase58(),
   stakePool: stakePool.toBase58(),
   admin: state.admin.toBase58(),
+  adminFeeWallet: state.adminFeeWallet.toBase58(),
   mint: state.mint.toBase58(),
   status: 'paused',
 }, null, 2));

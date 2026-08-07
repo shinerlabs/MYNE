@@ -5,7 +5,7 @@ import * as splToken from '@solana/spl-token';
 import web3 from '@solana/web3.js';
 
 const { AnchorProvider, Program, setProvider } = anchor;
-const { PublicKey, SystemProgram } = web3;
+const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = web3;
 const { AuthorityType, TOKEN_PROGRAM_ID, createMint, getMint, getOrCreateAssociatedTokenAccount, mintTo, setAuthority } = splToken;
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const LOADER = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111');
@@ -74,12 +74,21 @@ assert.ok(
   launchMint.mintAuthority?.equals(config),
   `MYNE mint authority must be the config PDA (${config.toBase58()}); found ${launchMint.mintAuthority?.toBase58() ?? 'none'}`,
 );
+// Keep the two settlement receivers distinct even in the disposable local
+// environment. This exercises the same account metas as production and makes
+// direct fee balances observable without conflating them with transaction fees.
+const buybackRole = Keypair.generate();
+const adminFeeRole = Keypair.generate();
+for (const role of [buybackRole, adminFeeRole]) {
+  const signature = await provider.connection.requestAirdrop(role.publicKey, LAMPORTS_PER_SOL);
+  await provider.connection.confirmTransaction(signature, 'confirmed');
+}
 await program.methods.initializeProtocol({
   randomnessAuthority: payer.publicKey,
   randomnessProgram: PublicKey.default,
-  buybackWallet: payer.publicKey,
+  buybackWallet: buybackRole.publicKey,
   motherlodeWallet: payer.publicKey,
-  adminFeeWallet: payer.publicKey,
+  adminFeeWallet: adminFeeRole.publicKey,
 }).accounts({
   config, miningPool, stakePool, payer: payer.publicKey, program: PROGRAM_ID, programData,
   upgradeAuthority: payer.publicKey, mint, tokenProgram: TOKEN_PROGRAM_ID, systemProgram: SystemProgram.programId,
@@ -92,4 +101,12 @@ await program.methods.setPaused(false).accounts({
   quoteVault: null,
   admin: payer.publicKey,
 }).rpc();
-console.log(JSON.stringify({ ok: true, status: 'active-local', programId: PROGRAM_ID.toBase58(), config: config.toBase58(), mint: mint.toBase58() }, null, 2));
+console.log(JSON.stringify({
+  ok: true,
+  status: 'active-local',
+  programId: PROGRAM_ID.toBase58(),
+  config: config.toBase58(),
+  mint: mint.toBase58(),
+  buybackWallet: buybackRole.publicKey.toBase58(),
+  adminFeeWallet: adminFeeRole.publicKey.toBase58(),
+}, null, 2));

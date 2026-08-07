@@ -6,6 +6,9 @@ import { isSocialConfigured, supabase } from '../social/config.js';
 import {
   canonicalSolanaAddress, isReferralCode, referralCodeFor,
 } from './referral-code.js';
+import {
+  boundedReferralPage, referralLeaderFromRow, referralNetworkFromRow, referralStatsFromRow,
+} from './referral-read-model.js';
 
 const minerPda = (owner) => derivePda('miner', new PublicKey(owner));
 const positionPda = (owner) => derivePda('stake_position', new PublicKey(owner));
@@ -18,14 +21,28 @@ export async function readReferrerOf(account) {
 
 export async function readReferralStats(account = getAccount()) {
   if (!account) return null;
-  const miner = await fetchProtocolAccount('Miner', minerPda(account));
+  const authority = new PublicKey(account).toBase58();
+  const miner = await fetchProtocolAccount('Miner', minerPda(authority));
   const referrer = miner?.referrer ?? PublicKey.default;
+  let indexed = { lifetime: 0n, referrals: 0, active: 0 };
+  if (isSocialConfigured && supabase) {
+    const { data, error } = await supabase
+      .from('mine_referral_stats_v1')
+      .select('referrals, active, earned_base_units::text')
+      .eq('wallet_address', authority)
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new Error(`Referral index unavailable: ${error.message}`);
+    if (data) indexed = referralStatsFromRow(data);
+  }
   return {
     referrer: referrer.toBase58(),
     hasReferrer: !referrer.equals(PublicKey.default),
-    // Referral rewards are credited directly into the same unclaimed MYNE balance.
-    claimable: BigInt(miner?.unclaimedMyne?.toString?.() ?? 0),
-    lifetime: 0n, referrals: 0, active: 0,
+    // There is no separate referral-reward balance or claim instruction. Claim-event credits are
+    // merged into the miner's general reward shares, so generic unclaimed MYNE must not be
+    // presented as referral-claimable MYNE.
+    claimable: 0n,
+    ...indexed,
   };
 }
 
@@ -69,10 +86,41 @@ export async function resolveReferrerReference(reference) {
 }
 
 export async function claimReferral() {
-  throw new Error('Referral MYNE is already included in your standard unclaimed MYNE balance');
+  throw new Error('Referral MYNE is included in the standard MYNE claim; there is no separate referral balance');
 }
 
 // Reverse referral enumeration is intentionally delegated to the indexer. The program keeps no
 // global user vector, preserving the protocol-level no-user-cap requirement.
-export async function readLeaderboard() { return []; }
-export async function readMyReferrals() { return []; }
+export async function readLeaderboard(limit = 10, offset = 0) {
+  if (!isSocialConfigured || !supabase) return [];
+  const page = boundedReferralPage({ limit, offset });
+  const { data, error } = await supabase
+    .from('mine_referral_stats_v1')
+    .select('wallet_address, referrals, active, earned_base_units::text')
+    .order('earned_base_units', { ascending: false })
+    .order('active', { ascending: false })
+    .order('referrals', { ascending: false })
+    .order('wallet_address', { ascending: true })
+    .range(page.offset, page.offset + page.limit - 1);
+  if (error) throw new Error(`Referral leaderboard unavailable: ${error.message}`);
+  return (data ?? []).map(referralLeaderFromRow);
+}
+
+export async function readMyReferrals(
+  account = getAccount(),
+  { limit = 100, offset = 0 } = {},
+) {
+  if (!account) return [];
+  if (!isSocialConfigured || !supabase) return [];
+  const authority = new PublicKey(account).toBase58();
+  const page = boundedReferralPage({ limit, offset });
+  const { data, error } = await supabase
+    .from('mine_referral_network_v1')
+    .select('referred_wallet, active, earned_base_units::text')
+    .eq('referrer_wallet', authority)
+    .order('earned_base_units', { ascending: false })
+    .order('referred_wallet', { ascending: true })
+    .range(page.offset, page.offset + page.limit - 1);
+  if (error) throw new Error(`Referral network unavailable: ${error.message}`);
+  return (data ?? []).map(referralNetworkFromRow);
+}

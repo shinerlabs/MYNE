@@ -9,3 +9,13 @@ node_modules/
 .pnpm-store/
 .git/
 **/.DS_Store
+.env
+.env.*
+!.env.example
+!.env.local.example
+**/*keypair*.json
+**/*.pem
+**/*.p12
+**/*.keystore
+.codex/
+.agents/

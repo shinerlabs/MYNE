@@ -53,8 +53,10 @@ test('winner tile reuses the branded multi-colour countdown overlay', async () =
   assert.match(css, /\.round-miner-grid i\.winning\s*\{[\s\S]*?var\(--tile-countdown-overlay\)/);
 });
 
-test('staking APY annualises a measured SOL reward rate', () => {
-  assert.equal(minuteApyPercent(1, 100), 525600);
-  assert.equal(minuteApyPercent(0, 100), 0);
-  assert.equal(minuteApyPercent(1, 0), null);
+test('staking APY annualises SOL rewards against the SOL value of MYNE weight', () => {
+  // 100 MYNE at 10 MYNE/SOL is 10 SOL of pool weight.
+  assert.equal(minuteApyPercent(1, 100, 10), 5_256_000);
+  assert.equal(minuteApyPercent(0, 100, 10), 0);
+  assert.equal(minuteApyPercent(1, 0, 10), null);
+  assert.equal(minuteApyPercent(1, 100, 0), null);
 });

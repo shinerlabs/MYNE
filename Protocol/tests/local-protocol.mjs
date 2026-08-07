@@ -5,7 +5,7 @@ import anchor from '@anchor-lang/core';
 import * as splToken from '@solana/spl-token';
 import web3 from '@solana/web3.js';
 
-const { AnchorProvider, BN, Program, setProvider } = anchor;
+const { AnchorProvider, BN, EventParser, Program, setProvider } = anchor;
 const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram } = web3;
 const {
   AuthorityType,
@@ -21,6 +21,13 @@ const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e')
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   'BPFLoaderUpgradeab1e11111111111111111111111',
 );
+const miningShareValue = (pool, minerState) => {
+  const assets = BigInt(pool.totalUnclaimed.toString());
+  const shares = BigInt(pool.rewardPerUnclaimed.toString());
+  const owned = BigInt(minerState.passiveRewardDebt.toString());
+  if (owned === 0n || assets === 0n || shares === 0n || owned > shares) return 0n;
+  return assets * owned / shares;
+};
 
 const idl = JSON.parse(
   await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'),
@@ -86,6 +93,12 @@ const fallbackAirdrop = await provider.connection.requestAirdrop(
   LAMPORTS_PER_SOL,
 );
 await provider.connection.confirmTransaction(fallbackAirdrop, 'confirmed');
+const buybackOwner = Keypair.generate();
+const buybackAirdrop = await provider.connection.requestAirdrop(
+  buybackOwner.publicKey,
+  LAMPORTS_PER_SOL,
+);
+await provider.connection.confirmTransaction(buybackAirdrop, 'confirmed');
 // The fallback path is constrained to this canonical ATA and remains distinct
 // from the claimant's token account during the local aliasing checks.
 const adminFeeAccount = (await getOrCreateAssociatedTokenAccount(
@@ -150,7 +163,7 @@ const initializeSignature = await program.methods
   .initializeProtocol({
     randomnessAuthority: payer.publicKey,
     randomnessProgram: PublicKey.default,
-    buybackWallet: payer.publicKey,
+    buybackWallet: buybackOwner.publicKey,
     motherlodeWallet: payer.publicKey,
     adminFeeWallet: fallbackOwner.publicKey,
   })
@@ -177,7 +190,7 @@ await program.methods
   .rpc();
 
 let state = await program.account.protocolConfig.fetch(config);
-assert.equal(state.version, 5);
+assert.equal(state.version, 6);
 assert.equal(state.paused, true);
 assert.ok(state.admin.equals(upgradeAuthority.publicKey));
 assert.ok(state.mint.equals(mint));
@@ -200,6 +213,19 @@ await program.methods
   })
   .signers(upgradeAuthoritySigners)
   .rpc();
+await assert.rejects(
+  program.methods
+    .migrateFeeScheduleV6()
+    .accounts({
+      config,
+      liquidityGate: null,
+      liquidityPool: null,
+      admin: upgradeAuthority.publicKey,
+    })
+    .signers(upgradeAuthoritySigners)
+    .rpc(),
+  /MigrationRequiresPause|Pause the protocol|custom program error/i,
+);
 
 const [miner] = PublicKey.findProgramAddressSync(
   [Buffer.from('miner'), payer.publicKey.toBuffer()],
@@ -326,16 +352,16 @@ const receiptFor = (authority, nonce) => PublicKey.findProgramAddressSync([
 ], PROGRAM_ID)[0];
 await program.methods
   .deploy(roundId, new BN(10), ninetyPercentShare)
-  .accounts({ config, miner, round, receipt: receiptFor(payer.publicKey, new BN(10)), authority: payer.publicKey, systemProgram: SystemProgram.programId })
+  .accounts({ config, miner, round, receipt: receiptFor(payer.publicKey, new BN(10)), randomnessAccount: null, authority: payer.publicKey, systemProgram: SystemProgram.programId })
   .rpc();
 await program.methods
   .deploy(roundId, new BN(11), tenPercentShare)
-  .accounts({ config, miner, round, receipt: receiptFor(payer.publicKey, new BN(11)), authority: payer.publicKey, systemProgram: SystemProgram.programId })
+  .accounts({ config, miner, round, receipt: receiptFor(payer.publicKey, new BN(11)), randomnessAccount: null, authority: payer.publicKey, systemProgram: SystemProgram.programId })
   .rpc();
 const rogueAmounts = Array.from({ length: 25 }, (_, index) => new BN(index === 0 ? 50_000_000 : 0));
 await program.methods
   .deploy(roundId, new BN(20), rogueAmounts)
-  .accounts({ config, miner: rogueMiner, round, receipt: receiptFor(rogue.publicKey, new BN(20)), authority: rogue.publicKey, systemProgram: SystemProgram.programId })
+  .accounts({ config, miner: rogueMiner, round, receipt: receiptFor(rogue.publicKey, new BN(20)), randomnessAccount: null, authority: rogue.publicKey, systemProgram: SystemProgram.programId })
   .signers([rogue])
   .rpc();
 const losingAmounts = Array.from({ length: 25 }, (_, index) => new BN(index === 1 ? 50_000_000 : 0));
@@ -343,7 +369,7 @@ await program.methods
   .deploy(roundId, new BN(30), losingAmounts)
   .accounts({
     config, miner: loserMiner, round, receipt: receiptFor(loser.publicKey, new BN(30)),
-    authority: loser.publicKey, systemProgram: SystemProgram.programId,
+    randomnessAccount: null, authority: loser.publicKey, systemProgram: SystemProgram.programId,
   })
   .signers([loser])
   .rpc();
@@ -358,12 +384,12 @@ await program.methods
   .rpc();
 await program.methods
   .executeAutoPlan(roundId, new BN(0))
-  .accounts({ config, autoPlan, miner, round, receipt: receiptFor(payer.publicKey, new BN(0)), executor: payer.publicKey, systemProgram: SystemProgram.programId })
+  .accounts({ config, autoPlan, miner, round, receipt: receiptFor(payer.publicKey, new BN(0)), randomnessAccount: null, executor: payer.publicKey, systemProgram: SystemProgram.programId })
   .rpc();
 await assert.rejects(
   program.methods
     .executeAutoPlan(roundId, new BN(1))
-    .accounts({ config, autoPlan, miner, round, receipt: receiptFor(payer.publicKey, new BN(1)), executor: payer.publicKey, systemProgram: SystemProgram.programId })
+    .accounts({ config, autoPlan, miner, round, receipt: receiptFor(payer.publicKey, new BN(1)), randomnessAccount: null, executor: payer.publicKey, systemProgram: SystemProgram.programId })
     .rpc(),
   /AutoPlanAlreadyExecuted|already executed|custom program error/i,
 );
@@ -390,19 +416,98 @@ for (let value = 0; value < 100_000; value += 1) {
   candidate.writeUInt32LE(value);
   const tile = Number(domainHash('tile', candidate).readBigUInt64LE() % 25n);
   const solo = domainHash('mode', candidate).readBigUInt64LE() % 2n === 0n;
-  if (tile === 0 && !solo) { randomness = [...candidate]; break; }
+  const motherlode = domainHash('motherlode', candidate).readBigUInt64LE() % 650n === 0n;
+  if (tile === 0 && !solo && !motherlode) { randomness = [...candidate]; break; }
 }
 assert.ok(randomness, 'Failed to derive deterministic split-mode local randomness');
-await program.methods
+await assert.rejects(
+  program.methods
+    .settleRound(randomness)
+    .accounts({
+      config,
+      stakePool,
+      round,
+      liquidityGate,
+      liquidityPool: localPool,
+      randomnessAuthority: payer.publicKey,
+      buybackWallet: buybackOwner.publicKey,
+      adminFeeWallet: rogue.publicKey,
+    })
+    .rpc(),
+  /InvalidFeeDestination|fee destination|custom program error/i,
+);
+const adminSolBeforeSettlement = await provider.connection.getBalance(fallbackOwner.publicKey, 'confirmed');
+const buybackSolBeforeSettlement = await provider.connection.getBalance(buybackOwner.publicKey, 'confirmed');
+const stakePoolBeforeSettlement = await program.account.stakePool.fetch(stakePool);
+const settlementSignature = await program.methods
   .settleRound(randomness)
-  .accounts({ config, stakePool, round, liquidityGate, liquidityPool: localPool, randomnessAuthority: payer.publicKey, buybackWallet: payer.publicKey })
+  .accounts({
+    config,
+    stakePool,
+    round,
+    liquidityGate,
+    liquidityPool: localPool,
+    randomnessAuthority: payer.publicKey,
+    buybackWallet: buybackOwner.publicKey,
+    adminFeeWallet: fallbackOwner.publicKey,
+  })
   .rpc();
+await provider.connection.confirmTransaction(settlementSignature, 'confirmed');
+const adminSolAfterSettlement = await provider.connection.getBalance(fallbackOwner.publicKey, 'confirmed');
+const buybackSolAfterSettlement = await provider.connection.getBalance(buybackOwner.publicKey, 'confirmed');
+const stakePoolAfterSettlement = await program.account.stakePool.fetch(stakePool);
+roundState = await program.account.round.fetch(round);
+assert.equal(roundState.prizeLamports.toString(), '572000000', 'Exactly 88% remains for miners');
+assert.equal(
+  adminSolAfterSettlement - adminSolBeforeSettlement,
+  11_700_000,
+  'Admin receives 1% of round volume plus 10% of the gross 8% staking allocation directly',
+);
+assert.equal(
+  buybackSolAfterSettlement - buybackSolBeforeSettlement,
+  6_500_000,
+  'Exactly 1% of round volume is transferred directly to the buyback wallet',
+);
+assert.equal(
+  BigInt(stakePoolAfterSettlement.totalFundedLamports.toString())
+    - BigInt(stakePoolBeforeSettlement.totalFundedLamports.toString()),
+  46_800_000n,
+  'Stakers receive the net 7.2% round allocation after the 10% staking admin share',
+);
+const settlementTransaction = await provider.connection.getTransaction(settlementSignature, {
+  commitment: 'confirmed',
+  maxSupportedTransactionVersion: 0,
+});
+assert.ok(settlementTransaction?.meta?.logMessages, 'Settlement logs are unavailable');
+const settlementEvents = [...new EventParser(PROGRAM_ID, program.coder)
+  .parseLogs(settlementTransaction.meta.logMessages)];
+const feeEvent = settlementEvents.find(({ name }) => (
+  name === 'RoundFeesDistributed' || name === 'roundFeesDistributed'
+))?.data;
+assert.ok(
+  feeEvent,
+  `Settlement must emit the canonical fee audit event; decoded: ${settlementEvents
+    .map(({ name }) => name)
+    .join(', ') || 'none'}`,
+);
+assert.equal(feeEvent.grossDeployedLamports.toString(), '650000000');
+assert.equal(feeEvent.totalFeeLamports.toString(), '78000000');
+assert.equal(feeEvent.stakingGrossLamports.toString(), '52000000');
+assert.equal(feeEvent.stakingAdminLamports.toString(), '5200000');
+assert.equal(feeEvent.stakingNetLamports.toString(), '46800000');
+assert.equal(feeEvent.buybackLamports.toString(), '6500000');
+assert.equal(feeEvent.motherlodeLamports.toString(), '13000000');
+assert.equal(feeEvent.miningAdminLamports.toString(), '6500000');
+assert.equal(feeEvent.adminTotalLamports.toString(), '11700000');
+assert.ok(feeEvent.adminFeeWallet.equals(fallbackOwner.publicKey));
 for (const nonce of [new BN(10), new BN(11)]) {
   await program.methods
     .claimReceipt()
     .accounts({ config, miningPool, stakePool, miner, stakePosition, round, receipt: receiptFor(payer.publicKey, nonce), authority: payer.publicKey })
     .rpc();
 }
+const stakePoolBeforeAutoBurn = await program.account.stakePool.fetch(stakePool);
+const positionBeforeAutoBurn = await program.account.stakePosition.fetch(stakePosition);
 await program.methods
   .claimAutoBurnReceipt()
   .accounts({
@@ -458,8 +563,26 @@ assert.equal(roundState.buybackCompleted, true);
 const settledConfig = await program.account.protocolConfig.fetch(config);
 assert.equal(settledConfig.motherlodeLamports.toString(), '13000000');
 const autoBurnPosition = await program.account.stakePosition.fetch(stakePosition);
+const stakePoolAfterAutoBurn = await program.account.stakePool.fetch(stakePool);
+const autoBurnPrincipalDelta = BigInt(autoBurnPosition.burnPrincipal.toString())
+  - BigInt(positionBeforeAutoBurn.burnPrincipal.toString());
+const poolBurnDelta = BigInt(stakePoolAfterAutoBurn.totalBurn.toString())
+  - BigInt(stakePoolBeforeAutoBurn.totalBurn.toString());
+const poolWeightDelta = BigInt(stakePoolAfterAutoBurn.totalWeight.toString())
+  - BigInt(stakePoolBeforeAutoBurn.totalWeight.toString());
+const totalStakedBeforeAutoBurn = BigInt(stakePoolBeforeAutoBurn.totalStandard.toString())
+  + BigInt(stakePoolBeforeAutoBurn.totalBurn.toString());
+const totalStakedAfterAutoBurn = BigInt(stakePoolAfterAutoBurn.totalStandard.toString())
+  + BigInt(stakePoolAfterAutoBurn.totalBurn.toString());
 assert.equal(autoBurnPosition.burnPrincipal.toString(), '83333334');
 assert.equal(autoBurnPosition.rewardWeight.toString(), '10416666670');
+assert.equal(poolBurnDelta, autoBurnPrincipalDelta, 'Auto-burn must increase pool and position burn principal equally');
+assert.equal(poolWeightDelta, autoBurnPrincipalDelta * 5n, 'Auto-burn must add exactly 5x pool weight');
+assert.equal(
+  totalStakedAfterAutoBurn - totalStakedBeforeAutoBurn,
+  autoBurnPrincipalDelta,
+  'Total staked must include both standard and permanent burn stake',
+);
 const autoReceipt = await program.account.betReceipt.fetch(receiptFor(payer.publicKey, new BN(0)));
 assert.equal(autoReceipt.rewardMode, 1);
 assert.equal(autoReceipt.claimed, true);
@@ -470,22 +593,45 @@ assert.equal(minerState.lifetimeSolClaimed.toString(), '524333333');
 assert.equal(rogueRewardState.lifetimeSolClaimed.toString(), '47666667');
 assert.equal(loserRewardState.lifetimeSolClaimed.toString(), '0');
 const referrerStateBefore = await program.account.miner.fetch(referrerMiner);
-const payerGross = BigInt(minerState.unclaimedMyne.toString());
+const poolBeforeReferredClaim = await program.account.miningPool.fetch(miningPool);
+const payerGross = miningShareValue(poolBeforeReferredClaim, minerState);
 const payerReferral = (payerGross * 1_000n) / 10_000n - (payerGross * 900n) / 10_000n;
+const adminBalanceBeforeReferredClaim = (await splToken.getAccount(provider.connection, adminFeeAccount)).amount;
 await program.methods
   .claimMyne()
   .accounts({
     config, miningPool, miner, referrerMiner, destinationTokens: launchAccount.address,
-    adminFeeTokens: adminFeeAccount, mint, authority: payer.publicKey, tokenProgram: TOKEN_PROGRAM_ID,
+    adminFeeTokens: null, mint, authority: payer.publicKey, tokenProgram: TOKEN_PROGRAM_ID,
   })
   .rpc();
 minerState = await program.account.miner.fetch(miner);
 assert.equal(minerState.unclaimedMyne.toString(), '0');
 const referrerStateAfter = await program.account.miner.fetch(referrerMiner);
+const poolAfterReferredClaim = await program.account.miningPool.fetch(miningPool);
+const referrerValueBefore = miningShareValue(poolBeforeReferredClaim, referrerStateBefore);
+const referrerValueAfter = miningShareValue(poolAfterReferredClaim, referrerStateAfter);
 assert.equal(
-  BigInt(referrerStateAfter.unclaimedMyne.toString()) - BigInt(referrerStateBefore.unclaimedMyne.toString()),
-  payerReferral,
-  'A labelled referrer receives exactly 1% of the claimed gross amount',
+  BigInt(referrerStateAfter.unclaimedMyne.toString()),
+  referrerValueAfter,
+  'The referrer cache equals its exact post-claim share value',
+);
+assert.equal(referrerValueBefore, 0n, 'The first referral credit starts without earlier pool shares');
+assert.ok(
+  referrerValueAfter <= payerReferral && referrerValueAfter + 1n >= payerReferral,
+  'The referrer receives the 1% asset credit within one base unit of share-rounding precision',
+);
+assert.equal(
+  BigInt(poolAfterReferredClaim.totalUnclaimed.toString()),
+  BigInt(poolBeforeReferredClaim.totalUnclaimed.toString())
+    - payerGross
+    + (payerGross * 900n) / 10_000n
+    + payerReferral,
+  'Claim, passive distribution and referral credit conserve every pool asset unit',
+);
+assert.equal(
+  (await splToken.getAccount(provider.connection, adminFeeAccount)).amount,
+  adminBalanceBeforeReferredClaim,
+  'A labelled referral must not also pay the administrator fallback',
 );
 
 // The Rewards panel's 0% Stake + Burn action must not mint liquid MYNE or route through the
@@ -494,11 +640,7 @@ assert.equal(
 const referrerPositionBeforeBurn = await program.account.stakePosition.fetch(referrerStakePosition);
 const referrerMinerBeforeBurn = await program.account.miner.fetch(referrerMiner);
 const poolBeforeBurn = await program.account.miningPool.fetch(miningPool);
-const referrerPassiveDelta = BigInt(poolBeforeBurn.rewardPerUnclaimed.toString())
-  - BigInt(referrerMinerBeforeBurn.passiveRewardDebt.toString());
-const referrerPassive = BigInt(referrerMinerBeforeBurn.unclaimedMyne.toString())
-  * referrerPassiveDelta / 1_000_000_000_000_000_000n;
-const referrerBurnAmount = BigInt(referrerMinerBeforeBurn.unclaimedMyne.toString()) + referrerPassive;
+const referrerBurnAmount = miningShareValue(poolBeforeBurn, referrerMinerBeforeBurn);
 const supplyBeforeRewardBurn = (await splToken.getMint(provider.connection, mint)).supply;
 await program.methods
   .burnUnclaimedMyne()
@@ -537,13 +679,20 @@ const adminBalanceBeforeFallback = (await splToken.getAccount(provider.connectio
 const rogueTokens = await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, rogue.publicKey);
 const rogueState = await program.account.miner.fetch(rogueMiner);
 const miningPoolState = await program.account.miningPool.fetch(miningPool);
-const rogueGross = BigInt(rogueState.unclaimedMyne.toString());
-const passiveDelta = BigInt(miningPoolState.rewardPerUnclaimed.toString())
-  - BigInt(rogueState.passiveRewardDebt.toString());
-const passiveCheckpoint = rogueGross * passiveDelta / 1_000_000_000_000_000_000n;
-const rogueEffectiveGross = rogueGross + passiveCheckpoint;
+const rogueEffectiveGross = miningShareValue(miningPoolState, rogueState);
 const rogueAdminFee = (rogueEffectiveGross * 1_000n) / 10_000n
   - (rogueEffectiveGross * 900n) / 10_000n;
+await assert.rejects(
+  program.methods
+    .claimMyne()
+    .accounts({
+      config, miningPool, miner: rogueMiner, referrerMiner: null, destinationTokens: rogueTokens.address,
+      adminFeeTokens: launchAccount.address, mint, authority: rogue.publicKey, tokenProgram: TOKEN_PROGRAM_ID,
+    })
+    .signers([rogue])
+    .rpc(),
+  /InvalidFeeDestination|token owner|constraint|custom program error/i,
+);
 await program.methods
   .claimMyne()
   .accounts({
@@ -574,8 +723,8 @@ await program.methods
   .accounts({ stakePool, stakePosition, authority: payer.publicKey })
   .rpc();
 const stakePoolState = await program.account.stakePool.fetch(stakePool);
-assert.equal(stakePoolState.totalFundedLamports.toString(), '152000000');
-assert.equal(stakePoolState.totalClaimedLamports.toString(), '152000000');
+assert.equal(stakePoolState.totalFundedLamports.toString(), '146800000');
+assert.equal(stakePoolState.totalClaimedLamports.toString(), '146800000');
 
 const archiveHash = [...createHash('sha256').update('local-round-0-canonical-snapshot').digest()];
 await assert.rejects(
@@ -662,6 +811,19 @@ state = await program.account.protocolConfig.fetch(config);
 assert.equal(state.paused, true);
 assert.ok(state.admin.equals(rogue.publicKey));
 assert.ok(state.pendingAdmin.equals(PublicKey.default));
+await assert.rejects(
+  program.methods
+    .migrateFeeScheduleV6()
+    .accounts({
+      config,
+      liquidityGate: null,
+      liquidityPool: null,
+      admin: rogue.publicKey,
+    })
+    .signers([rogue])
+    .rpc(),
+  /ProtocolUpgradeRequired|migrated to the current fee schedule|custom program error/i,
+);
 
 // Leave a detached validator usable by the local keeper after the authorization assertions.
 await program.methods
@@ -707,6 +869,8 @@ console.log(JSON.stringify({
     'receipt-based mining with multiple unbounded deployments',
     'deterministic round schedule rejects premature future rounds',
     'constant-cost split settlement and per-receipt claims',
+    'exact v6 fee routing, direct admin/buyback balances and audit event',
+    'paused-only one-way fee migration guards',
     'permissionless accumulate and auto-burn receipt settlement',
     'archive-before-close lifecycle with receipt and round rent recovery',
     'on-chain receipt processed/closed counters and buyback closure gate',

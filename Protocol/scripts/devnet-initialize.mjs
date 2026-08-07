@@ -37,8 +37,18 @@ const randomnessAuthority = new PublicKey(process.env.DEVNET_RANDOMNESS_AUTHORIT
 assert.ok(!randomnessAuthority.equals(PublicKey.default), 'Randomness authority cannot be the default key');
 assert.ok(process.env.DEVNET_RANDOMNESS_PROGRAM, 'Set DEVNET_RANDOMNESS_PROGRAM to the Switchboard On-Demand devnet program');
 const randomnessProgram = new PublicKey(process.env.DEVNET_RANDOMNESS_PROGRAM);
-for (const name of ['DEVNET_BUYBACK_WALLET', 'DEVNET_MOTHERLODE_WALLET']) {
+for (const name of ['DEVNET_BUYBACK_WALLET', 'DEVNET_MOTHERLODE_WALLET', 'DEVNET_ADMIN_FEE_WALLET']) {
   assert.ok(process.env[name], `Set ${name} to the intended devnet fee destination`);
+}
+const buybackWallet = new PublicKey(process.env.DEVNET_BUYBACK_WALLET);
+const motherlodeWallet = new PublicKey(process.env.DEVNET_MOTHERLODE_WALLET);
+const adminFeeWallet = new PublicKey(process.env.DEVNET_ADMIN_FEE_WALLET);
+for (const [name, address] of [
+  ['DEVNET_BUYBACK_WALLET', buybackWallet],
+  ['DEVNET_MOTHERLODE_WALLET', motherlodeWallet],
+  ['DEVNET_ADMIN_FEE_WALLET', adminFeeWallet],
+]) {
+  assert.ok(!address.equals(PublicKey.default), `${name} cannot be the default key`);
 }
 
 const idl = JSON.parse(
@@ -49,6 +59,26 @@ setProvider(provider);
 assert.equal(await provider.connection.getGenesisHash(), DEVNET_GENESIS_HASH, 'RPC is not Solana devnet');
 const payer = provider.wallet.payer;
 assert.ok(payer, 'Initialization requires a file-backed Anchor wallet');
+assert.ok(
+  adminFeeWallet.equals(payer.publicKey),
+  'DEVNET_ADMIN_FEE_WALLET must be the protocol admin wallet to preserve the three-role model',
+);
+assert.ok(
+  motherlodeWallet.equals(adminFeeWallet),
+  'The reserved DEVNET_MOTHERLODE_WALLET field must use the admin role',
+);
+assert.ok(!buybackWallet.equals(adminFeeWallet), 'Buyback and admin roles must be distinct');
+assert.ok(!randomnessAuthority.equals(adminFeeWallet), 'Randomness and admin roles must be distinct');
+assert.ok(!randomnessAuthority.equals(buybackWallet), 'Randomness and buyback roles must be distinct');
+for (const [name, address] of [
+  ['DEVNET_ADMIN_FEE_WALLET', adminFeeWallet],
+  ['DEVNET_BUYBACK_WALLET', buybackWallet],
+  ['DEVNET_RANDOMNESS_AUTHORITY', randomnessAuthority],
+]) {
+  const account = await provider.connection.getAccountInfo(address, 'confirmed');
+  assert.ok(account, `Fund ${name} before initialization`);
+  assert.ok(account.owner.equals(SystemProgram.programId), `${name} must be a System Program wallet`);
+}
 
 const program = new Program(idl, provider);
 const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID);
@@ -56,6 +86,27 @@ const [miningPool] = PublicKey.findProgramAddressSync([Buffer.from('mining_pool'
 const [stakePool] = PublicKey.findProgramAddressSync([Buffer.from('stake_pool')], PROGRAM_ID);
 const existingConfig = await provider.connection.getAccountInfo(config, 'confirmed');
 if (existingConfig) {
+  const state = await program.account.protocolConfig.fetch(config);
+  assert.ok(
+    state.randomnessAuthority.equals(randomnessAuthority),
+    'Existing config randomness authority differs from DEVNET_RANDOMNESS_AUTHORITY',
+  );
+  assert.ok(
+    state.randomnessProgram.equals(randomnessProgram),
+    'Existing config randomness program differs from DEVNET_RANDOMNESS_PROGRAM',
+  );
+  assert.ok(
+    state.buybackWallet.equals(buybackWallet),
+    'Existing config buyback wallet differs from DEVNET_BUYBACK_WALLET',
+  );
+  assert.ok(
+    state.motherlodeWallet.equals(motherlodeWallet),
+    'Existing config Motherlode wallet differs from DEVNET_MOTHERLODE_WALLET',
+  );
+  assert.ok(
+    state.adminFeeWallet.equals(adminFeeWallet),
+    'Existing config admin fee wallet differs from DEVNET_ADMIN_FEE_WALLET',
+  );
   console.log(`Config ${config.toBase58()} is already initialized; run pnpm test:devnet:smoke.`);
   process.exit(0);
 }
@@ -132,10 +183,9 @@ const signature = await program.methods
   .initializeProtocol({
     randomnessAuthority,
     randomnessProgram,
-    buybackWallet: new PublicKey(process.env.DEVNET_BUYBACK_WALLET),
-    motherlodeWallet: new PublicKey(process.env.DEVNET_MOTHERLODE_WALLET),
-    // Legacy config field retained for account-layout compatibility; no mining fee is sent here.
-    adminFeeWallet: payer.publicKey,
+    buybackWallet,
+    motherlodeWallet,
+    adminFeeWallet,
   })
   .accounts({
     config,
@@ -156,6 +206,9 @@ console.log(JSON.stringify({
   programId: PROGRAM_ID_TEXT,
   config: config.toBase58(),
   mint: mintKeypair.publicKey.toBase58(),
+  buybackWallet: buybackWallet.toBase58(),
+  motherlodeWallet: motherlodeWallet.toBase58(),
+  adminFeeWallet: adminFeeWallet.toBase58(),
   signature,
   status: 'paused',
   next: 'pnpm run test:devnet:smoke',

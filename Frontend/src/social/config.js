@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 /**
- * Supabase wiring for the social layer (chat, profiles, follows, news).
+ * Supabase wiring for the social layer (chat, profiles, and follows).
  *
  * In development everything goes through Vite's same-origin `/supabase` proxy:
  *   - the browser never talks to *.supabase.co directly (fewer CORS/leak surfaces)
@@ -11,28 +11,16 @@ import { createClient } from '@supabase/supabase-js';
  * `import.meta.env.MODE` is the build mode, not NODE_ENV — a production build
  * served locally still resolves to the remote URL, which is what we want.
  *
- * ⚠️ That remote-URL path assumes every Edge Function is deployed, which is NOT yet true:
- * chat-react, chat-reactions, chat-delete, follow-toggle and profile-update still live in
- * `backend/` because migration 0003 is unapplied, so a plain `vite build` yields a bundle
- * where those five 404 in the browser while working perfectly in dev. Until the migration
- * lands, the hosted deploy is built with `npm run build:hosted` (MODE=hosted, so the proxy
- * branch stays live) and nginx mirrors the Vite proxy table. Once 0003 is applied and the
- * functions are deployed, plain `build` is correct again and the mode can go away.
+ * Production talks directly to the deployed Supabase project. Development uses Vite's
+ * same-origin proxy so local CORS and Realtime behavior match the hosted service.
  */
-// These are publishable client values. Vercel should still define the VITE_* variables,
-// but the fallback keeps chat/profile surfaces working when a deployment was created before
-// the project environment variables were added.
-const DEFAULT_SUPABASE_URL = 'https://tfyvarplanptbknnqzwn.supabase.co';
-const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_YsDuGXn2C0MY8zx0ArhlZA_h4qFNpds';
-export const REMOTE_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
-const useProxy = import.meta.env.MODE !== 'production';
+// These are publishable client values, but production must provide them explicitly. A baked-in
+// project fallback can silently point a Mainnet bundle at the wrong database after a migration.
+export const REMOTE_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+const useProxy = Boolean(import.meta.env.DEV);
 export const SUPABASE_URL = useProxy ? `${window.location.origin}/supabase` : REMOTE_SUPABASE_URL;
-export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
+export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 export const FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
-
-/** Express social backend, reached through the `/rounds` proxy prefix. */
-export const ROUNDS_API = `${window.location.origin}/rounds/api`;
-export const NEWS_API = `${ROUNDS_API}/news`;
 
 export const isSocialConfigured = Boolean(REMOTE_SUPABASE_URL && SUPABASE_ANON_KEY);
 
@@ -45,7 +33,7 @@ export const supabase = isSocialConfigured
       persistSession: false,
       autoRefreshToken: false,
       detectSessionInUrl: false,
-      storageKey: 'bullion-chat-gotrue-unused',
+      storageKey: 'myne-chat-gotrue-unused',
     },
     realtime: {
       params: { eventsPerSecond: 10 },

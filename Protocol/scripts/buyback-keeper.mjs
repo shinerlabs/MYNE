@@ -1,7 +1,7 @@
 /**
  * MYNE Meteora buyback + burn keeper.
  *
- * The on-chain program sends the 2% buyback allocation to config.buybackWallet.
+ * The on-chain program sends the 1% buyback allocation to config.buybackWallet.
  * This process spends only that wallet's SOL, routes directly through the
  * registered Meteora DLMM pool, and burns the MYNE received by the same wallet.
  *
@@ -9,6 +9,7 @@
  * transaction is sent. Use DRY_RUN=1 (the default) to quote without spending.
  */
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import anchor from '@anchor-lang/core';
@@ -17,8 +18,12 @@ import * as splToken from '@solana/spl-token';
 import {
   calculateSpend,
   METEORA_DLMM_LABEL,
+  validateJupiterEndpoint,
   validateDirectMeteoraQuote,
 } from './buyback-policy.mjs';
+import {
+  requireMatchingSolanaNetwork,
+} from './production-network-policy.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const {
@@ -27,6 +32,7 @@ const {
   PublicKey,
   ComputeBudgetProgram,
   Transaction,
+  TransactionMessage,
   VersionedTransaction,
   sendAndConfirmTransaction,
 } = web3;
@@ -43,12 +49,21 @@ const {
 const PROGRAM_ID_TEXT = process.env.MYNE_PROGRAM_ID
   || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e';
 const PROGRAM_ID = new PublicKey(PROGRAM_ID_TEXT);
-const SWITCHBOARD_DEVNET_PROGRAM = 'Aio4gaXjXzJNVLtzwtNVmSqGKpANtXhybbkhtAC94ji2';
-const JUPITER_QUOTE_URL = process.env.JUPITER_QUOTE_URL || 'https://lite-api.jup.ag/swap/v1/quote';
-const JUPITER_SWAP_URL = process.env.JUPITER_SWAP_URL || 'https://lite-api.jup.ag/swap/v1/swap';
+const customJupiterAuthorized = process.env.ALLOW_CUSTOM_JUPITER_ENDPOINT === PROGRAM_ID_TEXT;
+const JUPITER_QUOTE_URL = validateJupiterEndpoint(
+  process.env.JUPITER_QUOTE_URL || 'https://lite-api.jup.ag/swap/v1/quote',
+  { expectedPath: '/swap/v1/quote', allowCustom: customJupiterAuthorized },
+);
+const JUPITER_SWAP_URL = validateJupiterEndpoint(
+  process.env.JUPITER_SWAP_URL || 'https://lite-api.jup.ag/swap/v1/swap',
+  { expectedPath: '/swap/v1/swap', allowCustom: customJupiterAuthorized },
+);
+const JUPITER_AGGREGATOR_V6 = new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4');
+const METEORA_DLMM_PROGRAM = new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo');
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const provider = AnchorProvider.env();
 setProvider(provider);
+const commitment = 'confirmed';
 const payer = provider.wallet.payer;
 assert.ok(payer, 'A file-backed keeper wallet is required (set ANCHOR_WALLET)');
 const program = new Program(idl, provider);
@@ -61,6 +76,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const statePath = process.env.BUYBACK_STATE_PATH || '';
 const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const keeperInstanceId = randomUUID();
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 function base58Encode(bytes) {
@@ -101,6 +117,30 @@ async function upsertBuybackEvidence(roundId, executions) {
   );
   const text = await response.text();
   assert.ok(response.ok, `Buyback evidence index failed (${response.status}): ${text}`);
+}
+
+async function acquireBuybackLease() {
+  const ttlSeconds = readInteger(
+    process.env.BUYBACK_LEASE_TTL_SECONDS || '600',
+    'BUYBACK_LEASE_TTL_SECONDS',
+  );
+  assert.ok(ttlSeconds >= 120 && ttlSeconds <= 3600, 'BUYBACK_LEASE_TTL_SECONDS must be 120..3600');
+  const response = await fetch(`${supabaseUrl}/rest/v1/rpc/acquire_mine_keeper_lease`, {
+    method: 'POST',
+    headers: {
+      apikey: serviceRole,
+      Authorization: `Bearer ${serviceRole}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      p_lease_name: `buyback:${PROGRAM_ID.toBase58()}`,
+      p_holder: keeperInstanceId,
+      p_ttl_seconds: ttlSeconds,
+    }),
+  });
+  const body = await response.json().catch(() => null);
+  assert.ok(response.ok, `Buyback lease request failed (${response.status})`);
+  return body === true;
 }
 
 async function loadState() {
@@ -185,6 +225,83 @@ async function buildSwapTransaction(quote) {
   return VersionedTransaction.deserialize(Buffer.from(body.swapTransaction, 'base64'));
 }
 
+async function inspectSwapTransaction(transaction, {
+  inputLamports,
+  myneAta,
+  beforeBaseUnits,
+  minimumOutputBaseUnits,
+}) {
+  assert.equal(
+    transaction.message.staticAccountKeys[0]?.toBase58(),
+    payer.publicKey.toBase58(),
+    'Jupiter transaction fee payer changed unexpectedly',
+  );
+  assert.equal(
+    transaction.message.header.numRequiredSignatures,
+    1,
+    'Jupiter transaction requires an unexpected signer',
+  );
+  const lookupTables = [];
+  for (const lookup of transaction.message.addressTableLookups) {
+    const response = await provider.connection.getAddressLookupTable(lookup.accountKey, { commitment });
+    assert.ok(response.value, `Jupiter lookup table is unavailable: ${lookup.accountKey.toBase58()}`);
+    lookupTables.push(response.value);
+  }
+  const decompiled = TransactionMessage.decompile(transaction.message, {
+    addressLookupTableAccounts: lookupTables,
+  });
+  const allowedPrograms = new Set([
+    ComputeBudgetProgram.programId.toBase58(),
+    web3.SystemProgram.programId.toBase58(),
+    TOKEN_PROGRAM_ID.toBase58(),
+    ASSOCIATED_TOKEN_PROGRAM_ID.toBase58(),
+    JUPITER_AGGREGATOR_V6.toBase58(),
+    METEORA_DLMM_PROGRAM.toBase58(),
+  ]);
+  for (const instruction of decompiled.instructions) {
+    assert.ok(
+      allowedPrograms.has(instruction.programId.toBase58()),
+      `Jupiter transaction contains an unapproved program: ${instruction.programId.toBase58()}`,
+    );
+  }
+
+  const beforeLamports = BigInt(await provider.connection.getBalance(payer.publicKey, commitment));
+  const simulation = await provider.connection.simulateTransaction(transaction, {
+    commitment,
+    sigVerify: false,
+    accounts: {
+      encoding: 'base64',
+      addresses: [payer.publicKey.toBase58(), myneAta.toBase58()],
+    },
+  });
+  assert.equal(
+    simulation.value.err,
+    null,
+    `Meteora swap simulation failed: ${JSON.stringify(simulation.value.err)}\n${(simulation.value.logs || []).join('\n')}`,
+  );
+  const [postPayer, postMyne] = simulation.value.accounts || [];
+  assert.ok(postPayer && postMyne, 'Swap simulation did not return payer and MYNE account state');
+  const spentLamports = beforeLamports - BigInt(postPayer.lamports);
+  assert.ok(spentLamports >= BigInt(inputLamports), 'Swap simulation spends less than the quoted input');
+  const fee = BigInt((await provider.connection.getFeeForMessage(transaction.message, commitment)).value || 0);
+  const overhead = BigInt(readInteger(
+    process.env.MAX_SWAP_OVERHEAD_LAMPORTS || '5000000',
+    'MAX_SWAP_OVERHEAD_LAMPORTS',
+  ));
+  assert.ok(
+    spentLamports <= BigInt(inputLamports) + fee + overhead,
+    `Swap simulation exceeds input plus bounded overhead: ${spentLamports} lamports`,
+  );
+  const tokenData = Buffer.from(postMyne.data[0], 'base64');
+  const postBaseUnits = BigInt(splToken.AccountLayout.decode(tokenData).amount.toString());
+  assert.ok(postBaseUnits >= beforeBaseUnits, 'Swap simulation reduces the keeper MYNE balance');
+  assert.ok(
+    postBaseUnits - beforeBaseUnits >= BigInt(minimumOutputBaseUnits),
+    'Swap simulation output is below the quote slippage threshold',
+  );
+  return { simulation, spentLamports, postBaseUnits };
+}
+
 async function ensureMyneAta(mint) {
   const ata = getAssociatedTokenAddressSync(mint, payer.publicKey, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
   if (await provider.connection.getAccountInfo(ata, 'confirmed')) return ata;
@@ -242,6 +359,14 @@ async function sendSavedTransaction(rawBase64) {
   return signature;
 }
 
+async function savedSignatureStatus(signature) {
+  const response = await provider.connection.getSignatureStatuses(
+    [signature],
+    { searchTransactionHistory: true },
+  );
+  return response.value[0] || null;
+}
+
 async function markRoundBuybackComplete(roundAddress, roundState) {
   if (roundState.buybackCompleted) return null;
   const instruction = await program.methods.markBuybackCompleted().accounts({
@@ -294,13 +419,30 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
       } catch (error) {
         current = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
         if (current <= before) {
-          // The exact signed transaction is now unusable (normally an expired
-          // blockhash) and did not produce tokens. It is safe to clear and
-          // quote again on the next tick.
-          journal.pending = null;
-          state.rounds[roundKey] = journal;
-          await saveState(state);
-          return { skipped: true, reason: 'pending-swap-expired-retry-next-tick', detail: String(error) };
+          const status = await savedSignatureStatus(pending.swapSignature);
+          const explicitlyAbandoned = process.env.CONFIRM_ABANDONED_BUYBACK
+            === `${roundKey}:${pending.swapSignature}`;
+          if (status?.err || explicitlyAbandoned) {
+            // A finalized transaction error is safe to retry. For an absent or
+            // ambiguous RPC status, require an exact round+signature operator
+            // acknowledgement; never silently requote and risk a double spend.
+            journal.pending = null;
+            state.rounds[roundKey] = journal;
+            await saveState(state);
+            return {
+              skipped: true,
+              reason: status?.err
+                ? 'pending-swap-finalized-error-retry-next-tick'
+                : 'pending-swap-explicitly-abandoned-retry-next-tick',
+              detail: String(error),
+            };
+          }
+          return {
+            skipped: true,
+            reason: 'pending-swap-status-ambiguous-manual-reconciliation-required',
+            swapSignature: pending.swapSignature,
+            detail: String(error),
+          };
         }
       }
     }
@@ -365,12 +507,20 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   if (!dryRun) assert.match(supabaseUrl, /^https:\/\//, 'SUPABASE_URL must use HTTPS in live mode');
   if (!dryRun) assert.ok(serviceRole, 'SUPABASE_SERVICE_ROLE_KEY is required in live mode');
   const configState = await program.account.protocolConfig.fetch(config);
+  assert.equal(Number(configState.version), 6, 'Buyback keeper requires protocol fee schedule v6');
+  const network = requireMatchingSolanaNetwork({
+    genesisHash: await provider.connection.getGenesisHash(),
+    randomnessProgram: configState.randomnessProgram.toBase58(),
+  });
   // Devnet intentionally runs without Meteora liquidity. The protocol still
-  // accounts for the 2% allocation on-chain, but there is no swap to execute
+  // accounts for the 1% allocation on-chain, but there is no swap to execute
   // until a real pool is registered; leave the allocation untouched for a
   // later pool-backed rehearsal.
-  if (configState.randomnessProgram.toBase58() === SWITCHBOARD_DEVNET_PROGRAM) {
+  if (network === 'devnet') {
     return { skipped: true, reason: 'devnet-liquidity-pool-not-required' };
+  }
+  if (!dryRun && !(await acquireBuybackLease())) {
+    return { skipped: true, reason: 'buyback-lease-held-by-another-instance' };
   }
   const gateState = await program.account.liquidityGate.fetch(liquidityGate);
   assert.ok(gateState.verified, 'Liquidity gate is not verified');
@@ -383,7 +533,7 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   if (currentRound < 0) return { skipped: true, reason: 'no-settled-round-yet' };
   const state = await loadState();
   // A new production journal must begin at the configured launch round so a
-  // keeper outage cannot silently strand earlier 2% allocations. Dry-run can
+  // keeper outage cannot silently strand earlier 1% allocations. Dry-run can
   // inspect the latest round without creating operational state.
   const initialRound = state.nextRound == null
     ? Number(process.env.BUYBACK_START_ROUND ?? (dryRun ? currentRound : 0))
@@ -398,7 +548,7 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   }
   const roundState = await program.account.round.fetch(roundAddress);
   if (!roundState.settled) return { skipped: true, reason: 'round-not-settled', round: roundId.toString() };
-  const allocation = (BigInt(roundState.grossDeployedLamports.toString()) * 200n) / 10_000n;
+  const allocation = (BigInt(roundState.grossDeployedLamports.toString()) * 100n) / 10_000n;
   const roundKey = roundId.toString();
   const journal = roundJournal(state, roundKey);
   state.rounds[roundKey] = journal;
@@ -444,7 +594,7 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const reserve = lamports(process.env.KEEPER_RESERVE_SOL || '0.25');
   const maxSpend = Math.min(lamports(process.env.MAX_BUYBACK_SOL || '0.25'), Number(remainingAllocation));
   const balance = await provider.connection.getBalance(payer.publicKey, 'confirmed');
-  // The protocol minimum round produces a 0.001 SOL buyback allocation, so a
+  // The protocol minimum round produces a 0.0005 SOL buyback allocation, so a
   // 0.01 SOL keeper floor would strand otherwise valid rounds forever.
   const minimum = lamports(process.env.MIN_BUYBACK_SOL || '0.0001');
   const spendPlan = calculateSpend({
@@ -463,8 +613,12 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const ensuredAta = await ensureMyneAta(configState.mint);
   const before = (await getAccount(provider.connection, ensuredAta, 'confirmed')).amount;
   const swap = await buildSwapTransaction(quote);
-  const swapSimulation = await provider.connection.simulateTransaction(swap);
-  assert.equal(swapSimulation.value.err, null, `Meteora swap simulation failed: ${JSON.stringify(swapSimulation.value.err)}`);
+  await inspectSwapTransaction(swap, {
+    inputLamports: spend,
+    myneAta: ensuredAta,
+    beforeBaseUnits: before,
+    minimumOutputBaseUnits: quote.otherAmountThreshold || checked.outputBaseUnits,
+  });
   swap.sign([payer]);
   const swapSignature = base58Encode(swap.signatures[0]);
   journal.pending = {

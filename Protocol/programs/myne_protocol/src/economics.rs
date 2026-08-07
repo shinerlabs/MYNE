@@ -6,16 +6,33 @@ use anchor_lang::prelude::*;
 
 pub const BPS_DENOMINATOR: u64 = 10_000;
 pub const MINING_PROTOCOL_FEE_BPS: u16 = 1_200;
-// The full 12% mining fee is distributed every one-minute round. There is no
-// administrator allocation: 8% funds stakers, 2% funds buyback/burn, and 2%
-// funds the Motherlode SOL pool.
+// The full 12% mining fee is distributed every one-minute round: 8% is the
+// gross staking allocation, 2% funds the Motherlode SOL pool, 1% funds
+// buyback/burn, and 1% is paid directly to the configured administrator fee
+// wallet. Ten percent of the gross staking allocation is also paid directly
+// to that wallet before the net staking rewards are indexed for stakers.
 pub const MINING_STAKING_BPS: u16 = 800;
-pub const MINING_BUYBACK_BPS: u16 = 200;
+pub const MINING_BUYBACK_BPS: u16 = 100;
 pub const MINING_MOTHERLODE_BPS: u16 = 200;
-pub const MINING_ADMIN_BPS: u16 = 0;
+pub const MINING_ADMIN_BPS: u16 = 100;
+pub const STAKING_ADMIN_SHARE_BPS: u16 = 1_000;
 pub const CLAIM_FEE_BPS: u16 = 1_000;
 pub const CLAIM_PASSIVE_BPS: u16 = 900;
 pub const CLAIM_REFERRAL_BPS: u16 = 100;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MiningFeeAllocation {
+    pub total: u64,
+    pub staking_gross: u64,
+    pub staking_admin: u64,
+    pub staking_net: u64,
+    pub buyback: u64,
+    pub motherlode: u64,
+    /// Includes any sub-lamport basis-point rounding remainder so the total
+    /// charged fee always equals the advertised 12% floor exactly.
+    pub mining_admin: u64,
+    pub admin_total: u64,
+}
 
 pub fn checked_bps(amount: u64, bps: u16) -> Result<u64> {
     let value = (amount as u128)
@@ -24,6 +41,43 @@ pub fn checked_bps(amount: u64, bps: u16) -> Result<u64> {
         .checked_div(BPS_DENOMINATOR as u128)
         .ok_or(MyneError::ArithmeticOverflow)?;
     u64::try_from(value).map_err(|_| error!(MyneError::ArithmeticOverflow))
+}
+
+pub fn mining_fee_allocation(amount: u64) -> Result<MiningFeeAllocation> {
+    let total = checked_bps(amount, MINING_PROTOCOL_FEE_BPS)?;
+    let staking_gross = checked_bps(amount, MINING_STAKING_BPS)?;
+    let buyback = checked_bps(amount, MINING_BUYBACK_BPS)?;
+    let motherlode = checked_bps(amount, MINING_MOTHERLODE_BPS)?;
+
+    // Derive the direct mining-admin leg from the advertised total after the
+    // other destinations are rounded down. This is deterministic, keeps the
+    // fee at exactly 12%, and makes every lamport auditable rather than
+    // leaving silent dust in the round vault.
+    let non_admin = staking_gross
+        .checked_add(buyback)
+        .and_then(|value| value.checked_add(motherlode))
+        .ok_or(MyneError::ArithmeticOverflow)?;
+    let mining_admin = total
+        .checked_sub(non_admin)
+        .ok_or(MyneError::InvalidFeeSchedule)?;
+    let staking_admin = checked_bps(staking_gross, STAKING_ADMIN_SHARE_BPS)?;
+    let staking_net = staking_gross
+        .checked_sub(staking_admin)
+        .ok_or(MyneError::ArithmeticOverflow)?;
+    let admin_total = mining_admin
+        .checked_add(staking_admin)
+        .ok_or(MyneError::ArithmeticOverflow)?;
+
+    Ok(MiningFeeAllocation {
+        total,
+        staking_gross,
+        staking_admin,
+        staking_net,
+        buyback,
+        motherlode,
+        mining_admin,
+        admin_total,
+    })
 }
 
 pub fn validate_economics() -> Result<()> {
@@ -44,6 +98,10 @@ pub fn validate_economics() -> Result<()> {
     );
     require!(
         CLAIM_PASSIVE_BPS.checked_add(CLAIM_REFERRAL_BPS) == Some(CLAIM_FEE_BPS),
+        MyneError::InvalidFeeSchedule
+    );
+    require!(
+        STAKING_ADMIN_SHARE_BPS <= BPS_DENOMINATOR as u16,
         MyneError::InvalidFeeSchedule
     );
     Ok(())
@@ -89,6 +147,8 @@ pub enum MyneError {
     InvalidRandomnessAuthority,
     #[msg("Pause the protocol before changing the randomness authority")]
     RandomnessAuthorityLocked,
+    #[msg("Pause the protocol before rotating funded operational wallets")]
+    OperationalWalletsLocked,
     #[msg("A verified randomness provider is required for this deployment")]
     RandomnessProviderRequired,
     #[msg("The round has no randomness account bound before betting")]
@@ -97,9 +157,13 @@ pub enum MyneError {
     InvalidRandomnessAccount,
     #[msg("The randomness account has not been revealed in the current slot")]
     RandomnessNotResolved,
-    #[msg("The randomness account was not committed to a future slot before betting")]
+    #[msg("The randomness account was revealed before settlement")]
+    RandomnessAlreadyRevealed,
+    #[msg("The randomness account has not been committed")]
     RandomnessNotCommitted,
-    #[msg("The randomness commitment was created too late")]
+    #[msg("The randomness account was committed before betting closed")]
+    RandomnessAlreadyCommitted,
+    #[msg("The randomness commitment is not a fresh post-betting commitment")]
     RandomnessCommittedTooLate,
     #[msg("The receipt has already been processed")]
     ReceiptAlreadyProcessed,
@@ -131,6 +195,8 @@ pub enum MyneError {
     AutoPlanInactive,
     #[msg("Production mode cannot be downgraded after mainnet randomness is selected")]
     ProductionModeLocked,
+    #[msg("This production artifact requires Switchboard mainnet randomness")]
+    ProductionRandomnessRequired,
     #[msg("The staking token account is not the canonical stake-pool vault")]
     InvalidStakeVault,
     #[msg("The automation reward mode is invalid")]
@@ -151,6 +217,16 @@ pub enum MyneError {
     BuybackNotCompleted,
     #[msg("The round still contains SOL allocated to player payouts")]
     RoundPayoutIncomplete,
+    #[msg("The protocol configuration must be migrated to the current fee schedule")]
+    ProtocolUpgradeRequired,
+    #[msg("Pause the protocol before migrating its fee schedule")]
+    MigrationRequiresPause,
+    #[msg("The v5 mining pool must have no unclaimed balances before migration")]
+    MiningPoolMigrationRequiresEmpty,
+    #[msg("The unclaimed mining-reward share accounting is inconsistent")]
+    InvalidMiningPoolAccounting,
+    #[msg("The mining reward is below the unclaimed-share precision")]
+    MiningRewardBelowSharePrecision,
 }
 
 #[cfg(test)]
@@ -164,17 +240,66 @@ mod tests {
 
     #[test]
     fn mining_fee_is_twelve_percent() {
+        let fees = mining_fee_allocation(50_000_000).unwrap();
+        assert_eq!(fees.total, 6_000_000);
+        assert_eq!(fees.staking_gross, 4_000_000);
+        assert_eq!(fees.staking_admin, 400_000);
+        assert_eq!(fees.staking_net, 3_600_000);
+        assert_eq!(fees.motherlode, 1_000_000);
+        assert_eq!(fees.buyback, 500_000);
+        assert_eq!(fees.mining_admin, 500_000);
+        assert_eq!(fees.admin_total, 900_000);
         assert_eq!(
-            checked_bps(50_000_000, MINING_PROTOCOL_FEE_BPS).unwrap(),
-            6_000_000
+            fees.staking_net
+                .checked_add(fees.staking_admin)
+                .and_then(|value| value.checked_add(fees.buyback))
+                .and_then(|value| value.checked_add(fees.motherlode))
+                .and_then(|value| value.checked_add(fees.mining_admin)),
+            Some(fees.total),
+        );
+    }
+
+    #[test]
+    fn fee_rounding_is_conserved_and_visible() {
+        let fees = mining_fee_allocation(12_345).unwrap();
+        assert_eq!(fees.total, 1_481);
+        assert_eq!(fees.mining_admin, 125);
+        assert_eq!(
+            fees.staking_net
+                .checked_add(fees.staking_admin)
+                .and_then(|value| value.checked_add(fees.buyback))
+                .and_then(|value| value.checked_add(fees.motherlode))
+                .and_then(|value| value.checked_add(fees.mining_admin)),
+            Some(fees.total),
         );
         assert_eq!(
-            checked_bps(50_000_000, MINING_STAKING_BPS).unwrap(),
-            4_000_000
+            fees.staking_admin,
+            checked_bps(fees.staking_gross, 1_000).unwrap()
         );
-        assert_eq!(
-            checked_bps(50_000_000, MINING_MOTHERLODE_BPS).unwrap(),
-            1_000_000
-        );
+    }
+
+    #[test]
+    fn fee_conservation_holds_at_boundaries() {
+        for gross in [0, 1, 8, 9, 10, 99, 9_999, 10_000, 10_001, u64::MAX] {
+            let fees = mining_fee_allocation(gross).unwrap();
+            assert_eq!(fees.total, checked_bps(gross, 1_200).unwrap());
+            assert_eq!(fees.buyback, checked_bps(gross, 100).unwrap());
+            assert_eq!(fees.motherlode, checked_bps(gross, 200).unwrap());
+            assert_eq!(fees.staking_gross, checked_bps(gross, 800).unwrap());
+            assert_eq!(
+                fees.staking_admin,
+                checked_bps(fees.staking_gross, 1_000).unwrap()
+            );
+            assert_eq!(fees.staking_net + fees.staking_admin, fees.staking_gross);
+            assert_eq!(fees.mining_admin + fees.staking_admin, fees.admin_total);
+            assert_eq!(
+                fees.staking_net
+                    + fees.staking_admin
+                    + fees.buyback
+                    + fees.motherlode
+                    + fees.mining_admin,
+                fees.total,
+            );
+        }
     }
 }

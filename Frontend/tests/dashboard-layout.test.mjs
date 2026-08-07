@@ -19,7 +19,7 @@ test('Stake and Referrals use explicit two-column dashboard wrappers', () => {
 test('tablet and short-screen dashboards use readable subviews instead of page scrolling', () => {
   assert.match(source, /class="dashboard-view-tabs stake-dashboard-tabs"/);
   assert.match(source, /class="dashboard-view-tabs referral-dashboard-tabs"/);
-  assert.match(fitStyles, /@media \(max-width: 900px\), \(max-height: 650px\)/);
+  assert.match(fitStyles, /@media \(max-width: 1024px\), \(max-height: 650px\)/);
   assert.match(fitStyles, /\.staking-dashboard\[data-mobile-view="overview"\][\s\S]*\.staking-actions[\s\S]*display:\s*none !important/);
   assert.match(fitStyles, /\.referrals-dashboard\[data-mobile-view="leaders"\] #referral-leaders-view[\s\S]*display:\s*grid !important/);
 });
@@ -51,10 +51,17 @@ test('stake reward actions collapse to one aligned column on mobile', () => {
 });
 
 test('compact Stake keeps rewards bounded and APY metadata readable', () => {
-  assert.match(fitStyles, /@media \(max-width: 900px\), \(max-height: 650px\)[\s\S]*\.staking-overview \{[\s\S]*height:\s*min\(100%, clamp\(240px, 45dvh, 310px\)\) !important/);
+  assert.match(fitStyles, /@media \(max-width: 1024px\), \(max-height: 650px\)[\s\S]*\.staking-overview \{[\s\S]*height:\s*min\(100%, clamp\(240px, 45dvh, 310px\)\) !important/);
   assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-yield-metric > small \{[\s\S]*display:\s*none !important/);
-  assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-overview \{[\s\S]*height:\s*min\(100%, 270px\) !important/);
+  assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-overview \{[\s\S]*height:\s*min\(100%, 320px\) !important/);
   assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*#claim-stake-rewards \{[\s\S]*white-space:\s*nowrap !important/);
+});
+
+test('tablet and scaled-desktop Stake use one compact rail without stretching reward cards', () => {
+  assert.match(fitStyles, /@media \(min-width: 721px\) and \(max-width: 1024px\)[\s\S]*\.staking-metrics \{[\s\S]*grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\) !important/);
+  assert.match(fitStyles, /@media \(min-width: 721px\) and \(max-width: 1024px\)[\s\S]*\.staking-dashboard \{[\s\S]*height:\s*min\(100%, 348px\) !important;[\s\S]*align-self:\s*start !important/);
+  assert.match(fitStyles, /@media \(min-width: 721px\) and \(max-width: 1024px\)[\s\S]*\.staking-overview \{[\s\S]*grid-template-rows:\s*224px 68px !important/);
+  assert.match(fitStyles, /@media \(min-width: 721px\) and \(max-width: 1024px\)[\s\S]*\.staking-actions \.stake-composer \{[\s\S]*grid-template-areas:[\s\S]*"mode tier tier"[\s\S]*"amount amount quick"[\s\S]*"submit submit submit"/);
 });
 
 test('short desktop Stake reclaims the full frame instead of squeezing into the first column', () => {
@@ -98,7 +105,7 @@ test('desktop Stake keeps rewards primary and bounds the transaction rail', () =
   assert.match(fitStyles, /\.staking-dashboard \.eth-claim-actions \{[\s\S]*align-self:\s*center !important/);
   assert.match(fitStyles, /body\[data-route="stake"\] \.stake-composer \.unstake-policy \{[\s\S]*display:\s*grid !important/);
   assert.match(fitStyles, /#claim-stake-rewards:disabled \{[\s\S]*background:\s*var\(--surface-control\) !important/);
-  assert.match(source, /8% of all mining volume is paid to stakers in SOL\./);
+  assert.match(source, /7\.2% of all mining volume is distributed to stakers in SOL from an 8% gross staking allocation\./);
 });
 
 test('desktop Stake stays top-aligned inside its restrained 1440px frame', () => {

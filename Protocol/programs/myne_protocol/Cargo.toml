@@ -17,6 +17,10 @@ no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+# Mainnet release artifacts must be built with this feature. It removes the
+# local/devnet randomness modes at compile time and makes every settlement
+# path liquidity-gated even when upgrading an older configuration account.
+production = []
 
 [dependencies]
 anchor-lang = { workspace = true }

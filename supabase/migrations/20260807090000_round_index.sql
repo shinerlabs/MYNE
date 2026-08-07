@@ -89,7 +89,7 @@ create table if not exists public.mine_round_proofs (
   created_at timestamptz not null default now()
 );
 
--- Durable, public evidence for each partial or complete 2% buyback allocation.
+-- Durable, public evidence for each partial or complete 1% buyback allocation.
 -- A round may require several capped swaps; every row links the SOL spend to
 -- the corresponding MYNE burn transaction before the archive is attested.
 create table if not exists public.mine_buyback_executions (

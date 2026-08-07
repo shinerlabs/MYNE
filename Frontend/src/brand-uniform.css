@@ -3024,7 +3024,7 @@ body[data-route="swap"] .swap-submit::before {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: #202124 url('/gld-icon-transparent.png') center / 22px 22px no-repeat;
+  background: #202124 url('/myne-mark-ui.png') center / 22px 22px no-repeat;
   opacity: .62;
 }
 
@@ -3141,7 +3141,7 @@ body[data-route="referrals"] .referral-claim-action::before {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: #202124 url('/gld-icon-transparent.png') center / 22px 22px no-repeat;
+  background: #202124 url('/myne-mark-ui.png') center / 22px 22px no-repeat;
   opacity: .62;
 }
 

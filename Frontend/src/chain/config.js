@@ -14,18 +14,16 @@ export const solanaNetwork = Object.freeze({
 });
 
 export const addresses = Object.freeze({
-  BullionToken: PROGRAMS.tokenMint,
-  BullionGridLottery: PROGRAMS.protocol,
-  BullionJackpot: '', BullionReferral: '', BullionStaking: '',
-  BullionAutoCommitV2: '', BullionBuyback: '', RandomnessView: '',
-  DrandRandomnessProvider: '',
+  MyneMint: PROGRAMS.tokenMint,
+  MyneProgram: PROGRAMS.protocol,
 });
 const ENV = import.meta.env ?? {};
 export let genesisTime = BigInt(ENV.VITE_GENESIS_TIME || Math.floor(Date.now() / 1000));
 export const setGenesisTime = (value) => { genesisTime = BigInt(value); };
 export const economics = Object.freeze({
-  protocolFeeBps: 1200, stakingBps: 800, buybackBps: 200, motherlodeBps: 200,
-  administrationBps: 0, liquidityPoolTaxBps: 0,
+  protocolFeeBps: 1200, stakingBps: 800, stakingAdminShareBps: 1000,
+  stakingNetBps: 720, buybackBps: 100, motherlodeBps: 200,
+  administrationBps: 100, liquidityPoolTaxBps: 0,
   minimumRoundLamports: '50000000', stakingRewardAsset: 'SOL',
 });
 export const MIN_ROUND_DEPLOYMENT = BigInt(economics.minimumRoundLamports);
@@ -33,7 +31,6 @@ export const MIN_ROUND_DEPLOYMENT = BigInt(economics.minimumRoundLamports);
 // initial liquidity pool. There is no protocol-owned or pre-existing burn-staked balance.
 export const launchAllocation = Object.freeze({ genesisMintMyne: 100, burnStakedMyne: 0, liquidityMyne: 100, initialMarketMyne: 100 });
 export const poolKey = null;
-export const uniswap = null;
 export const poolId = null;
 export const dexscreenerUrl = null;
 export const stockRewards = null;
@@ -42,7 +39,6 @@ export const hasPool = false;
 // the inherited UI branches are retired, but must never put this frontend into a pre-mine state.
 export const isPremine = false;
 export const protocolReady = PROTOCOL_READY;
-export const abis = Object.freeze({});
 export const GRID = 25;
 export const ROUND_DURATION = 65n;
 export const BETTING_DURATION = 60n;

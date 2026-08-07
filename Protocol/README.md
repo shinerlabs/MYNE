@@ -13,9 +13,12 @@ The local/devnet milestone contains:
 - staking, referrals, claims, balance-funded auto-round plans, and capped MYNE minting;
 - checked basis-point arithmetic plus local integration tests.
 
-Trading fees are deferred and are not part of this protocol milestone. Staking is funded by the
-8% mining allocation; the other mining allocations are 2% to the Motherlode and 2% to buyback and
-burn.
+Trading fees are deferred and are not part of this protocol milestone. Protocol version 6 charges
+an exact 12% of each round's gross deployment: 8% is the gross staking allocation, from which 0.8%
+of round volume is paid directly to the configured admin and the remaining 7.2% is indexed for
+stakers; 2% funds the Motherlode; 1% funds buyback and burn; and 1% is paid directly to the admin.
+The admin therefore receives 1.8% of round volume directly, subject only to the documented integer
+rounding rule that assigns fee dust to that direct payment.
 
 ## Intended toolchain
 
@@ -27,10 +30,24 @@ burn.
 Official Anchor installation currently recommends AVM. Once the toolchain is installed:
 
 ```bash
+# Local/Devnet rehearsal artifact only:
 anchor build
 cargo test --workspace
 anchor test --validator legacy
+
+# Internal Mainnet candidate/preflight (not the final verified deployment build):
+pnpm build:mainnet
 ```
+
+Never deploy the default `anchor build` output to Mainnet. `pnpm build:mainnet` forwards
+`--features production` through Anchor, verifies the production-only marker embedded in the SBF,
+and synchronizes the generated frontend IDL. The external release manifest and Mainnet preflight
+both reject a rehearsal binary even if its source tree and hash are otherwise internally
+consistent. After the final source is committed publicly, rebuild with Docker and `solana-verify`,
+deploy only that exact executable, and complete the on-chain hash, repository and remote
+verification sequence in [`docs/MAINNET_LAUNCH_RUNBOOK.md`](docs/MAINNET_LAUNCH_RUNBOOK.md). The
+internal marker and manifest are provenance controls, not a Solana verified build or a security
+audit.
 
 For the persistent local demonstration, start an upgradeable local validator and initialize it,
 then run:
@@ -43,23 +60,30 @@ pnpm run local:keeper
 `local:keeper` is hard-locked to localhost. It creates ten funded demo miners, including five
 persistent cover-all miners that bid on every one of the 25 tiles each round. Those five miners
 share one exact per-tile bid that changes between 10x and 20x the 0.001 SOL demo base each round.
-This keeps every local round populated while making equal-bid reward splits directly auditable.
-The keeper submits real receipt transactions
-every 65-second round, executes funded user auto-plans, and settles immediately after the
-60-second bidding window so the confirmed tile is visible for the final 5 seconds.
+Four of the five use real funded Auto-burn plans: their receipts commit burn mode before settlement,
+their mined MYNE becomes permanent 5x burn stake, and the pool-wide staked total increases after
+each winning receipt is processed. This keeps every local round populated while making equal-bid
+reward splits and Auto-burn staking growth directly auditable. The keeper submits real receipt
+transactions every 65-second round, executes funded user auto-plans, and settles both rounds and
+their receipts immediately after the 60-second bidding window so the confirmed tile is visible for
+the final 5 seconds.
 
 The synchronized devnet program ID is `D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e`. The local
 suite uses an ignored test wallet and an upgradeable validator fixture so initialization exercises
 the same authority constraint expected on devnet.
 
 Run `./scripts/check-devnet-readiness.sh` before a deployment. The detailed sequence and stop
-conditions are in [`docs/DEVNET_TESTING.md`](docs/DEVNET_TESTING.md), and the current security scope
-is recorded in [`docs/REVIEW_2026-08-05.md`](docs/REVIEW_2026-08-05.md).
+conditions are in [`docs/DEVNET_TESTING.md`](docs/DEVNET_TESTING.md). The dated
+[`docs/REVIEW_2026-08-05.md`](docs/REVIEW_2026-08-05.md) is retained as historical evidence and is
+superseded by the version-6 readiness and launch documents.
 
 Production lifecycle services are deliberately separated from the randomness-critical reveal
 transaction:
 
-- `round:indexer` records finalized events and commits deterministic archive proofs;
+- `devnet:switchboard-round`/the supervised production round keeper binds an uncommitted request,
+  commits and records it only after betting closes, then reveals and settles atomically;
+- `round:indexer` records finalized round/referral events, maintains versioned cursors and commits
+  deterministic archive proofs;
 - `round:lifecycle` batches permissionless settlements/refunds and closes archived PDAs;
 - `buyback:keeper` performs and indexes direct Meteora swap/burn evidence;
 - `prepare:admin-ata` creates the one canonical fallback fee token account after mint creation.

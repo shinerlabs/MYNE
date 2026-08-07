@@ -21,6 +21,19 @@
 .chat-message-col { min-width: 0; flex: 1; }
 .chat-avatar { overflow: hidden; display: inline-flex; align-items: center; justify-content: center; }
 .chat-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-avatar.is-generated {
+  background-color: transparent !important;
+  background-image: linear-gradient(
+    var(--avatar-angle, 125deg),
+    var(--avatar-start, #ffe66d) 0%,
+    var(--avatar-middle, #45e6ff) 50%,
+    var(--avatar-end, #ff4fd8) 100%
+  ) !important;
+  color: #0a0a0b !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.45), 0 5px 16px rgba(0,0,0,.22) !important;
+  font-weight: 800 !important;
+  text-shadow: 0 1px rgba(255,255,255,.28);
+}
 .chat-message header b { cursor: pointer; color: #858585; }
 .chat-message header b:hover { text-decoration: underline; color: #9c9c9c; }
 
@@ -66,18 +79,19 @@
   display: inline-flex; align-items: center; gap: 4px;
   padding: 1px 7px 2px; border-radius: 999px; cursor: pointer;
   background: rgba(255, 255, 255, .06); border: 1px solid transparent;
-  color: inherit; font-size: 12px; line-height: 1.5;
+  color: inherit; font-size: 11px; line-height: 1.45;
   transition: transform .12s ease, background .15s ease;
 }
 .chat-reaction:hover { background: rgba(255, 255, 255, .11); transform: translateY(-1px); }
 .chat-reaction:active { transform: scale(.94); }
 .chat-reaction.mine { background: rgba(219, 219, 219, .16); border-color: rgba(219, 219, 219, .45); }
 .chat-reaction b { font-weight: 600; font-size: 11px; opacity: .8; }
+.chat-reaction > span { font-size: 11px; }
 
 /* floating emoji on new reaction */
 .reaction-fly {
   position: absolute; right: 14px; bottom: 8px; pointer-events: none;
-  font-size: 17px; animation: reaction-rise 1s cubic-bezier(.3, .7, .4, 1) forwards;
+  font-size: 14px; animation: reaction-rise 1s cubic-bezier(.3, .7, .4, 1) forwards;
 }
 @keyframes reaction-rise {
   0%   { opacity: 0; transform: translate(0, 4px) scale(.6); }
@@ -93,7 +107,7 @@
 }
 .emoji-picker button {
   background: transparent; border: 0; cursor: pointer;
-  font-size: 18px; line-height: 1; padding: 4px 5px; border-radius: 7px;
+  font-size: 15px; line-height: 1; padding: 4px 5px; border-radius: 7px;
   transition: transform .1s ease, background .12s ease;
 }
 .emoji-picker button:hover { background: rgba(255, 255, 255, .1); transform: scale(1.22); }

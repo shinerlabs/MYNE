@@ -3,6 +3,60 @@ import { createHash } from 'node:crypto';
 const textOrNull = (value) => (value === null || value === undefined ? null : String(value));
 const numberOrNull = (value) => (value === null || value === undefined ? null : Number(value));
 
+const FEE_AMOUNT_FIELDS = Object.freeze([
+  'total_fee_lamports',
+  'staking_gross_lamports',
+  'staking_admin_lamports',
+  'staking_net_lamports',
+  'buyback_lamports',
+  'motherlode_fee_lamports',
+  'mining_admin_lamports',
+  'admin_total_lamports',
+]);
+
+/**
+ * Fail closed before a settled round is archived. These values come from the
+ * on-chain RoundFeesDistributed event rather than a keeper-side fee formula,
+ * so archived evidence remains correct across fee-schedule versions.
+ */
+export function requireRoundFeeAudit(round) {
+  const fees = {};
+  for (const field of FEE_AMOUNT_FIELDS) {
+    const raw = round?.[field];
+    if (raw === null || raw === undefined || raw === '') {
+      throw new Error(`Round fee audit is missing ${field}`);
+    }
+    try {
+      fees[field] = BigInt(String(raw));
+    } catch {
+      throw new Error(`Round fee audit has invalid ${field}`);
+    }
+    if (fees[field] < 0n) throw new Error(`Round fee audit has negative ${field}`);
+  }
+  if (!textOrNull(round?.admin_fee_wallet)) {
+    throw new Error('Round fee audit is missing admin_fee_wallet');
+  }
+  if (fees.staking_gross_lamports
+      !== fees.staking_net_lamports + fees.staking_admin_lamports) {
+    throw new Error('Round fee audit does not conserve the gross staking allocation');
+  }
+  if (fees.admin_total_lamports
+      !== fees.mining_admin_lamports + fees.staking_admin_lamports) {
+    throw new Error('Round fee audit does not conserve the administrator allocation');
+  }
+  if (fees.total_fee_lamports !== fees.staking_net_lamports
+      + fees.staking_admin_lamports
+      + fees.buyback_lamports
+      + fees.motherlode_fee_lamports
+      + fees.mining_admin_lamports) {
+    throw new Error('Round fee audit does not conserve the total mining fee');
+  }
+  return {
+    ...fees,
+    admin_fee_wallet: String(round.admin_fee_wallet),
+  };
+}
+
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -29,6 +83,15 @@ function canonicalRound(round) {
     pot_for_winners_wei: textOrNull(round.pot_for_winners_wei),
     bullion_for_winners_wei: textOrNull(round.bullion_for_winners_wei),
     payout_mul_wad: textOrNull(round.payout_mul_wad),
+    total_fee_lamports: textOrNull(round.total_fee_lamports),
+    staking_gross_lamports: textOrNull(round.staking_gross_lamports),
+    staking_admin_lamports: textOrNull(round.staking_admin_lamports),
+    staking_net_lamports: textOrNull(round.staking_net_lamports),
+    buyback_lamports: textOrNull(round.buyback_lamports),
+    motherlode_fee_lamports: textOrNull(round.motherlode_fee_lamports),
+    mining_admin_lamports: textOrNull(round.mining_admin_lamports),
+    admin_total_lamports: textOrNull(round.admin_total_lamports),
+    admin_fee_wallet: textOrNull(round.admin_fee_wallet),
     randomness_id: textOrNull(round.randomness_id),
     randomness_value: textOrNull(round.randomness_value),
     randomness_hex: textOrNull(round.randomness_hex),
@@ -94,7 +157,7 @@ export function buildArchiveSnapshot({ program, round, bets, settlements, buybac
     left.sequence - right.sequence
   ));
   return {
-    version: 1,
+    version: 2,
     program: String(program),
     round: canonicalRound(round),
     bets: canonicalBets,

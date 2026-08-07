@@ -1,5 +1,11 @@
 # Frontend migration map
 
+> **Historical migration record — superseded.** This document describes the retired EVM-to-Solana
+> transition and is retained only for provenance. It is not a current architecture or readiness
+> statement. Use [`../README.md`](../README.md), [`PROTOCOL_SPEC.md`](PROTOCOL_SPEC.md),
+> [`MAINNET_READINESS.md`](MAINNET_READINESS.md), and
+> [`MAINNET_LAUNCH_RUNBOOK.md`](MAINNET_LAUNCH_RUNBOOK.md) for the current system.
+
 The current frontend is safe only because protocol actions remain disabled while program and mint
 addresses are empty. Most files below still describe the inherited EVM contracts and cannot be
 activated against Solana.

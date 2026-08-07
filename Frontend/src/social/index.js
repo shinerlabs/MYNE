@@ -1,16 +1,14 @@
 import { isSocialConfigured } from './config.js';
 import { configureSession, getSession, clearSession } from './session.js';
 import {
-  mountChat, setChatComposeEnabled, setChatAdmin, getMessageIndex, loadChatHistory,
+  mountChat, setChatComposeEnabled, getMessageIndex,
   pinChatToLatest,
 } from './chat.js';
 import {
   configureProfile, loadMyProfile, openProfileEditor, applyProfileBroadcast, getMyProfile,
   buildAvatar, avatarPublicUrl, saveProfile, fileToAvatarDataUrl, checkNameAvailable,
+  loadPublicProfile,
 } from './profile.js';
-import {
-  mountNews, upsertNewsCard, removeNewsCard, refreshChatAdmin, loadNewsFeed,
-} from './news.js';
 
 /**
  * Single entry point for the social layer.
@@ -21,7 +19,6 @@ import {
  *   notify(message)      — surface a short message to the user
  *   getAccount()         — currently connected address, or null
  *   connectWallet()      — start the app's connect flow
- *   setRoute(name, opts) — navigate (news cards can deep-link)
  *   subscribe(fn)        — call fn whenever the connected account changes
  *   copyText(text)       — copy to clipboard, resolving true on success
  *
@@ -67,11 +64,7 @@ export function mountSocial(host) {
 
   mountChat(adapter, {
     onProfile: (payload) => applyProfileBroadcast(payload, getMessageIndex()),
-    onNews: (item) => upsertNewsCard(item),
-    onNewsDelete: (id) => removeNewsCard(id),
   });
-
-  mountNews(adapter);
 
   /**
    * Re-resolve everything that depends on who is connected.
@@ -83,7 +76,7 @@ export function mountSocial(host) {
   let lastAccount;
   const syncAccount = async ({ force = false } = {}) => {
     const account = host.getAccount();
-    const key = account ? account.toLowerCase() : null;
+    const key = account || null;
     if (!force && key === lastAccount) return;
     const previous = lastAccount;
     lastAccount = key;
@@ -109,20 +102,15 @@ export function mountSocial(host) {
       // every reload and force a pointless re-signature.
       if (previous) {
         clearSession();
-        setChatAdmin(false);
-        document.querySelector('#news-admin')?.setAttribute('hidden', '');
       }
       return;
     }
 
     const session = getSession();
-    if (session && session.walletAddress.toLowerCase() !== account.toLowerCase()) {
+    if (session && session.walletAddress !== account) {
       clearSession();
     }
     await loadMyProfile(getMessageIndex());
-    const admin = await refreshChatAdmin();
-    // Admin controls are per-message, so re-render once the answer is known.
-    if (admin) { setChatAdmin(true); await loadChatHistory(); await loadNewsFeed(); }
   };
 
   void syncAccount({ force: true });
@@ -143,6 +131,7 @@ export function mountSocial(host) {
      */
     showLatestMessages: pinChatToLatest,
     getMyProfile,
+    loadPublicProfile,
     buildAvatar,
     /** Resolve a stored avatar path (or the per-wallet shim) to a usable URL. */
     avatarUrlFor: (wallet, path = null) => avatarPublicUrl(path, wallet),

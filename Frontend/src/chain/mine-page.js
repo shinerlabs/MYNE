@@ -59,7 +59,7 @@ export const state = {
   account: null,
   lastResolved: null,
   currentRound: null, // full readRound() of state.roundId — carries its own `resolved`/winner
-  plan: null, // BullionAutoCommitV2 plan for the connected account (null = none configured)
+  plan: null, // MYNE auto-plan for the connected account (null = none configured)
 };
 
 const subscribers = new Set();

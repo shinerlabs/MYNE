@@ -425,7 +425,7 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
 
 /* A short landscape window needs the same panel switcher as a phone. This keeps text readable
    at common split-screen heights where displaying every dashboard card would require 40% zoom. */
-@media (max-width: 900px), (max-height: 650px) {
+@media (max-width: 1024px), (max-height: 650px) {
   .dashboard-view-tabs {
     min-height: 32px;
     height: 32px;
@@ -1867,5 +1867,1355 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
   body[data-route="stake"] .stake-composer .stake-quick-actions,
   body[data-route="stake"] .stake-composer .stake-quick-actions button {
     height: 32px !important;
+  }
+}
+
+/* Tablet / scaled-desktop Stake -----------------------------------------------------------
+   A Retina screenshot around 1500 physical pixels wide can expose only ~750 CSS pixels. That
+   previously landed between the phone and desktop authorities: the compact view tabs appeared,
+   but the old 2x2 metric rail and a flexible `1fr` reward card still stretched through the
+   remaining viewport. Keep the same readable panel switcher while giving the operational content
+   an intrinsic, top-aligned height. The empty remainder is page breathing room, never an oversized
+   transaction card. */
+@media (min-width: 721px) and (max-width: 1024px) {
+  body[data-route="stake"] .staking-shell.page-view.active {
+    width: min(800px, calc(100% - 24px)) !important;
+    grid-template-rows: 54px 56px minmax(0, 1fr) !important;
+    gap: 8px !important;
+    padding-top: 6px !important;
+  }
+
+  body[data-route="stake"] .staking-shell > .route-header h1 {
+    font-size: 38px !important;
+  }
+
+  body[data-route="stake"] .staking-metrics {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    height: 56px !important;
+  }
+
+  body[data-route="stake"] .staking-metrics article,
+  body[data-route="stake"] .staking-metrics article:first-child {
+    min-height: 0 !important;
+    height: 56px !important;
+    padding: 7px 8px !important;
+  }
+
+  body[data-route="stake"] .staking-metrics article:nth-child(3) {
+    border-left: 1px solid var(--surface-rule) !important;
+    border-top: 0 !important;
+  }
+
+  body[data-route="stake"] .staking-metrics :is(span, small) {
+    font-size: 6.5px !important;
+  }
+
+  body[data-route="stake"] .staking-metrics strong {
+    font-size: 17px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard {
+    height: 286px !important;
+    align-self: start !important;
+    grid-template-rows: 32px minmax(0, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  body[data-route="stake"] .staking-overview {
+    width: 100% !important;
+    height: 246px !important;
+    grid-template-rows: 188px 50px !important;
+    gap: 8px !important;
+  }
+
+  body[data-route="stake"] .staking-overview > .stake-rewards {
+    height: 188px !important;
+    grid-template-columns: minmax(0, 1.08fr) minmax(210px, .72fr) !important;
+    gap: 14px !important;
+    padding: 14px 18px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-logo {
+    width: 54px !important;
+    height: 54px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard #stake-claimable-eth {
+    font-size: 48px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+    padding: 10px !important;
+    grid-template-rows: auto 36px !important;
+    gap: 6px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip,
+  body[data-route="stake"] .staking-dashboard .staking-position-strip article {
+    height: 50px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip article {
+    padding: 7px 10px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip strong {
+    margin-top: 3px !important;
+    font-size: 16px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip small {
+    display: none !important;
+  }
+
+  body[data-route="stake"] .staking-actions,
+  body[data-route="stake"] .staking-actions > .staking-layout,
+  body[data-route="stake"] .staking-actions .stake-composer {
+    height: 246px !important;
+  }
+
+  body[data-route="stake"] .staking-actions .stake-composer {
+    grid-template-columns: minmax(130px, .72fr) minmax(0, 1fr) minmax(150px, .85fr) !important;
+    grid-template-areas:
+      "mode tier tier"
+      "label label label"
+      "amount amount quick"
+      "submit submit submit" !important;
+    grid-template-rows: 74px 12px 52px 42px !important;
+    align-content: start !important;
+    gap: 7px 10px !important;
+    padding: 16px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-mode-tabs {
+    align-self: center !important;
+    height: 38px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-tier-tabs,
+  body[data-route="stake"] .stake-composer .stake-tier-tabs button,
+  body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-tier-burn {
+    min-height: 0 !important;
+    height: 74px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-amount {
+    height: 52px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-quick-actions,
+  body[data-route="stake"] .stake-composer .stake-quick-actions button {
+    height: 38px !important;
+  }
+}
+
+/* A wide but shallow browser still uses the subview tabs, but its active card should not inflate
+   to consume every spare pixel. This keeps the same visual density as the tablet authority. */
+@media (min-width: 901px) and (max-height: 650px) {
+  body[data-route="stake"] .staking-dashboard {
+    height: 286px !important;
+    align-self: start !important;
+    grid-template-rows: 30px minmax(0, 1fr) !important;
+  }
+
+  body[data-route="stake"] .staking-overview {
+    height: 250px !important;
+    grid-template-rows: 200px 44px !important;
+  }
+}
+
+/* Mobile and tablet usability authority ----------------------------------------------------
+   These rules intentionally live last. Earlier responsive generations optimized primarily for
+   fitting every panel, which left 5.5px labels on phones and forced the three-column Mine frame
+   beyond a 1024px tablet. Preserve the information hierarchy, but never trade away legibility,
+   touch area or access to a complete control rail. */
+
+/* Tablet landscape: Social becomes a recoverable drawer/tab and the core Mine workspace uses
+   the complete viewport. At wider desktop sizes the stable three-column composition above is
+   preserved exactly, including its no-reflow collapse behavior. */
+@media (min-width: 901px) and (max-width: 1180px) {
+  body[data-route="mine"] .workspace.page-view.active,
+  body[data-route="mine"] .workspace.page-view.active.chat-hidden {
+    width: calc(100vw - 76px) !important;
+    max-width: none !important;
+    grid-template-columns: minmax(470px, 1fr) clamp(335px, 38vw, 400px) !important;
+    grid-template-areas: "board controls" !important;
+    gap: 10px !important;
+    margin: 8px 18px 0 58px !important;
+  }
+
+  body[data-route="mine"] .workspace.page-view.active.chat-hidden > .chat-panel {
+    display: none !important;
+  }
+
+  body[data-route="mine"] .workspace.page-view.active > .board-panel {
+    grid-column: 1 !important;
+    grid-area: board !important;
+  }
+
+  body[data-route="mine"] .workspace.page-view.active > .control-column {
+    grid-column: 2 !important;
+    grid-area: controls !important;
+  }
+
+  body[data-route="mine"] #show-chat.visible {
+    display: flex !important;
+    width: 44px !important;
+    height: 44px !important;
+    left: 7px !important;
+    top: calc(84px + var(--premine-banner-h, 0px)) !important;
+  }
+
+  .topbar :is(.nav-item, .market-pill, .header-social-link) {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
+
+/* The About rail consumes 210–240px before its chapter content. Collapse the Stats comparison
+   before the row tracks reach their intrinsic minimum so long market/supply values stay aligned. */
+@media (max-width: 1100px) {
+  body[data-route="about"] .protocol-stats-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 26px !important;
+  }
+}
+
+/* Pointer-friendly controls for compact desktops, tablets and any coarse-pointer device. These
+   selectors intentionally cover the chapter choices and detail links as well as the obvious tabs. */
+@media (max-width: 1180px), (any-pointer: coarse) {
+  body[data-route="about"] .about-nav button[data-about-section],
+  body[data-route="about"] .about-nav-toggle,
+  body[data-route="about"] .address-actions :is(button, a),
+  body[data-route="rounds"] .round-filters button,
+  body[data-route="rounds"] .round-pagination button,
+  body[data-route="rounds"] .round-explorer {
+    min-height: 44px !important;
+  }
+
+  body[data-route="about"] .address-actions :is(button, a),
+  body[data-route="rounds"] :is(.round-filters button, .round-pagination button) {
+    min-width: 44px !important;
+  }
+}
+
+@media (min-width: 901px) {
+  /* About's visual hero is intentionally retired by about-compact.css. Do not reserve a phantom
+     header row for a display:none grid item; the chapter navigator and article own the frame. */
+  body[data-route="about"] .about-shell.page-view.active {
+    grid-template-rows: minmax(0, 1fr) !important;
+  }
+
+  body[data-route="about"] .about-shell.page-view.active > .about-layout {
+    grid-row: 1 / -1 !important;
+  }
+
+  /* There are exactly two independently disclosed fee schedules. Keep them paired on desktop
+     rather than inheriting the generic three-card grid and leaving an empty third track. */
+  body[data-route="about"] .detailed-fees {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Shared tablet typography: the 721–900px composition is a real tablet UI, not a globally
+   scaled desktop. Supporting copy remains readable at arm's length and primary controls retain
+   at least a 42–44px interaction area. */
+@media (min-width: 721px) and (max-width: 1024px) {
+  .topbar .nav-item {
+    font-size: 11px !important;
+  }
+
+  body[data-route="stake"] .staking-shell > .route-header .eyebrow,
+  body[data-route="referrals"] .feature-shell[data-page="referrals"] > .route-header .eyebrow,
+  body[data-route="rounds"] .route-header .eyebrow,
+  body[data-route="about"] .route-header .eyebrow {
+    font-size: 9px !important;
+  }
+
+  body[data-route="stake"] .staking-metrics :is(span, small),
+  body[data-route="referrals"] .referral-metrics :is(span, small),
+  body[data-route="rounds"] .feature-metrics :is(span, small) {
+    font-size: 8.5px !important;
+    line-height: 1.2 !important;
+  }
+
+  body[data-route="stake"] .staking-metrics strong,
+  body[data-route="referrals"] .referral-metrics strong {
+    font-size: 18px !important;
+  }
+
+  .dashboard-view-tabs {
+    min-height: 40px !important;
+    height: 40px !important;
+  }
+
+  .dashboard-view-tabs button {
+    min-height: 34px !important;
+    height: 34px !important;
+    font-size: 10.5px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard {
+    height: min(100%, 348px) !important;
+    grid-template-rows: 40px minmax(0, 1fr) !important;
+    align-self: start !important;
+  }
+
+  body[data-route="stake"] .staking-overview,
+  body[data-route="stake"] .staking-actions,
+  body[data-route="stake"] .staking-actions > .staking-layout {
+    height: auto !important;
+    align-self: start !important;
+  }
+
+  body[data-route="stake"] .staking-overview {
+    height: 300px !important;
+    grid-template-rows: 224px 68px !important;
+  }
+
+  body[data-route="stake"] .staking-overview > .stake-rewards {
+    height: 100% !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip,
+  body[data-route="stake"] .staking-dashboard .staking-position-strip article {
+    height: 68px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip span {
+    font-size: 9px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip strong {
+    font-size: 18px !important;
+  }
+
+  body[data-route="stake"] .staking-actions .stake-composer {
+    height: auto !important;
+    min-height: 300px !important;
+  }
+
+  body[data-route="referrals"] .referrals-dashboard {
+    height: min(100%, 600px) !important;
+    grid-template-rows: 40px minmax(0, 1fr) !important;
+    align-self: start !important;
+  }
+
+  body[data-route="referrals"] .referral-link-note {
+    display: block !important;
+    color: var(--surface-text-secondary) !important;
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+
+  body[data-route="referrals"] .referral-link-block {
+    grid-template-areas: "title" "note" "link" !important;
+    grid-template-rows: auto auto 58px !important;
+  }
+
+  body[data-route="referrals"] .referral-link {
+    min-height: 58px !important;
+    height: 58px !important;
+  }
+
+  body[data-route="referrals"] .referral-link button,
+  body[data-route="rounds"] .round-filters button,
+  body[data-route="rounds"] .round-pagination button,
+  body[data-route="about"] .about-nav-toggle {
+    min-height: 44px !important;
+  }
+
+  body[data-route="about"] .about-content {
+    padding: 22px 24px !important;
+  }
+
+  body[data-route="about"] .about-section :is(p, li) {
+    font-size: 13px !important;
+    line-height: 1.55 !important;
+  }
+
+  body[data-route="about"] .about-section .about-lead {
+    font-size: 14px !important;
+  }
+
+  body[data-route="about"] .about-section :is(.eyebrow, small),
+  body[data-route="rounds"] .feature-metrics span {
+    font-size: 9px !important;
+  }
+
+  body[data-route="rounds"] .round-table-head {
+    font-size: 9.5px !important;
+  }
+
+  body[data-route="rounds"] .round-record {
+    font-size: 11.5px !important;
+  }
+}
+
+/* Compact About uses a disclosure overlay, not an expanding block. Capping the chapter list keeps
+   the current article stable and makes all chapters reachable on a 640px-tall phone. */
+@media (max-width: 860px) {
+  body[data-route="about"] .about-nav {
+    top: calc(76px + var(--premine-banner-h, 0px)) !important;
+    z-index: 24 !important;
+    overflow: visible !important;
+  }
+
+  body[data-route="about"] .about-nav-list {
+    position: absolute !important;
+    z-index: 30 !important;
+    top: calc(100% + 6px) !important;
+    right: 6px !important;
+    left: 6px !important;
+    display: none !important;
+    max-height: min(60dvh, 420px) !important;
+    padding: 6px !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    border-radius: 12px !important;
+    background: #18191b !important;
+    box-shadow: 0 20px 54px rgba(0, 0, 0, .62), inset 0 0 0 1px rgba(255,255,255,.08) !important;
+    overscroll-behavior: contain;
+  }
+
+  body[data-route="about"] .about-nav.open .about-nav-list {
+    display: flex !important;
+  }
+
+  body[data-route="about"] .about-nav button[data-about-section] {
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+  }
+
+  body[data-route="about"] .address-row code {
+    font-size: 10.5px !important;
+    line-height: 1.5 !important;
+  }
+}
+
+/* Phone shell ----------------------------------------------------------------------------- */
+@media (max-width: 720px) {
+  body[data-route="about"] .about-nav {
+    top: calc(56px + var(--premine-banner-h, 0px)) !important;
+  }
+
+  body:not([data-route="home"]) #app > .topbar {
+    min-height: 56px !important;
+    height: 56px !important;
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+    padding: 6px 12px !important;
+    overflow: hidden !important;
+  }
+
+  body:not([data-route="home"]) #app > .topbar .main-nav,
+  body:not([data-route="home"]) #app > .topbar .header-right > :not(.header-account) {
+    display: none !important;
+  }
+
+  body:not([data-route="home"]) #app > .topbar .brand {
+    flex: 0 0 auto !important;
+  }
+
+  body:not([data-route="home"]) #app > .topbar .gld-wordmark {
+    width: 72px !important;
+  }
+
+  body:not([data-route="home"]) #app > .topbar .header-right {
+    width: auto !important;
+    height: 44px !important;
+    display: flex !important;
+    align-items: center !important;
+    margin-left: auto !important;
+    flex: 0 0 auto !important;
+  }
+
+  body:not([data-route="home"]) #app > .topbar :is(.header-account, .connect-header) {
+    min-width: 108px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+    font-size: 15px !important;
+  }
+
+  .tabbar .tab {
+    min-width: 44px;
+    min-height: 56px;
+  }
+
+  .tabbar .tab b {
+    font-size: 9.5px !important;
+  }
+
+  body[data-route="stake"] .staking-shell.page-view.active,
+  body[data-route="referrals"] .feature-shell[data-page="referrals"].page-view.active {
+    grid-template-rows: 48px 64px minmax(0, 1fr) !important;
+    gap: 7px !important;
+  }
+
+  body[data-route="stake"] .staking-shell > .route-header .eyebrow,
+  body[data-route="referrals"] .feature-shell[data-page="referrals"] > .route-header .eyebrow,
+  body[data-route="rounds"] .route-header .eyebrow,
+  body[data-route="about"] .route-header .eyebrow {
+    margin-bottom: 4px !important;
+    font-size: 9px !important;
+  }
+
+  body[data-route="stake"] .staking-shell > .route-header h1,
+  body[data-route="referrals"] .feature-shell[data-page="referrals"] > .route-header h1,
+  body[data-route="rounds"] .route-header h1,
+  body[data-route="about"] .route-header h1 {
+    font-size: clamp(34px, 10vw, 40px) !important;
+    line-height: .95 !important;
+  }
+
+  body[data-route="stake"] .staking-metrics,
+  body[data-route="referrals"] .referral-metrics {
+    height: 64px !important;
+  }
+
+  body[data-route="stake"] .staking-metrics article,
+  body[data-route="stake"] .staking-metrics article:first-child,
+  body[data-route="referrals"] .feature-shell[data-page="referrals"] .referral-metrics article {
+    height: 64px !important;
+    padding: 7px 4px !important;
+  }
+
+  body[data-route="stake"] .staking-metrics :is(span, small),
+  body[data-route="referrals"] .referral-metrics :is(span, small) {
+    font-size: 8px !important;
+    line-height: 1.15 !important;
+  }
+
+  body[data-route="stake"] .staking-metrics strong,
+  body[data-route="referrals"] .referral-metrics strong {
+    font-size: 16px !important;
+  }
+
+  .dashboard-view-tabs {
+    min-height: 40px !important;
+    height: 40px !important;
+    padding: 3px !important;
+  }
+
+  .dashboard-view-tabs button {
+    min-height: 34px !important;
+    height: 34px !important;
+    padding-inline: 8px !important;
+    font-size: 10.5px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard,
+  body[data-route="referrals"] .referrals-dashboard {
+    grid-template-rows: 40px minmax(0, 1fr) !important;
+  }
+
+  body[data-route="stake"] .staking-overview {
+    width: 100% !important;
+    height: 100% !important;
+    max-height: 460px !important;
+    grid-template-rows: minmax(0, 1fr) 60px !important;
+    align-self: start !important;
+  }
+
+  body[data-route="stake"] .staking-overview > .stake-rewards {
+    height: 100% !important;
+    grid-template-columns: minmax(0, 1fr) minmax(122px, .72fr) !important;
+    gap: 10px !important;
+    padding: 12px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-logo {
+    width: 48px !important;
+    height: 48px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard #stake-claimable-eth {
+    font-size: clamp(42px, 13vw, 54px) !important;
+  }
+
+  body[data-route="stake"] #eth-claim-title,
+  body[data-route="stake"] .staking-position-strip span,
+  body[data-route="stake"] .eth-lifetime span,
+  body[data-route="stake"] .eth-lifetime small {
+    font-size: 9px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip,
+  body[data-route="stake"] .staking-dashboard .staking-position-strip article {
+    height: 60px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip article {
+    padding: 8px 6px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .staking-position-strip strong {
+    font-size: 17px !important;
+  }
+
+  body[data-route="stake"] .staking-share-group .stake-flex-trigger,
+  body[data-route="stake"] #claim-stake-rewards {
+    min-height: 44px !important;
+    height: 44px !important;
+    font-size: 10px !important;
+  }
+
+  body[data-route="stake"] .staking-actions,
+  body[data-route="stake"] .staking-actions > .staking-layout,
+  body[data-route="stake"] .staking-actions .stake-composer {
+    height: auto !important;
+    max-height: 460px !important;
+  }
+
+  body[data-route="stake"] .staking-actions .stake-composer {
+    grid-template-rows: 40px 76px 14px 54px 44px 44px !important;
+    gap: 5px 7px !important;
+    padding: 10px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-mode-tabs,
+  body[data-route="stake"] .stake-composer .stake-mode-tabs button {
+    min-height: 40px !important;
+    height: 40px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-tier-tabs,
+  body[data-route="stake"] .stake-composer .stake-tier-tabs button,
+  body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-tier-burn {
+    min-height: 76px !important;
+    height: 76px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-amount {
+    height: 54px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-quick-actions,
+  body[data-route="stake"] .stake-composer .stake-quick-actions button,
+  body[data-route="stake"] .stake-composer .stake-submit {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="referrals"] .referrals-primary > .referral-command {
+    width: 100% !important;
+    height: min(100%, 390px) !important;
+    grid-template-rows: minmax(170px, 1fr) 64px 44px !important;
+    gap: 8px !important;
+    align-self: start !important;
+  }
+
+  body[data-route="referrals"] .referral-link-block {
+    grid-template-areas: "title" "note" "link" !important;
+    grid-template-rows: auto auto 56px !important;
+    align-content: start !important;
+    gap: 8px !important;
+    padding: 12px !important;
+  }
+
+  body[data-route="referrals"] .referral-link-note {
+    display: block !important;
+    margin: 0 !important;
+    color: var(--surface-text-secondary) !important;
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+  }
+
+  body[data-route="referrals"] .referral-link {
+    min-height: 56px !important;
+    height: 56px !important;
+  }
+
+  body[data-route="referrals"] .referral-link code {
+    font-size: 11px !important;
+  }
+
+  body[data-route="referrals"] .referral-link button {
+    min-width: 72px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+    font-size: 11px !important;
+  }
+
+  body[data-route="referrals"] .referral-performance,
+  body[data-route="referrals"] .feature-shell[data-page="referrals"] .referral-performance,
+  body[data-route="referrals"] .referral-performance > strong {
+    height: 64px !important;
+  }
+
+  body[data-route="referrals"] .referral-performance > strong {
+    padding: 8px !important;
+    font-size: 19px !important;
+  }
+
+  body[data-route="referrals"] .referral-performance small {
+    font-size: 9px !important;
+  }
+
+  body[data-route="referrals"] .referral-flex-actions,
+  body[data-route="referrals"] .referral-flex-actions > button,
+  body[data-route="referrals"] .referral-flex-actions > .referral-claim-action {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="referrals"] .referrals-secondary .ledger-head h2 {
+    font-size: 20px !important;
+  }
+
+  body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
+    min-height: 48px !important;
+    height: 48px !important;
+    font-size: 11px !important;
+  }
+
+  /* Mine keeps all 25 tiles visible, then exposes a comfortably tappable transaction panel in
+     normal page flow. The quote switch remains presentation-only; these rules only change its
+     hit area. */
+  body[data-route="mine"] .mine-currency-toggle {
+    min-height: 44px !important;
+    height: 44px !important;
+    padding-inline: 8px !important;
+  }
+
+  body[data-route="mine"] .deploy-panel :is(.stepper button, #all, #auto-round),
+  body[data-route="mine"] .claim-panel button,
+  body[data-route="mine"] .miners-page-btn {
+    min-height: 44px !important;
+  }
+
+  body[data-route="mine"] .amount-display input {
+    min-height: 44px !important;
+    font-size: 24px !important;
+  }
+
+  body[data-route="mine"] .switchboard-proof-trigger {
+    min-height: 34px !important;
+    padding: 6px !important;
+  }
+
+  /* Rounds become compact two-line records rather than a 900px desktop table clipped by the
+     viewport. Every value—round, tile, mode, SOL, winner count and time—remains visible. */
+  body[data-route="rounds"] .feature-shell[data-page="rounds"].page-view.active {
+    width: calc(100% - 20px) !important;
+    max-width: none !important;
+    margin-inline: auto !important;
+    padding-bottom: 78px !important;
+    overflow: visible !important;
+  }
+
+  body[data-route="rounds"] .feature-metrics :is(span, small) {
+    font-size: 9px !important;
+    line-height: 1.25 !important;
+  }
+
+  body[data-route="rounds"] .feature-metrics strong {
+    font-size: 20px !important;
+  }
+
+  body[data-route="rounds"] .ledger-panel {
+    width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  body[data-route="rounds"] .round-filters {
+    gap: 4px !important;
+  }
+
+  body[data-route="rounds"] .round-filters button {
+    min-height: 44px !important;
+    padding-inline: 10px !important;
+    font-size: 10px !important;
+  }
+
+  body[data-route="rounds"] .round-table-head {
+    display: none !important;
+  }
+
+  body[data-route="rounds"] :is(.round-list, .round-entry, .round-record) {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  body[data-route="rounds"] .round-record {
+    position: relative;
+    min-height: 72px !important;
+    display: grid !important;
+    grid-template-columns: 64px minmax(0, 1fr) 78px 14px !important;
+    grid-template-rows: repeat(2, 28px) !important;
+    gap: 0 8px !important;
+    padding: 8px 10px !important;
+    font-size: 11px !important;
+  }
+
+  body[data-route="rounds"] .round-record > * {
+    min-width: 0 !important;
+  }
+
+  body[data-route="rounds"] .round-record > :is(span, time) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body[data-route="rounds"] .round-record > :nth-child(1) { grid-column: 1; grid-row: 1; }
+  body[data-route="rounds"] .round-record > :nth-child(2) { grid-column: 2; grid-row: 1; }
+  body[data-route="rounds"] .round-record > :nth-child(3) { grid-column: 3; grid-row: 1; }
+  body[data-route="rounds"] .round-record > :nth-child(4) { grid-column: 2; grid-row: 2; }
+  body[data-route="rounds"] .round-record > :nth-child(5) { grid-column: 3; grid-row: 2; }
+  body[data-route="rounds"] .round-record > :nth-child(6) { grid-column: 1; grid-row: 2; }
+  body[data-route="rounds"] .round-record > :nth-child(7) { grid-column: 4; grid-row: 1 / -1; }
+
+  body[data-route="rounds"] .round-record > :nth-child(5)::before {
+    content: "WIN ";
+    margin-right: 3px;
+    color: var(--surface-text-tertiary);
+    font-size: 7px;
+    letter-spacing: .08em;
+  }
+
+  body[data-route="rounds"] .round-pagination button {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  /* About is the long-form reading surface. It may scroll, but it must never respond by shrinking
+     paragraphs or labels below a comfortable mobile reading size. */
+  body[data-route="about"] .about-shell.page-view.active {
+    width: calc(100% - 16px) !important;
+    max-width: none !important;
+    margin-inline: auto !important;
+    padding-bottom: 78px !important;
+  }
+
+  body[data-route="about"] .about-nav-toggle {
+    min-height: 46px !important;
+    height: 46px !important;
+    padding-inline: 12px !important;
+    font-size: 12px !important;
+  }
+
+  body[data-route="about"] .about-content {
+    padding: 18px 16px !important;
+  }
+
+  body[data-route="about"] .about-section h2 {
+    font-size: clamp(28px, 8vw, 34px) !important;
+  }
+
+  body[data-route="about"] .about-section :is(p, li) {
+    font-size: 13px !important;
+    line-height: 1.58 !important;
+  }
+
+  body[data-route="about"] .about-section .about-lead {
+    font-size: 14px !important;
+    line-height: 1.55 !important;
+  }
+
+  body[data-route="about"] .about-section :is(.eyebrow, small) {
+    font-size: 9px !important;
+  }
+
+  body[data-route="about"] .protocol-yield-banner {
+    padding: 20px !important;
+  }
+
+  body[data-route="about"] .protocol-yield-banner p,
+  body[data-route="about"] .principle-grid p,
+  body[data-route="about"] .about-rule-table p {
+    font-size: 12.5px !important;
+  }
+
+  body[data-route="about"] .about-statline small {
+    font-size: 9px !important;
+  }
+}
+
+/* Final compact interaction contract -------------------------------------------------------
+   The active dashboard remains one screen in normal use, while its work panel is the single
+   controlled escape hatch for the software keyboard, text zoom and unusually long translated
+   labels. This avoids trapping content behind the route-level overflow lock. */
+@media (max-width: 1024px) {
+  body[data-route="stake"] .staking-dashboard > :is(.staking-overview, .staking-actions),
+  body[data-route="referrals"] .referrals-dashboard > :is(.referrals-primary, .referrals-secondary),
+  body[data-route="referrals"] .referrals-secondary > :is(.my-referrals, .referral-leaderboard) {
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  body[data-route="stake"] .staking-dashboard > :is(.staking-overview, .staking-actions)::-webkit-scrollbar,
+  body[data-route="referrals"] .referrals-dashboard > :is(.referrals-primary, .referrals-secondary)::-webkit-scrollbar,
+  body[data-route="referrals"] .referrals-secondary > :is(.my-referrals, .referral-leaderboard)::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1024px) {
+  html body #app > .topbar .main-nav {
+    gap: 6px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard,
+  body[data-route="referrals"] .referrals-dashboard {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas:
+      "tabs"
+      "active" !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard > .stake-dashboard-tabs,
+  body[data-route="referrals"] .referrals-dashboard > .referral-dashboard-tabs {
+    grid-area: tabs !important;
+    width: 100% !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard > :is(.staking-overview, .staking-actions),
+  body[data-route="referrals"] .referrals-dashboard > :is(.referrals-primary, .referrals-secondary) {
+    grid-area: active !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  /* Reserve a real gutter for the Social reopen control instead of floating it over the round
+     summary. The board and deployment rail keep their existing scale and document flow. */
+  body[data-route="mine"] .workspace.page-view.active,
+  body[data-route="mine"] .workspace.page-view.active.chat-hidden {
+    width: calc(100vw - 76px) !important;
+    margin-left: 58px !important;
+    margin-right: 18px !important;
+  }
+
+  body[data-route="mine"] #show-chat.visible {
+    width: 44px !important;
+    height: 44px !important;
+    left: 7px !important;
+  }
+
+  .topbar .nav-item,
+  .topbar :is(.market-pill, .header-social-link, .header-social),
+  .dashboard-view-tabs button,
+  body[data-route="stake"] .stake-composer :is(.stake-mode-tabs button, .stake-quick-actions button, .stake-submit),
+  body[data-route="referrals"] .referral-pagination button {
+    min-height: 44px !important;
+  }
+
+  .topbar .header-social,
+  body[data-route="mine"] :is(.mine-currency-toggle, .switchboard-proof-trigger, #rewards-toggle, .round-miners-pagination > button),
+  body[data-route="mine"] .deploy-panel > .quick-amounts button,
+  body[data-route="mine"] .deploy-panel .auto-toggle,
+  body[data-route="stake"] :is(.stake-flex-trigger, #claim-stake-rewards) {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  .topbar .header-social,
+  body[data-route="mine"] :is(#rewards-toggle, .round-miners-pagination > button) {
+    min-width: 44px !important;
+    width: 44px !important;
+  }
+
+  .topbar .nav-item {
+    min-width: 44px !important;
+  }
+
+  /* Unstake has no tier choice. Remove that row completely rather than leaving the 74px Stake
+     tier slot as unexplained whitespace. */
+  body[data-route="stake"] .staking-actions .stake-composer:has(#stake-tier-tabs[hidden]) {
+    grid-template-areas:
+      "mode mode mode"
+      "label label label"
+      "amount amount quick"
+      "submit submit submit" !important;
+    grid-template-rows: 44px 14px 54px 44px !important;
+    min-height: 0 !important;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1180px) {
+  /* Social is a contained drawer at tablet widths. It is removed from Mine's layout tracks, so
+     opening it cannot create an implicit third column or resize the board and transaction rail. */
+  body[data-route="mine"] .workspace.page-view.active:not(.chat-hidden) > .chat-panel {
+    position: fixed !important;
+    z-index: 70 !important;
+    top: calc(84px + var(--premine-banner-h, 0px)) !important;
+    bottom: 24px !important;
+    left: 7px !important;
+    width: min(360px, calc(100vw - 14px)) !important;
+    height: auto !important;
+    min-height: 0 !important;
+    display: flex !important;
+    background: #09090a !important;
+    box-shadow: 0 22px 58px rgba(0, 0, 0, .62) !important;
+  }
+
+  body[data-route="mine"] .workspace .chat-close-only,
+  body[data-route="mine"] .workspace .chat-compose button {
+    min-width: 44px !important;
+    width: 44px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="mine"] .workspace .chat-compose {
+    grid-template-columns: 44px minmax(0, 1fr) 44px !important;
+    align-items: center !important;
+  }
+
+  body[data-route="mine"] .workspace .chat-compose textarea {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+}
+
+@media (max-width: 720px) {
+  :root { --mobile-topbar: 56px; }
+
+  /* There are four actual destinations. A five-track grid left a permanent empty fifth column
+     and shifted every thumb target away from the screen edges. */
+  .tabbar {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  #chat-drawer {
+    top: var(--mobile-topbar) !important;
+  }
+
+  #chat-drawer .chat-close-only,
+  #chat-drawer .chat-compose button,
+  #chat-drawer #chat-sticker-close,
+  #chat-drawer #chat-attach-clear {
+    min-width: 44px !important;
+    width: 44px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  #chat-drawer .chat-compose {
+    grid-template-columns: 44px minmax(0, 1fr) 44px !important;
+    align-items: center !important;
+  }
+
+  #chat-drawer .chat-compose textarea {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  .dashboard-view-tabs,
+  .dashboard-view-tabs button {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="home"] :is(.topbar .brand, .landing-nav button, .landing-actions button) {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  #app > .topbar .brand {
+    min-height: 44px !important;
+    display: flex !important;
+    align-items: center !important;
+  }
+
+  body[data-route="mine"] .deploy-panel > .quick-amounts button,
+  body[data-route="mine"] .auto-reward-options button,
+  body[data-route="mine"] .switchboard-proof-trigger,
+  body[data-route="mine"] .rewards-actions button,
+  body[data-route="mine"] .rewards-stake {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="mine"] .switchboard-proof-trigger,
+  body[data-route="mine"] .reward-action small,
+  body[data-route="mine"] .round-reward-tip p {
+    font-size: 10px !important;
+  }
+
+  body[data-route="mine"] :is(#rewards-toggle, .round-miners-pagination > button) {
+    min-width: 44px !important;
+    width: 44px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  .mobile-sheet .sheet-close,
+  body[data-route="mine"] .round-reward,
+  body[data-route="mine"] .miners-page-btn {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+
+  .mobile-sheet .sheet-close,
+  body[data-route="mine"] .round-reward {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* Removing the tier row is also important on phones: otherwise Unstake inherits an empty 76px
+     row between the mode tabs and its amount field. */
+  body[data-route="stake"] .staking-actions .stake-composer:has(#stake-tier-tabs[hidden]) {
+    grid-template-areas:
+      "mode mode"
+      "label label"
+      "amount amount"
+      "quick quick"
+      "submit submit" !important;
+    grid-template-rows: 40px 14px 54px 44px 44px !important;
+  }
+
+  body[data-route="stake"] .staking-overview {
+    height: min(100%, 320px) !important;
+    grid-template-rows: minmax(0, 1fr) 60px !important;
+  }
+
+  body[data-route="stake"] .staking-actions {
+    height: auto !important;
+    align-self: start !important;
+  }
+
+  body[data-route="stake"] .staking-actions .stake-composer {
+    grid-template-rows: 44px 76px 14px 54px 44px 44px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-mode-tabs,
+  body[data-route="stake"] .stake-composer .stake-mode-tabs button,
+  body[data-route="stake"] .stake-composer .stake-amount button {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-amount input {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="stake"] .staking-actions .stake-composer:has(#stake-tier-tabs[hidden]) {
+    grid-template-rows: 44px 14px 54px 44px 44px !important;
+  }
+
+  /* Keep every leaderboard fact on a phone. The old compact row discarded referral and active
+     totals completely; this two-line ledger preserves both without horizontal scrolling. */
+  body[data-route="referrals"] .referral-row {
+    grid-template-columns: 32px minmax(0, 1fr) auto 44px !important;
+    grid-template-rows: 24px 18px !important;
+    gap: 0 7px !important;
+    padding: 4px 7px !important;
+  }
+
+  body[data-route="referrals"] .referral-row > :nth-child(1) { grid-column: 1; grid-row: 1 / -1; }
+  body[data-route="referrals"] .referral-row > :nth-child(2) { grid-column: 2; grid-row: 1; }
+  body[data-route="referrals"] .referral-row > :nth-child(3) {
+    grid-column: 2;
+    grid-row: 2;
+    display: flex !important;
+    align-items: center;
+    font-size: 9px !important;
+  }
+  body[data-route="referrals"] .referral-row > :nth-child(3)::before {
+    content: "REF ";
+    margin-right: 3px;
+    color: var(--surface-text-tertiary);
+    font-size: 7px;
+    letter-spacing: .08em;
+  }
+  body[data-route="referrals"] .referral-row > :nth-child(4) {
+    grid-column: 3;
+    grid-row: 2;
+    display: flex !important;
+    align-items: center;
+    font-size: 9px !important;
+  }
+  body[data-route="referrals"] .referral-row > :nth-child(4)::before {
+    content: "ACTIVE ";
+    margin-right: 3px;
+    color: var(--surface-text-tertiary);
+    font-size: 7px;
+    letter-spacing: .08em;
+  }
+  body[data-route="referrals"] .referral-row > :nth-child(5) { grid-column: 3; grid-row: 1; }
+  body[data-route="referrals"] .referral-row > :nth-child(6) { grid-column: 4; grid-row: 1 / -1; }
+
+  body[data-route="referrals"] :is(.referrer-identity span, .referral-status, .round-explorer) {
+    font-size: 9px !important;
+  }
+
+  body[data-route="rounds"] .round-filters button {
+    min-width: 44px !important;
+  }
+
+  body[data-route="rounds"] .round-detail {
+    position: static !important;
+    left: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 420px) {
+  /* Auto-round inserts the reward policy dynamically. Keep every row in strict source order so
+     its controls can never overlap the Auto-round switch on narrow phones. */
+  body[data-route="mine"] .auto-reward-row {
+    grid-column: 1 !important;
+    grid-row: 8 !important;
+  }
+
+  body[data-route="mine"] .deploy-panel > .auto-plan { grid-row: 9 !important; }
+  body[data-route="mine"] .deploy-panel > .deploy { grid-row: 10 !important; }
+}
+
+/* Final Stake / Referrals compact sizing authority ------------------------------------------
+   Keep the visible tab track, intrinsic ledger rows and touch targets internally consistent.
+   These declarations intentionally stay last because several older compact layers use fixed
+   30–40px tracks that are too small for the final 44px controls. */
+@media (min-width: 721px) and (max-width: 1024px) {
+  body:is([data-route="stake"], [data-route="referrals"]) .dashboard-view-tabs {
+    min-height: 44px !important;
+    height: 44px !important;
+    padding: 0 !important;
+  }
+
+  body:is([data-route="stake"], [data-route="referrals"]) .dashboard-view-tabs button {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard,
+  body[data-route="referrals"] .referrals-dashboard {
+    grid-template-rows: 44px minmax(0, 1fr) !important;
+  }
+
+  body[data-route="stake"] .staking-actions .stake-composer {
+    gap: 4px 6px !important;
+  }
+
+  body[data-route="stake"] .stake-composer :is(
+    .stake-mode-tabs,
+    .stake-mode-tabs button,
+    .stake-quick-actions,
+    .stake-quick-actions button,
+    .stake-submit
+  ) {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  body[data-route="stake"] .staking-dashboard .staking-share-group .stake-flex-trigger,
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards,
+  body[data-route="about"] .about-nav .about-nav-toggle {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  /* The selected network/leaderboard panel is the scroll owner. Leaving its parent scrollable as
+     well creates a nested gesture trap near the end of a four-row page. */
+  body[data-route="referrals"] .referrals-dashboard > .referrals-secondary {
+    overflow-y: hidden !important;
+  }
+
+  body[data-route="referrals"] .referral-pagination {
+    min-height: 44px !important;
+  }
+
+  body[data-route="referrals"] .referral-pagination button,
+  body[data-route="referrals"] :is(.my-referral-row, .referral-row) > .round-explorer {
+    min-width: 44px !important;
+    width: 44px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="referrals"] :is(.my-referral-row, .referral-row) > .round-explorer {
+    justify-content: center !important;
+    padding-inline: 4px !important;
+  }
+
+  body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
+    min-height: 48px !important;
+    height: auto !important;
+    padding-block: 4px !important;
+  }
+
+  body[data-route="referrals"] :is(.referrer-identity span, .referral-status, .round-explorer) {
+    font-size: 10px !important;
+  }
+}
+
+@media (max-width: 720px) {
+  body:not([data-route="home"]) #app > .topbar {
+    padding-block: 6px !important;
+  }
+
+  body:not([data-route="home"]) #app > .topbar .header-right,
+  body:not([data-route="home"]) #app > .topbar :is(.header-account, .connect-header) {
+    min-height: 44px !important;
+    height: 44px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard,
+  body[data-route="referrals"] .referrals-dashboard {
+    grid-template-rows: 44px minmax(0, 1fr) !important;
+  }
+
+  body:is([data-route="stake"], [data-route="referrals"]) .dashboard-view-tabs {
+    padding: 0 !important;
+  }
+
+  body[data-route="stake"] .staking-metrics :is(span, small),
+  body[data-route="referrals"] .referral-metrics :is(span, small) {
+    font-size: 9px !important;
+  }
+
+  /* Each ledger row may grow under text zoom instead of clipping its second line. */
+  body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
+    min-height: 50px !important;
+    height: auto !important;
+  }
+
+  body[data-route="referrals"] .my-referral-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto 44px !important;
+    grid-template-rows: minmax(24px, auto) minmax(18px, auto) !important;
+    gap: 0 7px !important;
+    padding: 4px 7px !important;
+  }
+
+  body[data-route="referrals"] .referral-row {
+    grid-template-rows: minmax(24px, auto) minmax(18px, auto) !important;
+  }
+
+  body[data-route="referrals"] .my-referral-row > :nth-child(1) { grid-column: 1; grid-row: 1; }
+  body[data-route="referrals"] .my-referral-row > :nth-child(2) { grid-column: 1; grid-row: 2; }
+  body[data-route="referrals"] .my-referral-row > :nth-child(3) { grid-column: 2; grid-row: 1 / -1; }
+  body[data-route="referrals"] .my-referral-row > :nth-child(4) { grid-column: 3; grid-row: 1 / -1; }
+
+  body[data-route="referrals"] :is(.my-referral-row, .referral-row) > .round-explorer {
+    min-width: 44px !important;
+    min-height: 44px !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  body[data-route="referrals"] :is(.referrer-identity span, .referral-status, .round-explorer) {
+    font-size: 10px !important;
+  }
+
+  body[data-route="referrals"] .referral-row > :is(:nth-child(3), :nth-child(4))::before {
+    font-size: 9px !important;
+    letter-spacing: .06em !important;
+  }
+
+  /* Five 4px row gaps keep the full 44px action set inside the 360px-high work panel. */
+  body[data-route="stake"] .staking-actions .stake-composer {
+    gap: 4px 6px !important;
   }
 }

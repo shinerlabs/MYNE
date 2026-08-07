@@ -125,9 +125,9 @@
     {
       "name": "bind_round_randomness",
       "docs": [
-        "Bind a Switchboard randomness account before any deployment is accepted.",
-        "The account must still be committed (not revealed) at bind time. This",
-        "prevents a keeper or miner from selecting an already-known outcome."
+        "Bind a fresh, uncommitted Switchboard randomness account before any",
+        "deployment is accepted. The account identity is fixed while no outcome",
+        "exists; committing it later is what irreversibly closes betting."
       ],
       "discriminator": [
         46,
@@ -814,7 +814,26 @@
         {
           "name": "referrer_miner",
           "writable": true,
-          "optional": true
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "miner.referrer",
+                "account": "Miner"
+              }
+            ]
+          }
         },
         {
           "name": "destination_tokens",
@@ -822,7 +841,12 @@
         },
         {
           "name": "admin_fee_tokens",
-          "writable": true
+          "docs": [
+            "Optional for referred claims, which route no MYNE to the admin. The",
+            "handler requires and canonicalizes this ATA only on fallback claims."
+          ],
+          "writable": true,
+          "optional": true
         },
         {
           "name": "mint",
@@ -1533,6 +1557,14 @@
           }
         },
         {
+          "name": "randomness_account",
+          "docs": [
+            "provider-owned request and that it has not been revealed. Optional only",
+            "for the explicit local legacy mode."
+          ],
+          "optional": true
+        },
+        {
           "name": "authority",
           "writable": true,
           "signer": true,
@@ -1696,6 +1728,10 @@
               }
             ]
           }
+        },
+        {
+          "name": "randomness_account",
+          "optional": true
         },
         {
           "name": "executor",
@@ -2055,7 +2091,7 @@
       "docs": [
         "The dedicated buyback signer records completion only after the swap and",
         "burn have been confirmed. This prevents a settled round from closing",
-        "while its 2% allocation is still operationally outstanding."
+        "while its 1% allocation is still operationally outstanding."
       ],
       "discriminator": [
         169,
@@ -2112,6 +2148,78 @@
         {
           "name": "buyback_authority",
           "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "migrate_fee_schedule_v6",
+      "docs": [
+        "One-way semantic migration for already-initialized v5 deployments.",
+        "The account layout is unchanged, but settlement remains fail-closed",
+        "until an administrator acknowledges the new audited fee schedule while",
+        "the protocol is paused."
+      ],
+      "discriminator": [
+        114,
+        44,
+        7,
+        113,
+        173,
+        182,
+        214,
+        40
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "mining_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
         }
       ],
       "args": []
@@ -2261,6 +2369,81 @@
         {
           "name": "pending_admin",
           "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "record_round_randomness_commit",
+      "docs": [
+        "Record the Switchboard commitment only after betting has closed. This",
+        "instruction must follow Switchboard's `randomness_commit` instruction in",
+        "the same transaction and accepts only its strict fresh-slot state. Since",
+        "every deploy instruction requires `seed_slot == 0`, no wager can be",
+        "added after the outcome becomes available to the randomness authority."
+      ],
+      "discriminator": [
+        33,
+        238,
+        226,
+        176,
+        219,
+        209,
+        188,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "round",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  111,
+                  117,
+                  110,
+                  100
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "round_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "randomness_account"
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "round_id",
+          "type": "u64"
         }
       ]
     },
@@ -2551,7 +2734,25 @@
         },
         {
           "name": "referrer_miner",
-          "optional": true
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "referrer"
+              }
+            ]
+          }
         },
         {
           "name": "authority",
@@ -2652,6 +2853,78 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "rotate_operational_wallets",
+      "docs": [
+        "Atomically rotates the two funded fee-receiver roles while paused.",
+        "Requiring the replacement admin fallback ATA up front prevents a key",
+        "recovery from leaving MYNE claims permanently unable to route fees."
+      ],
+      "discriminator": [
+        237,
+        62,
+        66,
+        12,
+        231,
+        9,
+        181,
+        205
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "new_buyback_wallet",
+          "docs": [
+            "Existing, system-owned receiver required so settlement cannot route to",
+            "an undeployed or program-owned address."
+          ]
+        },
+        {
+          "name": "new_admin_fee_wallet",
+          "docs": [
+            "Existing, system-owned receiver for all direct admin fee flows."
+          ]
+        },
+        {
+          "name": "new_admin_fee_tokens"
+        },
+        {
+          "name": "mint",
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "token_program"
+        }
+      ],
+      "args": []
     },
     {
       "name": "set_paused",
@@ -3220,6 +3493,17 @@
         },
         {
           "name": "buyback_wallet",
+          "docs": [
+            "Direct SOL destination controlled by the buyback keeper."
+          ],
+          "writable": true
+        },
+        {
+          "name": "admin_fee_wallet",
+          "docs": [
+            "Direct SOL destination for the 1% mining allocation and the 10% share",
+            "of gross staking rewards. It never accumulates inside a claim vault."
+          ],
           "writable": true
         }
       ],
@@ -3360,6 +3644,16 @@
         },
         {
           "name": "buyback_wallet",
+          "docs": [
+            "Direct SOL destination controlled by the buyback keeper."
+          ],
+          "writable": true
+        },
+        {
+          "name": "admin_fee_wallet",
+          "docs": [
+            "Direct SOL destination for every administrator round allocation."
+          ],
           "writable": true
         }
       ],
@@ -3819,6 +4113,19 @@
       ]
     },
     {
+      "name": "ClaimFeeRoutedV2",
+      "discriminator": [
+        158,
+        29,
+        91,
+        132,
+        190,
+        76,
+        21,
+        26
+      ]
+    },
+    {
       "name": "DeploymentCreated",
       "discriminator": [
         208,
@@ -3858,6 +4165,19 @@
       ]
     },
     {
+      "name": "OperationalWalletsRotated",
+      "discriminator": [
+        202,
+        103,
+        242,
+        143,
+        64,
+        177,
+        238,
+        169
+      ]
+    },
+    {
       "name": "PauseChanged",
       "discriminator": [
         238,
@@ -3881,6 +4201,19 @@
         118,
         76,
         132
+      ]
+    },
+    {
+      "name": "ProtocolVersionChanged",
+      "discriminator": [
+        119,
+        246,
+        75,
+        250,
+        172,
+        87,
+        242,
+        121
       ]
     },
     {
@@ -3975,6 +4308,19 @@
       ]
     },
     {
+      "name": "RoundFeesDistributed",
+      "discriminator": [
+        135,
+        118,
+        130,
+        99,
+        201,
+        74,
+        183,
+        45
+      ]
+    },
+    {
       "name": "RoundOpened",
       "discriminator": [
         99,
@@ -3998,6 +4344,19 @@
         148,
         61,
         110
+      ]
+    },
+    {
+      "name": "RoundRandomnessCommitted",
+      "discriminator": [
+        172,
+        235,
+        116,
+        68,
+        212,
+        143,
+        112,
+        133
       ]
     },
     {
@@ -4190,158 +4549,203 @@
     },
     {
       "code": 6019,
+      "name": "OperationalWalletsLocked",
+      "msg": "Pause the protocol before rotating funded operational wallets"
+    },
+    {
+      "code": 6020,
       "name": "RandomnessProviderRequired",
       "msg": "A verified randomness provider is required for this deployment"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "RandomnessNotBound",
       "msg": "The round has no randomness account bound before betting"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "InvalidRandomnessAccount",
       "msg": "The supplied randomness account is invalid"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "RandomnessNotResolved",
       "msg": "The randomness account has not been revealed in the current slot"
     },
     {
-      "code": 6023,
-      "name": "RandomnessNotCommitted",
-      "msg": "The randomness account was not committed to a future slot before betting"
-    },
-    {
       "code": 6024,
-      "name": "RandomnessCommittedTooLate",
-      "msg": "The randomness commitment was created too late"
+      "name": "RandomnessAlreadyRevealed",
+      "msg": "The randomness account was revealed before settlement"
     },
     {
       "code": 6025,
+      "name": "RandomnessNotCommitted",
+      "msg": "The randomness account has not been committed"
+    },
+    {
+      "code": 6026,
+      "name": "RandomnessAlreadyCommitted",
+      "msg": "The randomness account was committed before betting closed"
+    },
+    {
+      "code": 6027,
+      "name": "RandomnessCommittedTooLate",
+      "msg": "The randomness commitment is not a fresh post-betting commitment"
+    },
+    {
+      "code": 6028,
       "name": "ReceiptAlreadyProcessed",
       "msg": "The receipt has already been processed"
     },
     {
-      "code": 6026,
+      "code": 6029,
       "name": "ReceiptNotProcessed",
       "msg": "The receipt must be claimed or refunded before it can close"
     },
     {
-      "code": 6027,
+      "code": 6030,
       "name": "InvalidReceiptAuthority",
       "msg": "The receipt authority is invalid"
     },
     {
-      "code": 6028,
+      "code": 6031,
       "name": "InsufficientBalance",
       "msg": "The requested token or SOL amount is unavailable"
     },
     {
-      "code": 6029,
+      "code": 6032,
       "name": "InvalidReferrer",
       "msg": "The supplied referrer is invalid"
     },
     {
-      "code": 6030,
+      "code": 6033,
       "name": "CooldownActive",
       "msg": "The staking cooldown has not completed"
     },
     {
-      "code": 6031,
+      "code": 6034,
       "name": "InvalidStakeAuthority",
       "msg": "The staking position does not match this authority"
     },
     {
-      "code": 6032,
+      "code": 6035,
       "name": "InvalidFeeDestination",
       "msg": "The provided fee destination does not match protocol configuration"
     },
     {
-      "code": 6033,
+      "code": 6036,
       "name": "LiquidityPoolNotVerified",
       "msg": "A verified Meteora liquidity pool is required before unpausing"
     },
     {
-      "code": 6034,
+      "code": 6037,
       "name": "InvalidLiquidityPool",
       "msg": "The configured liquidity pool is invalid"
     },
     {
-      "code": 6035,
+      "code": 6038,
       "name": "InvalidRound",
       "msg": "The round ID does not match this account"
     },
     {
-      "code": 6036,
+      "code": 6039,
       "name": "InvalidRoundSchedule",
       "msg": "Only the current scheduled round can be opened"
     },
     {
-      "code": 6037,
+      "code": 6040,
       "name": "AutoPlanAlreadyExecuted",
       "msg": "This automation plan already executed for the round"
     },
     {
-      "code": 6038,
+      "code": 6041,
       "name": "AutoPlanInactive",
       "msg": "This automation plan is inactive"
     },
     {
-      "code": 6039,
+      "code": 6042,
       "name": "ProductionModeLocked",
       "msg": "Production mode cannot be downgraded after mainnet randomness is selected"
     },
     {
-      "code": 6040,
+      "code": 6043,
+      "name": "ProductionRandomnessRequired",
+      "msg": "This production artifact requires Switchboard mainnet randomness"
+    },
+    {
+      "code": 6044,
       "name": "InvalidStakeVault",
       "msg": "The staking token account is not the canonical stake-pool vault"
     },
     {
-      "code": 6041,
+      "code": 6045,
       "name": "InvalidRewardMode",
       "msg": "The automation reward mode is invalid"
     },
     {
-      "code": 6042,
+      "code": 6046,
       "name": "EmissionComplete",
       "msg": "The fixed MYNE emission schedule has completed"
     },
     {
-      "code": 6043,
+      "code": 6047,
       "name": "InvalidArchiveHash",
       "msg": "The round archive hash cannot be zero"
     },
     {
-      "code": 6044,
+      "code": 6048,
       "name": "RoundAlreadyArchived",
       "msg": "The round has already been archived"
     },
     {
-      "code": 6045,
+      "code": 6049,
       "name": "RoundNotArchived",
       "msg": "The round has not been archived"
     },
     {
-      "code": 6046,
+      "code": 6050,
       "name": "RoundCleanupIncomplete",
       "msg": "Not every receipt has completed the cleanup lifecycle"
     },
     {
-      "code": 6047,
+      "code": 6051,
       "name": "BuybackAlreadyCompleted",
       "msg": "The buyback has already been marked complete"
     },
     {
-      "code": 6048,
+      "code": 6052,
       "name": "BuybackNotCompleted",
       "msg": "The round buyback has not completed"
     },
     {
-      "code": 6049,
+      "code": 6053,
       "name": "RoundPayoutIncomplete",
       "msg": "The round still contains SOL allocated to player payouts"
+    },
+    {
+      "code": 6054,
+      "name": "ProtocolUpgradeRequired",
+      "msg": "The protocol configuration must be migrated to the current fee schedule"
+    },
+    {
+      "code": 6055,
+      "name": "MigrationRequiresPause",
+      "msg": "Pause the protocol before migrating its fee schedule"
+    },
+    {
+      "code": 6056,
+      "name": "MiningPoolMigrationRequiresEmpty",
+      "msg": "The v5 mining pool must have no unclaimed balances before migration"
+    },
+    {
+      "code": 6057,
+      "name": "InvalidMiningPoolAccounting",
+      "msg": "The unclaimed mining-reward share accounting is inconsistent"
+    },
+    {
+      "code": 6058,
+      "name": "MiningRewardBelowSharePrecision",
+      "msg": "The mining reward is below the unclaimed-share precision"
     }
   ],
   "types": [
@@ -4609,6 +5013,42 @@
       }
     },
     {
+      "name": "ClaimFeeRoutedV2",
+      "docs": [
+        "Versioned companion event: preserve the historical `MyneClaimed` layout",
+        "while making every fee recipient directly indexable and auditable."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "claimant",
+            "type": "pubkey"
+          },
+          {
+            "name": "passive_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "referral_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "referral_base_units",
+            "type": "u64"
+          },
+          {
+            "name": "admin_fee_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin_base_units",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
       "name": "DeploymentCreated",
       "type": {
         "kind": "struct",
@@ -4754,10 +5194,17 @@
           },
           {
             "name": "unclaimed_myne",
+            "docs": [
+              "Cached share value, refreshed whenever this miner touches the program."
+            ],
             "type": "u64"
           },
           {
             "name": "passive_reward_debt",
+            "docs": [
+              "v6: this miner's unclaimed-reward shares. The legacy field name keeps",
+              "the account layout stable; v5 pools must be empty before migration."
+            ],
             "type": "u128"
           },
           {
@@ -4802,14 +5249,26 @@
           },
           {
             "name": "total_unclaimed",
+            "docs": [
+              "Exact MYNE base-unit liability represented by all outstanding shares."
+            ],
             "type": "u64"
           },
           {
             "name": "reward_per_unclaimed",
+            "docs": [
+              "v6: total outstanding unclaimed-reward shares. This field retains its",
+              "original name to preserve the binary account layout across migration."
+            ],
             "type": "u128"
           },
           {
             "name": "undistributed_base_units",
+            "docs": [
+              "Passive claim fees assessed when no eligible unclaimed holder exists.",
+              "These base units remain permanently unissued and never accrue to a",
+              "future miner."
+            ],
             "type": "u64"
           }
         ]
@@ -4843,6 +5302,34 @@
           {
             "name": "admin_base_units",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OperationalWalletsRotated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous_buyback_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyback_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "previous_admin_fee_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin_fee_wallet",
+            "type": "pubkey"
+          },
+          {
+            "name": "admin_fee_token_account",
+            "type": "pubkey"
           }
         ]
       }
@@ -4979,6 +5466,22 @@
           {
             "name": "max_tokens",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProtocolVersionChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "previous_version",
+            "type": "u8"
+          },
+          {
+            "name": "current_version",
+            "type": "u8"
           }
         ]
       }
@@ -5289,6 +5792,58 @@
       }
     },
     {
+      "name": "RoundFeesDistributed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "gross_deployed_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "total_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "staking_gross_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "staking_admin_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "staking_net_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "buyback_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "motherlode_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "mining_admin_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "admin_total_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "admin_fee_wallet",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "RoundOpened",
       "type": {
         "kind": "struct",
@@ -5322,6 +5877,26 @@
     },
     {
       "name": "RoundRandomnessBound",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "round_id",
+            "type": "u64"
+          },
+          {
+            "name": "randomness_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "randomness_commit_slot",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RoundRandomnessCommitted",
       "type": {
         "kind": "struct",
         "fields": [

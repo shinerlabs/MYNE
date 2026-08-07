@@ -1,16 +1,18 @@
 import { supabase, isSocialConfigured } from '../social/config.js';
+import { ROUND_DURATION } from './config.js';
+import { nowSeconds as chainNowSeconds } from './round.js';
+import { summariseStakingRewardWindow } from './staking-apy.js';
 
 /**
- * Round history read from the Supabase index (see backend/src/services/round-index.service.ts).
+ * Round history read from the Supabase index maintained by Protocol/scripts/round-indexer.mjs.
  *
  * The chain remains the source of truth — this is a cache the backend rebuilds from `getRound`.
  * It exists because the chain path scans EVERY elapsed round on every visit (one multicall of
  * ~1,800 `getRound` calls, refreshed every 8s) and is hard-capped at `maxScan = 2000`, past
  * which the ledger silently truncates and the lifetime totals stop being lifetime totals.
  *
- * Every function here returns `null` rather than throwing when the index is unavailable — an
- * unapplied migration, a cold indexer, an offline backend. `loadRoundHistory` treats `null` as
- * "fall back to the chain", so the page degrades to today's behaviour instead of breaking.
+ * Every function here returns `null` rather than throwing when the index is unavailable. Local
+ * and Devnet can fall back to direct chain reads; Mainnet refuses unbounded account scans.
  *
  * The LIVE round is never served from here. It is unresolved by definition and the indexer only
  * writes rounds up to `current - 1`.
@@ -29,8 +31,7 @@ const ROUND_COLUMNS = [
   'total_wager_wei::text', 'winner_total_wei::text', 'pot_for_winners_wei::text',
   'bullion_for_winners_wei::text', 'payout_mul_wad::text',
   // The randomness that decided the round — what the fairness row displays.
-  'randomness_id', 'randomness_value::text',
-  'drand_round', 'drand_url',
+  'randomness_id', 'randomness_value::text', 'randomness_hex', 'randomness_commit_slot',
 ].join(', ');
 
 /** One probe per session decides whether the table exists; no point retrying on every page. */
@@ -46,16 +47,17 @@ function fromRow(r) {
     winningSquare: r.winning_square === null ? 0 : Number(r.winning_square),
     jackpotHit: r.jackpot_hit,
     singleMinerRound: r.single_miner_round,
-    singleMinerWinner: r.winner || '0x0000000000000000000000000000000000000000',
+    singleMinerWinner: r.winner || '11111111111111111111111111111111',
     totalWager: unwrap(r.total_wager_wei),
     winnerTotal: unwrap(r.winner_total_wei),
     potForWinners: unwrap(r.pot_for_winners_wei),
     bullionForWinners: unwrap(r.bullion_for_winners_wei),
     payoutMulWad: unwrap(r.payout_mul_wad),
     randomnessId: r.randomness_id || null,
-    randomnessValue: r.randomness_value ? unwrap(r.randomness_value) : null,
-    drandRound: r.drand_round != null ? Number(r.drand_round) : null,
-    drandUrl: r.drand_url || null,
+    // Prefer the byte-preserving hex form. Decimal remains compatible with rows indexed before
+    // randomness_hex was added and is normalized by chain/randomness-proof.js.
+    randomnessValue: r.randomness_hex || (r.randomness_value ? unwrap(r.randomness_value) : null),
+    randomnessCommitSlot: r.randomness_commit_slot == null ? null : unwrap(r.randomness_commit_slot),
   };
 }
 
@@ -205,6 +207,55 @@ export async function countMyBetRounds(address) {
   return rounds?.ids ? rounds.ids.size : null;
 }
 
+const STAKING_WINDOW_CACHE_MS = 30_000;
+const ROUND_CADENCE_SECONDS = Number(ROUND_DURATION);
+let stakingWindowCache = null;
+
+/**
+ * Durable realised staking rewards for an exact recent window.
+ *
+ * The index contains the net SOL amount actually routed to stakers by each
+ * on-chain RoundFeesDistributed event. Rebuilding this window on refresh keeps
+ * APY stable across browsers; a local in-memory balance sample cannot honestly
+ * claim to represent the previous 30 minutes. `complete` is deliberately
+ * strict so an indexer outage renders APY unavailable instead of overstating it.
+ */
+export async function loadStakingRewardWindow(windowMinutes = 30, nowSeconds = Number(chainNowSeconds())) {
+  if (!Number.isFinite(windowMinutes) || !(windowMinutes > 0)
+    || !Number.isFinite(nowSeconds) || !(await indexAvailable())) return null;
+  const end = Math.floor(nowSeconds);
+  const start = end - Math.round(windowMinutes * 60);
+  const key = `${windowMinutes}:${Math.floor(end / (STAKING_WINDOW_CACHE_MS / 1000))}`;
+  if (stakingWindowCache?.key === key) {
+    if ('value' in stakingWindowCache) return stakingWindowCache.value;
+    return stakingWindowCache.promise;
+  }
+
+  // Cache the in-flight read as well as its result. Stake and About can request
+  // this metric in the same render tick; they should share one indexed query.
+  const promise = (async () => {
+    const { data, error } = await supabase
+      .from('mine_rounds')
+      .select('round_id,resolved,settles_at,staking_net_lamports::text')
+      .gte('settles_at', start)
+      .lte('settles_at', end)
+      .order('settles_at', { ascending: true })
+      .limit(1000);
+    if (error) return null;
+    return summariseStakingRewardWindow(data ?? [], {
+      start,
+      end,
+      windowMinutes,
+      roundCadenceSeconds: ROUND_CADENCE_SECONDS,
+      maxRows: 1000,
+    });
+  })().catch(() => null);
+  stakingWindowCache = { key, promise };
+  const value = await promise;
+  if (stakingWindowCache?.key === key) stakingWindowCache = { key, value };
+  return value;
+}
+
 /** Exact receipt addresses for indexed reads; null means the index is unavailable. */
 export async function loadReceiptIndex({ roundId = null, address = null } = {}) {
   if (!(await indexAvailable())) return null;
@@ -279,22 +330,6 @@ export async function loadSettledRounds(address = null) {
   }
 }
 
-/** Stored drand link for one round — used by the expanded fairness row. */
-export async function loadDrandLink(roundId) {
-  if (!(await indexAvailable())) return null;
-  try {
-    const { data, error } = await supabase
-      .from('mine_rounds')
-      .select('drand_round, drand_url')
-      .eq('round_id', Number(roundId))
-      .maybeSingle();
-    if (error || !data?.drand_url || data.drand_round == null) return null;
-    return { round: Number(data.drand_round), url: data.drand_url };
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Miners who bet on a given square in a given round, biggest stake first.
  *
@@ -314,18 +349,25 @@ export async function loadDrandLink(roundId) {
 export async function loadRoundBets(roundId, square) {
   if (!(await indexAvailable())) return null;
   try {
-    const { data, error } = await supabase
-      .from('mine_round_bets')
-      // ::text for the same reason as everywhere else — wei past 2^53 loses precision as a
-      // bare JSON number.
-      .select('bettor, square, amount_wei::text')
-      .eq('round_id', Number(roundId))
-      .limit(2000);
-    if (error) return null;
+    const data = [];
+    for (let offset = 0; ; offset += PAGE) {
+      const { data: chunk, error } = await supabase
+        .from('mine_round_bets')
+        // ::text for the same reason as everywhere else — wei past 2^53 loses precision as a
+        // bare JSON number. Page instead of imposing a silent participant ceiling.
+        .select('bettor, square, amount_wei::text')
+        .eq('round_id', Number(roundId))
+        .order('receipt', { ascending: true })
+        .order('square', { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) return null;
+      data.push(...(chunk ?? []));
+      if (!chunk || chunk.length < PAGE) break;
+    }
 
     const win = Number(square);
     const byBettor = new Map();
-    for (const r of data ?? []) {
+    for (const r of data) {
       const key = r.bettor;
       const acc = byBettor.get(key) ?? { bettor: key, deployed: 0n, winningStake: 0n };
       const amount = unwrap(r.amount_wei);

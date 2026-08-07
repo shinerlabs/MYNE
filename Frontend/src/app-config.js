@@ -1,3 +1,6 @@
+import idl from './generated/myne_protocol.json' with { type: 'json' };
+import { validateDeploymentConfig } from './deployment-validation.js';
+
 /**
  * Product and network identity live here so the working name can be replaced
  * without hunting through the application. Protocol identifiers deliberately
@@ -26,7 +29,9 @@ export const PROGRAMS = Object.freeze({
 });
 
 export const SERVICES = Object.freeze({
-  indexerUrl: ENV.VITE_MYNE_INDEXER_URL || '',
+  // The production indexer writes the PostgREST tables read through the Supabase client.
+  // Do not accept a separate readiness-only URL that the browser never actually queries.
+  indexerUrl: ENV.VITE_SUPABASE_URL || '',
 });
 
 export const LINKS = Object.freeze({
@@ -34,15 +39,13 @@ export const LINKS = Object.freeze({
   x: ENV.VITE_X_URL || 'https://x.com/myne_solana',
 });
 
+export const GENERATED_PROGRAM_ID = idl.address || idl.metadata?.address || '';
 export const DEPLOYMENT_CONFIG_ERRORS = Object.freeze([
-  ...(NETWORK.cluster === 'mainnet-beta' && !/^https:\/\//.test(NETWORK.rpcUrl)
-    ? ['Mainnet RPC must use HTTPS'] : []),
-  ...(NETWORK.cluster === 'mainnet-beta' && /devnet|testnet|localhost|127\.0\.0\.1/i.test(NETWORK.rpcUrl)
-    ? ['Mainnet frontend is configured with a non-mainnet RPC'] : []),
+  ...validateDeploymentConfig({
+    network: NETWORK, programs: PROGRAMS, services: SERVICES, generatedProgramId: GENERATED_PROGRAM_ID,
+  }),
   ...(NETWORK.cluster === 'mainnet-beta' && PROGRAMS.randomness !== SWITCHBOARD_MAINNET_PROGRAM
     ? ['Mainnet frontend must pin the Switchboard mainnet program'] : []),
-  ...(NETWORK.cluster === 'mainnet-beta' && !PROGRAMS.tokenMint
-    ? ['Mainnet MYNE mint is not configured'] : []),
 ]);
 
 // Transaction modules stay fail-closed until every required instruction exists in the generated

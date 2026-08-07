@@ -36,8 +36,9 @@ Current UI contract:
 - Split: miners on the winning tile receive SOL and MYNE pro rata by deployed SOL.
 - Solo: SOL remains pro rata on the winning tile; one deployment-weighted miner receives MYNE.
 - Motherlode: currently shown as 1-in-650 per round. It is the SOL payment pool; each round also
-  accrues a 0.2 MYNE staking bonus. On a hit, the bonus is paid alongside the SOL reward to the
-  miners of that round, permanently burned, and added to each recipient's 5x staking weight.
+  accrues a 0.2 MYNE staking bonus. On a hit, both pools are shared by every participant in that
+  round pro rata by total SOL deployed. The MYNE share is permanently burned and added to each
+  recipient's 5x staking weight.
 
 Implemented Solana account design:
 
@@ -65,23 +66,31 @@ Local/devnet decisions:
    pool; Mainnet remains pool-gated.
 4. Unsettled receipts become fully refundable ten minutes after the normal settlement time.
 5. The 0.2 MYNE staking bonus is virtual until a Motherlode hit. It is never a liquid or claimable
-   token balance: when claimed alongside the SOL payment, it is permanently burned and becomes
-   non-transferable 5x staking weight for each miner receiving the shared Motherlode reward.
+   token balance: each round participant receives SOL and virtual-burn MYNE pro rata by total SOL
+   deployed, and that MYNE becomes non-transferable 5x staking weight.
 
 ## Mining fee
 
-The UI currently promises a 12% fee on deployed SOL:
+Protocol version 6 charges an exact 12% fee on deployed SOL:
 
 | Destination | Basis points | Share of deployment |
 | --- | ---: | ---: |
-| Staker SOL rewards | 800 | 8% |
-| MYNE buyback and burn | 200 | 2% |
+| Gross staking allocation | 800 | 8% |
+| Direct admin share of gross staking | (80) | (0.8%) |
+| **Net staker SOL rewards** | **720** | **7.2%** |
 | Motherlode | 200 | 2% |
+| MYNE buyback and burn | 100 | 1% |
+| Direct mining admin | 100 | 1% |
 | **Total** | **1,200** | **12%** |
 
-All arithmetic must use checked integer math. Allocation remainders stay in the round vault until
-settlement and are assigned by one documented dust rule; they must never become implicit operator
-revenue. There is no administration allocation.
+The parenthesized staking-admin row is a carve-out of the 800-basis-point gross staking allocation,
+not an additional fee. Ten percent of the rounded gross staking allocation is paid directly to the
+configured admin wallet; the remainder is indexed for stakers. The direct mining-admin leg is the
+exact total fee minus the independently rounded gross-staking, buyback and Motherlode legs, so it
+receives the nominal 1% plus any basis-point rounding dust. Consequently every lamport is explicit,
+the total charged fee remains exactly `floor(gross * 1,200 / 10,000)`, and total direct admin revenue
+is nominally 1.8% of round volume. Admin allocations are transferred at settlement and never require
+an admin claim.
 
 At settlement, the 2% Motherlode share moves from the round PDA into the program-owned config PDA
 and increments its tracked SOL balance. A funded winning round that hits the Motherlode atomically
@@ -108,11 +117,17 @@ escape hatch.
 - A MYNE claim charges 10%.
 - 9% is redistributed to remaining unclaimed MYNE balances.
 - 1% accrues to the claimant's permanent referrer; if no referrer is set, it is minted to
-  the configured admin-fee wallet.
+  the configured admin-fee wallet's pre-created canonical ATA in the same transaction. The admin
+  never submits a separate claim for this fallback fee.
 - Attribution is first-valid and permanent; self-referral and simple cycles are rejected.
 
-The scalable model is a global reward-per-unclaimed accumulator. Every miner checkpoints before
-their balance changes. This avoids iterating all unclaimed miners during a claim.
+The scalable implementation uses a global asset/share pool rather than an additive lazy reward
+index. Passive fees add MYNE liability without issuing new shares, so every existing unclaimed
+holder compounds pro rata. Later mining/referral credits receive shares at the current exchange
+rate and cannot capture earlier fees. A claim burns all of that miner's shares; integer remainder
+stays in the pool for the final holder, so sequential exits conserve the exact liability without
+iterating every miner. If no eligible holder exists, the 9% is tracked as permanently unissued and
+is never inherited by a future miner.
 
 The 10% fee is always charged, including when no referrer is set. This keeps the fee split
 deterministic and prevents an unlabelled referral share from silently inflating the passive pool.
@@ -121,9 +136,10 @@ deterministic and prevents an unlabelled referral share from silently inflating 
 
 - Standard stake: 1x reward weight; unstake request enters a 30-day queue.
 - Burn stake: token principal is burned permanently for 5x reward weight.
-- Rewards are SOL, funded by the 8% mining-deployment allocation.
-- The Motherlode staking bonus enters a 5x permanent burn-stake position for each winner; the
-  Motherlode SOL payment remains claimable.
+- Rewards are SOL, funded by the net 7.2% remaining from the 8% gross staking allocation after its
+  direct 0.8% admin share.
+- The Motherlode staking bonus enters a 5x permanent burn-stake position for every participant,
+  pro rata by total SOL deployed; the matching Motherlode SOL share remains claimable.
 
 Working accounts:
 
@@ -140,14 +156,19 @@ liquid SPL mint supply. They are always awarded with the Motherlode SOL payment.
 
 Meteora trading and any pool-trade fee are intentionally deferred. No buy/sell tax is collected by
 the MYNE program in this milestone. The current on-chain fee schedule is limited to mining rounds:
-8% to staking rewards, 2% to the Motherlode, and 2% to buyback and burn.
+8% gross staking (0.8% direct admin and 7.2% net stakers), 2% Motherlode, 1% buyback and burn, and
+1% direct admin.
 
 ## Randomness and settlement
 
 Recent blockhashes, timestamps and validator-controlled values are not acceptable randomness.
-Production pins Switchboard On-Demand. A randomness account must be committed to a future seed
-slot and bound before bids are accepted; reveal and settlement occur atomically, and settlement
-checks the exact owner, authority, account, seed slot, reveal slot and value.
+Production pins Switchboard On-Demand. The keeper creates and binds a fresh, uncommitted request
+before bids are accepted. Every manual deployment and Auto-round execution supplies that exact
+account, and the program rejects the deployment unless its seed slot, reveal slot and value are all
+still zero. Only after betting closes does one transaction execute Switchboard commit followed by
+`record_round_randomness_commit`. After the committed seed slot is available, one transaction
+executes reveal followed by verified settlement. Settlement checks the exact owner, authority,
+bound account, recorded seed slot, current reveal slot and value.
 
 Every request stores the round/roll identity before randomness exists. Fulfilment is one-shot.
 Settlement derives domain-separated values for tile, Split/Solo mode, Solo ticket and Motherlode

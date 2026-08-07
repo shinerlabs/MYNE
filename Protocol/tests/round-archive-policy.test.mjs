@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { archiveHash, buildArchiveSnapshot } from '../scripts/round-archive-policy.mjs';
+import {
+  archiveHash,
+  buildArchiveSnapshot,
+  requireRoundFeeAudit,
+} from '../scripts/round-archive-policy.mjs';
 
 const round = {
   round_id: 9,
@@ -19,6 +23,15 @@ const round = {
   pot_for_winners_wei: '880',
   bullion_for_winners_wei: '1000000000',
   payout_mul_wad: '2933333333333333333',
+  total_fee_lamports: '120',
+  staking_gross_lamports: '80',
+  staking_admin_lamports: '8',
+  staking_net_lamports: '72',
+  buyback_lamports: '10',
+  motherlode_fee_lamports: '20',
+  mining_admin_lamports: '10',
+  admin_total_lamports: '18',
+  admin_fee_wallet: 'admin',
   randomness_id: 'randomness',
   randomness_value: '12',
   randomness_hex: '0c',
@@ -68,4 +81,38 @@ test('archive proof changes when economic history changes', () => {
     program: 'program', round, bets: [{ ...bets[0], amount_wei: '201' }, bets[1]], settlements, buybacks,
   });
   assert.notEqual(archiveHash(first), archiveHash(changed));
+});
+
+test('archive proof commits every round fee destination', () => {
+  const first = buildArchiveSnapshot({ program: 'program', round, bets, settlements, buybacks });
+  const changed = buildArchiveSnapshot({
+    program: 'program',
+    round: { ...round, staking_net_lamports: '71', staking_admin_lamports: '9' },
+    bets,
+    settlements,
+    buybacks,
+  });
+  assert.equal(first.version, 2);
+  assert.notEqual(archiveHash(first), archiveHash(changed));
+});
+
+test('settled-round fee audit returns the indexed buyback allocation', () => {
+  const audit = requireRoundFeeAudit(round);
+  assert.equal(audit.buyback_lamports, 10n);
+  assert.equal(audit.admin_total_lamports, 18n);
+});
+
+test('settled-round fee audit rejects missing or non-conserving evidence', () => {
+  assert.throws(
+    () => requireRoundFeeAudit({ ...round, buyback_lamports: null }),
+    /missing buyback_lamports/,
+  );
+  assert.throws(
+    () => requireRoundFeeAudit({ ...round, admin_total_lamports: '17' }),
+    /administrator allocation/,
+  );
+  assert.throws(
+    () => requireRoundFeeAudit({ ...round, total_fee_lamports: '119' }),
+    /total mining fee/,
+  );
 });

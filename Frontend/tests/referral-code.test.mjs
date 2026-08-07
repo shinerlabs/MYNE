@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { Keypair } from '@solana/web3.js';
 
 import {
   REFERRAL_CODE_LENGTH, canonicalSolanaAddress, compactReferralLink,
   isReferralCode, referralCodeFor, referralLinkFor,
 } from '../src/chain/referral-code.js';
 
-const wallet = '7VHaD8JMcdLo3c9PC7xgLnACJyoT1S3kKDCJt4H5S6A4';
+const wallet = Keypair.fromSeed(Uint8Array.from({ length: 32 }, (_, index) => index + 1))
+  .publicKey.toBase58();
 
 test('social referral URLs use a compact deterministic Solana code', () => {
   const code = referralCodeFor(wallet);

@@ -7,12 +7,24 @@
  * canonical archive hash on-chain.
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import anchor from '@anchor-lang/core';
 import {
   ComputeBudgetProgram, PublicKey, Transaction, sendAndConfirmTransaction,
 } from '@solana/web3.js';
-import { archiveHash, buildArchiveSnapshot } from './round-archive-policy.mjs';
+import {
+  archiveHash,
+  buildArchiveSnapshot,
+  requireRoundFeeAudit,
+} from './round-archive-policy.mjs';
+import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
+import {
+  REFERRAL_PROJECTION_VERSION,
+  compactReferralCode,
+  minerRegistrationProjection,
+  myneClaimProjection,
+} from './referral-index-policy.mjs';
 
 const { AnchorProvider, EventParser, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -29,17 +41,25 @@ const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 assert.match(supabaseUrl, /^https:\/\//, 'SUPABASE_URL must use HTTPS');
 assert.ok(serviceRole, 'SUPABASE_SERVICE_ROLE_KEY is required and must remain server-side');
 
-const INDEXER_ID = `${PROGRAM_ID.toBase58()}:${provider.connection.rpcEndpoint}`;
+// RPC URLs commonly carry API keys. Persist only a stable digest as cursor
+// identity so service credentials never enter Supabase rows, backups or logs.
+const rpcIdentity = createHash('sha256')
+  .update(provider.connection.rpcEndpoint)
+  .digest('hex')
+  .slice(0, 24);
+const INDEXER_ID = `${PROGRAM_ID.toBase58()}:${rpcIdentity}`;
+const REFERRAL_INDEXER_ID = `${INDEXER_ID}:referrals:v${REFERRAL_PROJECTION_VERSION}`;
 const intervalMs = Number(process.env.ROUND_INDEXER_INTERVAL_MS || 3000);
 const startSlot = Number(process.env.ROUND_INDEXER_START_SLOT ?? -1);
+const referralStartSlot = Number(process.env.REFERRAL_INDEXER_START_SLOT ?? startSlot);
 const maxPages = Number(process.env.ROUND_INDEXER_MAX_PAGES || 100);
 const requireBuybackEvidence = process.env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE === '1';
 assert.ok(Number.isInteger(intervalMs) && intervalMs >= 1000, 'ROUND_INDEXER_INTERVAL_MS must be >= 1000');
+assert.ok(Number.isInteger(referralStartSlot), 'REFERRAL_INDEXER_START_SLOT must be an integer');
 assert.ok(Number.isInteger(maxPages) && maxPages > 0, 'ROUND_INDEXER_MAX_PAGES must be positive');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const asString = (value) => value?.toString?.() ?? String(value ?? 0);
-const referralCodeFor = (authority) => new PublicKey(authority).toBase58().slice(-10);
 const u64Seed = (value) => {
   const buffer = Buffer.alloc(8);
   buffer.writeBigUInt64LE(BigInt(asString(value)));
@@ -51,6 +71,20 @@ const receiptPda = (roundId, authority, nonce) => PublicKey.findProgramAddressSy
 const roundPda = (roundId) => PublicKey.findProgramAddressSync([
   Buffer.from('round'), u64Seed(roundId),
 ], PROGRAM_ID)[0];
+const configPda = PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID)[0];
+const indexedConfig = await program.account.protocolConfig.fetch(configPda);
+assert.equal(Number(indexedConfig.version), 6, 'Round indexer requires protocol fee schedule v6');
+const indexedNetwork = requireMatchingSolanaNetwork({
+  genesisHash: await provider.connection.getGenesisHash(),
+  randomnessProgram: indexedConfig.randomnessProgram.toBase58(),
+});
+if (indexedNetwork === 'mainnet-beta') {
+  assert.equal(
+    requireBuybackEvidence,
+    true,
+    'Mainnet indexer requires ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1',
+  );
+}
 
 async function rest(path, { method = 'GET', body, prefer } = {}) {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
@@ -161,7 +195,7 @@ async function processEvent(event, signature, slot) {
         // One exact indexed read resolves a short social referral code. Never scan program
         // accounts or wildcard-query the ever-growing bet ledger in production.
         await upsert('mine_referral_codes', {
-          code: referralCodeFor(authority), wallet_address: authority,
+          code: compactReferralCode(authority), wallet_address: authority,
         }, 'wallet_address');
       }
       break;
@@ -206,6 +240,24 @@ async function processEvent(event, signature, slot) {
         updated_slot: slot,
         updated_at: new Date().toISOString(),
       }, 'authority');
+      break;
+    }
+    case 'RoundFeesDistributed': {
+      const roundId = asString(data.roundId);
+      await ensureRound(roundId);
+      await upsert('mine_rounds', {
+        round_id: roundId,
+        total_fee_lamports: asString(data.totalFeeLamports),
+        staking_gross_lamports: asString(data.stakingGrossLamports),
+        staking_admin_lamports: asString(data.stakingAdminLamports),
+        staking_net_lamports: asString(data.stakingNetLamports),
+        buyback_lamports: asString(data.buybackLamports),
+        motherlode_fee_lamports: asString(data.motherlodeLamports),
+        mining_admin_lamports: asString(data.miningAdminLamports),
+        admin_total_lamports: asString(data.adminTotalLamports),
+        admin_fee_wallet: new PublicKey(data.adminFeeWallet).toBase58(),
+        updated_at: new Date().toISOString(),
+      }, 'round_id');
       break;
     }
     case 'RoundSettled': {
@@ -289,6 +341,7 @@ async function processEvent(event, signature, slot) {
       await upsert('mine_rounds', {
         round_id: asString(data.roundId),
         archive_hash: bytes(data.archiveHash).toString('hex'),
+        archive_verified: false,
         archive_slot: asString(data.slot),
         archived_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -306,12 +359,74 @@ async function processEvent(event, signature, slot) {
   }
 }
 
-async function state() {
-  const rows = await rest(`mine_indexer_state?id=eq.${encodeURIComponent(INDEXER_ID)}&select=*`);
+async function state(id = INDEXER_ID) {
+  const rows = await rest(`mine_indexer_state?id=eq.${encodeURIComponent(id)}&select=*`);
   return rows?.[0] ?? null;
 }
 
-async function signaturesSince(previous) {
+async function registeredReferrer(authority) {
+  const rows = await rest(
+    `mine_referral_miners_v1?authority=eq.${encodeURIComponent(authority)}&select=referrer&limit=1`,
+  );
+  return rows?.[0]?.referrer ?? null;
+}
+
+async function processReferralEvents(events, signature, slot) {
+  const pairedRoutes = new Set();
+  for (let eventIndex = 0; eventIndex < events.length; eventIndex += 1) {
+    const event = events[eventIndex];
+    if (event.name === 'MinerRegistered') {
+      const registration = minerRegistrationProjection({
+        data: event.data, signature, slot, eventIndex,
+      });
+      // The conflict target is the immutable event identity. A second registration event for the
+      // same authority fails the table's unique constraint instead of rewriting attribution.
+      await upsert(
+        'mine_referral_miners_v1',
+        registration,
+        'registration_signature,registration_event_index',
+      );
+      await upsert('mine_referral_codes', {
+        code: compactReferralCode(registration.authority),
+        wallet_address: registration.authority,
+      }, 'wallet_address');
+      continue;
+    }
+    if (event.name !== 'MyneClaimed') continue;
+
+    // v2 is a companion event rather than an in-place MyneClaimed layout change, preserving
+    // decoding of historical logs. It is emitted immediately after the stable claim event.
+    const next = events[eventIndex + 1];
+    const route = next?.name === 'ClaimFeeRoutedV2' ? next : null;
+    if (route) pairedRoutes.add(eventIndex + 1);
+    const claimant = new PublicKey(event.data.authority).toBase58();
+    const projection = myneClaimProjection({
+      data: event.data,
+      routingData: route?.data ?? null,
+      mappedReferrer: await registeredReferrer(claimant),
+      signature,
+      slot,
+      eventIndex,
+      routingEventIndex: route ? eventIndex + 1 : null,
+    });
+    await upsert(
+      'mine_referral_claims_v1',
+      projection,
+      'claim_signature,claim_event_index',
+    );
+  }
+
+  const orphanedRoute = events.findIndex(
+    (event, index) => event.name === 'ClaimFeeRoutedV2' && !pairedRoutes.has(index),
+  );
+  assert.equal(
+    orphanedRoute,
+    -1,
+    'ClaimFeeRoutedV2 must immediately follow the MyneClaimed event it audits',
+  );
+}
+
+async function signaturesSince(previous, minimumSlot = startSlot) {
   const gathered = [];
   let before;
   for (let page = 0; page < maxPages; page += 1) {
@@ -321,9 +436,9 @@ async function signaturesSince(previous) {
       ...(previous ? { until: previous } : {}),
     }, 'finalized');
     if (!rows.length) break;
-    gathered.push(...rows.filter((row) => row.err == null && (previous || row.slot >= startSlot)));
+    gathered.push(...rows.filter((row) => row.err == null && (previous || row.slot >= minimumSlot)));
     before = rows.at(-1).signature;
-    if (rows.length < 1000 || (!previous && rows.at(-1).slot < startSlot)) break;
+    if (rows.length < 1000 || (!previous && rows.at(-1).slot < minimumSlot)) break;
     assert.notEqual(page, maxPages - 1, 'Indexer page limit reached; raise ROUND_INDEXER_MAX_PAGES before continuing');
   }
   return gathered.reverse();
@@ -354,8 +469,42 @@ async function indexTransactions() {
   return rows.length;
 }
 
+/**
+ * Referral projection has its own versioned cursor so adding it to an already-running round
+ * indexer performs a finalized log backfill instead of starting at the round cursor's head.
+ * This scans transaction history only; it never performs full program-account enumeration.
+ */
+async function indexReferralTransactions() {
+  const cursor = await state(REFERRAL_INDEXER_ID);
+  if (!cursor) {
+    assert.ok(
+      referralStartSlot >= 0,
+      'Set REFERRAL_INDEXER_START_SLOT to the program deployment slot for the referral v1 backfill',
+    );
+  }
+  const rows = await signaturesSince(cursor?.newest_signature || null, referralStartSlot);
+  for (const row of rows) {
+    const transaction = await provider.connection.getTransaction(row.signature, {
+      commitment: 'finalized', maxSupportedTransactionVersion: 0,
+    });
+    assert.ok(
+      transaction?.meta?.logMessages,
+      `Finalized referral transaction ${row.signature} is temporarily unavailable; cursor not advanced`,
+    );
+    const events = [...parser.parseLogs(transaction.meta.logMessages)];
+    await processReferralEvents(events, row.signature, row.slot);
+    await upsert('mine_indexer_state', {
+      id: REFERRAL_INDEXER_ID,
+      newest_signature: row.signature,
+      newest_slot: row.slot,
+      updated_at: new Date().toISOString(),
+    }, 'id');
+  }
+  return rows.length;
+}
+
 async function archiveReadyRounds() {
-  const rounds = await rest('mine_rounds?archive_hash=is.null&select=*&order=round_id.asc&limit=20');
+  const rounds = await rest('mine_rounds?archive_verified=eq.false&closed_signature=is.null&select=*&order=round_id.asc&limit=20');
   let archived = 0;
   for (const round of rounds || []) {
     if (!round.resolved && (!round.refund_at || Number(round.refund_at) > Math.floor(Date.now() / 1000))) continue;
@@ -371,9 +520,15 @@ async function archiveReadyRounds() {
     const settlementCount = new Set((settlements || []).map((entry) => entry.receipt)).size;
     if (settlementCount !== chainReceiptCount) continue;
     if (state.settled && !state.buybackCompleted) continue;
+    // A settled v6 round is not archival-ready until its exact on-chain fee
+    // event has been indexed and the allocation conserves every lamport.
+    // Refund-only rounds never distribute fees and therefore skip this gate.
+    const feeAudit = state.settled ? requireRoundFeeAudit(round) : null;
     const buybacks = await rest(`mine_buyback_executions?round_id=eq.${round.round_id}&select=*&order=sequence.asc`);
     if (requireBuybackEvidence && state.settled) {
-      const allocation = (BigInt(state.grossDeployedLamports.toString()) * 200n) / 10_000n;
+      // Compare evidence to the amount emitted and indexed for this round. Do
+      // not duplicate a version-specific basis-point formula in the indexer.
+      const allocation = feeAudit.buyback_lamports;
       const evidenced = (buybacks || []).reduce(
         (sum, entry) => sum + BigInt(entry.spend_lamports), 0n,
       );
@@ -388,6 +543,14 @@ async function archiveReadyRounds() {
       program: PROGRAM_ID.toBase58(), round: indexedRound, bets, settlements, buybacks,
     });
     const snapshotHash = archiveHash(snapshot);
+    const existingProofs = await rest(`mine_round_proofs?round_id=eq.${round.round_id}&select=archive_hash`);
+    if (existingProofs?.length) {
+      assert.equal(
+        existingProofs[0].archive_hash,
+        snapshotHash,
+        `Stored archive proof for round ${round.round_id} disagrees with canonical history`,
+      );
+    }
     await upsert('mine_round_proofs', {
       round_id: round.round_id,
       archive_hash: snapshotHash,
@@ -397,7 +560,8 @@ async function archiveReadyRounds() {
       randomness_hex: round.randomness_hex,
       settlement_signature: round.settlement_signature,
     }, 'round_id');
-    if (Number(state.archivedAtSlot.toString()) === 0) {
+    let attestedState = state;
+    if (Number(attestedState.archivedAtSlot.toString()) === 0) {
       const instruction = await program.methods.archiveRound([...Buffer.from(snapshotHash, 'hex')]).accounts({
         config: PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID)[0],
         round: address,
@@ -407,11 +571,18 @@ async function archiveReadyRounds() {
       await rest(`mine_round_proofs?round_id=eq.${round.round_id}`, {
         method: 'PATCH', body: { archived_signature: signature }, prefer: 'return=minimal',
       });
+      attestedState = await program.account.round.fetch(address);
     }
+    assert.equal(
+      Buffer.from(attestedState.archiveHash).toString('hex'),
+      snapshotHash,
+      `On-chain archive hash for round ${round.round_id} disagrees with canonical history`,
+    );
     await rest(`mine_rounds?round_id=eq.${round.round_id}`, {
       method: 'PATCH',
       body: {
         archive_hash: snapshotHash,
+        archive_verified: true,
         total_receipts: chainReceiptCount,
         processed_receipts: Number(state.processedReceipts.toString()),
         buyback_completed: Boolean(state.buybackCompleted),
@@ -428,7 +599,8 @@ async function archiveReadyRounds() {
 export async function indexerTick() {
   const indexed = await indexTransactions();
   const archived = await archiveReadyRounds();
-  return { indexed, archived };
+  const referralsIndexed = await indexReferralTransactions();
+  return { indexed, archived, referralsIndexed };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

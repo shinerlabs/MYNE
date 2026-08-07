@@ -239,7 +239,7 @@ body[data-route]:not([data-route="home"]) :is(
 }
 
 /* Small neutral identity surfaces use the same dark grey everywhere. */
-img[src="/gld-icon-transparent.png"],
+img[src="/myne-mark-ui.png"],
 body[data-route="mine"] .round-miner-avatar,
 .chat-avatar {
   background-color: var(--surface-icon) !important;
@@ -356,6 +356,7 @@ body[data-route="mine"] .reward-action.is-busy::after {
 /* USDC is the alternate display unit for Mine. Bids remain canonical SOL amounts; these marks
    label the equivalent quote only and never enter transaction construction. */
 body[data-route="mine"] .usdc-icon {
+  content: url('/usdc.png');
   display: inline-block;
   width: 16px;
   height: 16px;
@@ -368,39 +369,304 @@ body[data-route="mine"] .usdc-icon {
 body[data-route="mine"] .mine-currency-toggle > b {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-
-body[data-route="mine"] .mine-currency-toggle .toggle-usdc,
-body[data-route="mine"] .quick-amounts .quick-usdc {
-  width: 12px;
-  height: 12px;
-  flex-basis: 12px;
-}
-
-body[data-route="mine"] .quick-amounts button:has(.quick-usdc) {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 0;
+}
+
+/* The switch labels the two display modes in text. A second token mark inside this compact
+   control made USDC look like a payment asset rather than a quote denomination. */
+body[data-route="mine"] .mine-currency-toggle .toggle-usdc {
+  display: none !important;
 }
 
 body.mine-display-usd[data-route="mine"] .mine-currency-value[data-usd]::after {
   padding-left: 1.25em;
-  background: url('/usdc-mark.svg') no-repeat left center / .9em .9em;
+  background: url('/usdc.png') no-repeat left center / .9em .9em;
 }
 
-body[data-route="mine"] .round-summary .deployed-usd-value,
-body[data-route="mine"] .round-summary .motherlode-eth-usd {
+/* The active toggle already establishes USDC as the unit. Keep the 25 mining tiles and quick-buy
+   controls typographic so the repeated blue mark does not compete with tile and selection states. */
+body.mine-display-usd[data-route="mine"] .slot .mine-currency-value[data-usd]::after {
+  padding-left: 0;
+  background: none;
+}
+
+/* The amount field carries one stable mark slot. Only the visible mark and number change; its
+   canonical value remains SOL before any transaction is built. */
+html body[data-route="mine"] .deploy-panel > .amount-display {
+  grid-template-columns: 18px minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+}
+
+html body[data-route="mine"] .deploy-panel > .amount-display :is(.amount-eth, .amount-usd-mark) {
+  display: block !important;
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  align-self: center !important;
+  justify-self: center !important;
+  width: 18px !important;
+  height: auto !important;
+  margin: 0 !important;
+}
+
+html body[data-route="mine"] .deploy-panel > .amount-display input {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  align-self: center !important;
+}
+
+html body[data-route="mine"] .deploy-panel > .amount-display .amount-usd-mark {
+  display: none !important;
+}
+
+html body.mine-display-usd[data-route="mine"] .deploy-panel > .amount-display {
+  grid-template-columns: 18px minmax(0, 1fr) !important;
+}
+
+html body.mine-display-usd[data-route="mine"] .deploy-panel > .amount-display .amount-eth {
+  display: none !important;
+}
+
+html body.mine-display-usd[data-route="mine"] .deploy-panel > .amount-display input {
+  grid-column: 2 !important;
+}
+
+html body.mine-display-usd[data-route="mine"] .deploy-panel > .amount-display .amount-usd-mark {
+  display: block !important;
+}
+
+/* One centered value group per summary card. Earlier CSS simultaneously painted a generated
+   USDC overlay and retained the injected USDC peer, which separated the icon from Deployed and
+   collapsed the Motherlode number into its mark. These rules make each denomination a single
+   flex row and keep the alternate peer out of layout until it is selected. */
+html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > :is(.deployed-token-value, .deployed-usd-value) {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+  width: max-content !important;
+  max-width: 100% !important;
+  height: var(--summary-headline-row) !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  align-self: center !important;
+  justify-self: center !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 6px;
+  gap: clamp(5px, 1.2cqw, 8px) !important;
+  color: #fff !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  filter: none !important;
+  white-space: nowrap !important;
 }
 
-body[data-route="mine"] .round-summary .summary-usdc {
+html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-token-value::after {
+  content: none !important;
+  display: none !important;
+  padding: 0 !important;
+  background: none !important;
+}
+
+html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-token-value > * {
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-usd-value > span,
+html body[data-route="mine"] .round-summary.motherlode-inline .motherlode-eth-usd > .motherlode-usdc-value {
+  color: inherit !important;
+  font: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  letter-spacing: inherit !important;
+  line-height: inherit !important;
+  white-space: nowrap !important;
+}
+
+html body:not(.mine-display-usd)[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-usd-value,
+html body.mine-display-usd[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-token-value.deployed-token-value.deployed-token-value {
+  display: none !important;
+}
+
+html body:not(.mine-display-usd)[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-token-value,
+html body.mine-display-usd[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-usd-value {
+  display: flex !important;
+}
+
+html body[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat > .motherlode-secondary {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: clamp(5px, 1.2cqw, 8px) !important;
+}
+
+html body[data-route="mine"] .round-summary.motherlode-inline .motherlode-eth-usd {
+  align-items: center !important;
+  justify-content: center !important;
+  gap: clamp(5px, 1.2cqw, 8px) !important;
+  width: max-content !important;
+  max-width: 100% !important;
+  color: #fff !important;
+  font: inherit !important;
+  white-space: nowrap !important;
+}
+
+html body[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat > .motherlode-secondary > .motherlode-eth-usd {
+  display: none !important;
+}
+
+html body.mine-display-usd[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat > .motherlode-secondary > :is(.motherlode-eth, .motherlode-eth-value, b) {
+  display: none !important;
+}
+
+html body.mine-display-usd[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat > .motherlode-secondary > .motherlode-eth-usd {
+  display: inline-flex !important;
+}
+
+html body:not(.mine-display-usd)[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat > .motherlode-secondary > :is(.motherlode-eth, .motherlode-eth-value) {
+  display: inline-block !important;
+}
+
+html body[data-route="mine"] .round-summary .summary-usdc {
   width: .72em;
   height: .72em;
   flex-basis: .72em;
+  flex-grow: 0;
+  flex-shrink: 0;
+}
+
+@media (hover: hover) {
+  /* Hover can reveal the inverse quote in the descriptor, but must never replace or move the
+     selected Deployed headline. The SOL/USDC switch is the only denomination control. */
+  html body:not(.mine-display-usd)[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat:is(:hover, :focus-visible) > .deployed-token-value,
+  html body.mine-display-usd[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat:is(:hover, :focus-visible) > .deployed-usd-value {
+    display: flex !important;
+  }
+
+  html body:not(.mine-display-usd)[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat:is(:hover, :focus-visible) > .deployed-usd-value,
+  html body.mine-display-usd[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat:is(:hover, :focus-visible) > .deployed-token-value.deployed-token-value.deployed-token-value {
+    display: none !important;
+  }
+
+  /* Motherlode hover changes only its descriptor; preserve the selected headline currency. */
+  html body:not(.mine-display-usd)[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat:is(:hover, :focus-visible) > .motherlode-secondary > :is(.motherlode-eth, .motherlode-eth-value) {
+    display: inline-block !important;
+  }
+
+  html body:not(.mine-display-usd)[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat:is(:hover, :focus-visible) > .motherlode-secondary > .motherlode-eth-usd {
+    display: none !important;
+  }
+
+  html body.mine-display-usd[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat:is(:hover, :focus-visible) > .motherlode-secondary > :is(.motherlode-eth, .motherlode-eth-value, b) {
+    display: none !important;
+  }
+
+  html body.mine-display-usd[data-route="mine"] .round-summary.motherlode-inline > .motherlode-stat:is(:hover, :focus-visible) > .motherlode-secondary > .motherlode-eth-usd {
+    display: inline-flex !important;
+  }
+}
+
+/* SOL and USDC use identical mark boxes in every denomination-sensitive readout. */
+html body[data-route="mine"] .round-summary .deployed-stat :is(.summary-eth, .summary-usdc) {
+  width: 19px !important;
+  height: auto !important;
+  flex: 0 0 19px !important;
+}
+
+html body[data-route="mine"] .round-summary .motherlode-secondary :is(.motherlode-eth, .summary-usdc) {
+  width: 18px !important;
+  height: auto !important;
+  flex: 0 0 18px !important;
+}
+
+/* Deployed always keeps its selected denomination in the headline and the inverse quote beneath.
+   This is real text (not a hover-only generated value), so it is available to touch and keyboard
+   users and does not shift when the pointer crosses the card. */
+html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-token-label {
+  display: block !important;
+  grid-column: 1 !important;
+  grid-row: 3 !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  color: #8f9198 !important;
+  font-family: var(--font-number) !important;
+  font-size: 9px !important;
+  font-weight: 650 !important;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em !important;
+  line-height: 1 !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  filter: none !important;
+  white-space: nowrap !important;
+}
+
+@media (hover: hover) {
+  html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat:is(:hover, :focus-visible) > span {
+    font-size: 9px !important;
+    letter-spacing: .15em !important;
+  }
+
+  html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat:is(:hover, :focus-visible) > span::after {
+    content: none !important;
+    display: none !important;
+  }
+}
+
+/* The switch is text-only: selected is white, unselected is grey. */
+html body[data-route="mine"] .mine-currency-toggle > span,
+html body[data-route="mine"] .mine-currency-toggle > b,
+html body[data-route="mine"] .mine-currency-toggle > b > span {
+  color: #74777e !important;
+}
+
+html body[data-route="mine"] .mine-currency-toggle:not(.active) > span,
+html body[data-route="mine"] .mine-currency-toggle.active > b,
+html body[data-route="mine"] .mine-currency-toggle.active > b > span {
+  color: #fff !important;
+}
+
+/* Total deployment has no hover conversion. It reuses a fixed mark/value/unit row in both modes. */
+html body[data-route="mine"] .mine-total-value {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 5px !important;
+  min-width: 0 !important;
+  color: #f0f0f0 !important;
+  font: inherit !important;
+  white-space: nowrap !important;
+}
+
+html body[data-route="mine"] .mine-total-mark {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+}
+
+html body[data-route="mine"] .mine-total-mark > img {
+  grid-area: 1 / 1;
+  width: 13px !important;
+  height: auto !important;
+  margin: 0 !important;
+}
+
+html body[data-route="mine"] .mine-total-mark > .mine-usdc-mark,
+html body.mine-display-usd[data-route="mine"] .mine-total-mark > .mine-sol-mark {
+  display: none !important;
+}
+
+html body.mine-display-usd[data-route="mine"] .mine-total-mark > .mine-usdc-mark {
+  display: block !important;
+}
+
+html body[data-route="mine"] .mine-total-unit {
+  color: inherit !important;
+  font: inherit !important;
+  letter-spacing: inherit !important;
 }
 
 @media (max-width: 420px) {

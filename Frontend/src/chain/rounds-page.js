@@ -2,6 +2,7 @@ import { readRoundsRange, readWinnerCounts, readMyClaimStatus, readExpectedRewar
 import { settledSolReward } from './round-rewards.js';
 import { roundIdAt, roundEnd } from './round.js';
 import { loadIndexedRounds, loadSettledRounds } from './rounds-index.js';
+import { NETWORK } from '../app-config.js';
 
 /**
  * Real round history for the Rounds page — the FULL history, paginated.
@@ -47,7 +48,7 @@ const matchesFilter = (r, filter) => filter === 'all'
  * Every unclaimed win across all history, for the claimable panel + claim-all.
  *
  * Amounts are PER-USER (this account's share), NOT the round's total pot:
- * SOL = prize * winning-tile stake / winning-tile total, BULLION = getExpectedReward
+ * SOL = prize * winning-tile stake / winning-tile total, MYNE = getExpectedReward
  * (handles solo/split). Calculate SOL directly from the settled integers instead of the
  * display/index multiplier: payoutMulWad is a truncated convenience value and can lose lamports
  * when multiplied a second time.
@@ -63,13 +64,13 @@ async function buildClaimable(settled, mine, account) {
       })
     : [];
   if (!base.length) return [];
-  // getExpectedReward gives each round's per-user BULLION; winner counts let the UI explain a
+  // getExpectedReward gives each round's per-user MYNE; winner counts let the UI explain a
   // split ("your share of N winners") vs a solo win. Both only for the claimable set.
   const [expected, claimCounts, resolveIndex] = await Promise.all([
     readExpectedRewards(base, account),
     readWinnerCounts(base),
-    // Needed to value the passive MYNE these rounds have accrued since they resolved — see
-    // `passiveOnRounds`. Without it a never-claimed account shows 0.000 passive forever.
+    // Retained for the shared row shape. V6 does not back-date unsettled
+    // receipt rewards into historical passive distributions.
     readRoundIndexAtResolve(base),
   ]);
   return base.map((r) => {
@@ -148,6 +149,13 @@ export async function loadRoundHistory({ page = 0, pageSize = ROUND_PAGE_SIZE, a
       summary: indexed.summary,
       claimable,
     };
+  }
+
+  // Production history is intentionally index-backed. Falling through would issue an ever-growing
+  // sequence of round PDA reads and then a program-wide receipt scan; an index outage must degrade
+  // visibly, not turn every visitor into an unbounded public-RPC crawler.
+  if (NETWORK.cluster === 'mainnet-beta') {
+    throw new Error('Production round index is unavailable; on-chain account scans are disabled');
   }
 
   if (stale) {

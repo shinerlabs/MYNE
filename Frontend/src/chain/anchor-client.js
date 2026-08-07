@@ -1,10 +1,12 @@
 import { AnchorProvider, BN, BorshAccountsCoder, Program } from '@anchor-lang/core';
 import { ComputeBudgetProgram, PublicKey, Transaction } from '@solana/web3.js';
 
-import idl from '../generated/myne_protocol.json';
+import idl from '../generated/myne_protocol.json' with { type: 'json' };
 import { PROGRAMS } from '../app-config.js';
 import { NETWORK } from '../app-config.js';
-import { connection } from './client.js';
+import {
+  assertConfiguredCluster, connection, getAccount, getProvider,
+} from './client.js';
 import { capabilitiesFromIdl } from './protocol-capabilities.js';
 
 const PROGRAM_ID = PROGRAMS.protocol ? new PublicKey(PROGRAMS.protocol) : null;
@@ -68,6 +70,7 @@ function assertDeploymentMatchesConfig(config) {
 }
 
 export async function fetchProtocolAccount(name, address) {
+  await assertConfiguredCluster();
   const info = await connection.getAccountInfo(address, 'confirmed');
   if (!info) return null;
   return decodeProtocolAccount(name, info.data);
@@ -98,7 +101,6 @@ export const invalidateProtocolConfig = () => {
 };
 
 async function walletAdapter() {
-  const { getAccount, getProvider } = await import('./client.js');
   const provider = getProvider();
   const account = getAccount();
   if (!provider || !account) throw new Error('Connect a Solana wallet first');
@@ -113,6 +115,9 @@ async function walletAdapter() {
 }
 
 export async function getWritableProgram() {
+  // Verify the ledger before even asking the wallet for an account or signature. The successful
+  // genesis attestation is immutable and cached, so this adds only one RPC call per page load.
+  await assertConfiguredCluster();
   const wallet = await walletAdapter();
   const provider = new AnchorProvider(connection, wallet, { commitment: 'confirmed', preflightCommitment: 'confirmed' });
   return { program: new Program(idl, provider), provider, wallet };
@@ -120,23 +125,30 @@ export async function getWritableProgram() {
 
 export async function sendInstructions(instructions) {
   const { wallet } = await getWritableProgram();
-  const latest = await connection.getLatestBlockhash('confirmed');
+  if (!Array.isArray(instructions) || instructions.length === 0) throw new Error('Transaction has no instructions');
+  const { context, value: latest } = await connection.getLatestBlockhashAndContext('confirmed');
   const simulationTransaction = new Transaction({ feePayer: wallet.publicKey, ...latest }).add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
     ...instructions,
   );
   const simulation = await connection.simulateTransaction(simulationTransaction, {
     sigVerify: false,
+    commitment: 'confirmed',
+    minContextSlot: context.slot,
   });
   if (simulation.value.err) {
-    throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
+    const programMessage = [...(simulation.value.logs || [])].reverse()
+      .find((line) => /Program log: (Error|AnchorError)|custom program error/i.test(line));
+    throw new Error(programMessage
+      ? `Transaction simulation failed: ${programMessage.replace(/^Program log:\s*/, '')}`
+      : `Transaction simulation failed: ${JSON.stringify(simulation.value.err)}`);
   }
   const measuredUnits = Number(simulation.value.unitsConsumed || 200_000);
   const computeUnits = Math.min(1_400_000, Math.max(50_000, Math.ceil(measuredUnits * 1.1)));
-  const priorityMicrolamports = Math.max(0, Math.min(
-    1_000_000,
-    Number(import.meta.env?.VITE_PRIORITY_FEE_MICROLAMPORTS || 0),
-  ));
+  const configuredPriorityFee = Number(import.meta.env?.VITE_PRIORITY_FEE_MICROLAMPORTS || 0);
+  const priorityMicrolamports = Number.isFinite(configuredPriorityFee)
+    ? Math.max(0, Math.min(1_000_000, Math.floor(configuredPriorityFee)))
+    : 0;
   const transaction = new Transaction({ feePayer: wallet.publicKey, ...latest }).add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }),
     ...(priorityMicrolamports > 0
@@ -146,15 +158,27 @@ export async function sendInstructions(instructions) {
   );
   let signature;
   if (wallet.provider.signAndSendTransaction) {
-    const result = await wallet.provider.signAndSendTransaction(transaction);
+    const result = await wallet.provider.signAndSendTransaction(transaction, {
+      preflightCommitment: 'confirmed', minContextSlot: context.slot, maxRetries: 3,
+    });
     signature = typeof result === 'string' ? result : result.signature;
   } else {
     const signed = await wallet.signTransaction(transaction);
-    signature = await connection.sendRawTransaction(signed.serialize());
+    signature = await connection.sendRawTransaction(signed.serialize(), {
+      preflightCommitment: 'confirmed', minContextSlot: context.slot, maxRetries: 3,
+    });
   }
+  if (!signature) throw new Error('Wallet did not return a transaction signature');
   const confirmation = await connection.confirmTransaction({ signature, ...latest }, 'confirmed');
   if (confirmation.value.err) {
-    throw new Error(`Transaction failed after submission: ${JSON.stringify(confirmation.value.err)}`);
+    const transactionDetails = await connection.getTransaction(signature, {
+      commitment: 'confirmed', maxSupportedTransactionVersion: 0,
+    }).catch(() => null);
+    const programMessage = [...(transactionDetails?.meta?.logMessages || [])].reverse()
+      .find((line) => /Program log: (Error|AnchorError)|custom program error/i.test(line));
+    throw new Error(programMessage
+      ? `Transaction failed after submission: ${programMessage.replace(/^Program log:\s*/, '')}`
+      : `Transaction failed after submission: ${JSON.stringify(confirmation.value.err)}`);
   }
   return signature;
 }
@@ -163,6 +187,8 @@ export async function readProtocolStatus() {
   if (!PROGRAM_ID) {
     return { connected: false, reason: 'VITE_MYNE_PROGRAM_ID is not configured', capabilities: protocolCapabilities };
   }
+
+  const { genesisHash } = await assertConfiguredCluster();
 
   const configPda = deriveProtocolConfigPda();
   const [slot, programAccount, configAccount] = await Promise.all([
@@ -183,6 +209,7 @@ export async function readProtocolStatus() {
   assertDeploymentMatchesConfig(config);
   return {
     connected: true,
+    genesisHash,
     slot,
     programId: PROGRAM_ID,
     configPda,

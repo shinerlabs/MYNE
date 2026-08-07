@@ -22,6 +22,12 @@ const provider = AnchorProvider.env();
 setProvider(provider);
 const payer = provider.wallet.payer;
 assert.ok(payer, 'A file-backed payer is required');
+const genesisHash = await provider.connection.getGenesisHash();
+assert.equal(
+  process.env.CONFIRM_SOLANA_GENESIS_HASH,
+  genesisHash,
+  `Set CONFIRM_SOLANA_GENESIS_HASH=${genesisHash} after independently checking the RPC cluster`,
+);
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const program = new Program(idl, provider);
 const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], PROGRAM_ID);

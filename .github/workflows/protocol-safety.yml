@@ -1,0 +1,75 @@
+name: Protocol safety
+
+on:
+  pull_request:
+    paths:
+      - 'Protocol/**'
+      - 'supabase/migrations/**'
+      - '.github/workflows/protocol-safety.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Protocol/**'
+      - 'supabase/migrations/**'
+      - '.github/workflows/protocol-safety.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-safety-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  keeper-policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: Protocol
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: Protocol/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm test:dependency-safety
+      - run: pnpm test:buyback-policy
+      - run: pnpm test:archive-policy
+      - run: pnpm test:indexed-rpc-policy
+      - run: pnpm test:production-network-policy
+      - run: pnpm test:production-lifecycle-policy
+      - run: pnpm test:switchboard-round-policy
+      - run: bash -n scripts/*.sh
+
+  rust-safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Protocol
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify pinned Rust toolchain
+        run: |
+          test "$(rustc --version | awk '{print $2}')" = "1.97.1"
+          rustc --version --verbose
+          cargo --version
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        with:
+          workspaces: Protocol
+      - run: cargo fmt --all -- --check
+      - run: cargo check --workspace --all-targets --locked
+      - run: cargo check --workspace --all-targets --locked --features production
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: cargo test --workspace --locked --features production

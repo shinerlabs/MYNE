@@ -2,6 +2,22 @@ import assert from 'node:assert/strict';
 
 export const NATIVE_SOL_MINT = 'So11111111111111111111111111111111111111112';
 export const METEORA_DLMM_LABEL = 'Meteora DLMM';
+export const OFFICIAL_JUPITER_HOSTS = Object.freeze(['lite-api.jup.ag', 'api.jup.ag']);
+
+export function validateJupiterEndpoint(value, { expectedPath, allowCustom = false } = {}) {
+  const endpoint = new URL(value);
+  assert.equal(endpoint.protocol, 'https:', 'Jupiter endpoint must use HTTPS');
+  assert.equal(endpoint.username, '', 'Jupiter endpoint must not contain URL credentials');
+  assert.equal(endpoint.password, '', 'Jupiter endpoint must not contain URL credentials');
+  assert.equal(endpoint.search, '', 'Configure a Jupiter endpoint without query parameters');
+  assert.equal(endpoint.hash, '', 'Configure a Jupiter endpoint without a fragment');
+  assert.equal(endpoint.pathname, expectedPath, `Jupiter endpoint path must be ${expectedPath}`);
+  assert.ok(
+    OFFICIAL_JUPITER_HOSTS.includes(endpoint.hostname) || allowCustom,
+    `Unapproved Jupiter endpoint host: ${endpoint.hostname}`,
+  );
+  return endpoint.toString();
+}
 
 export function calculateSpend({ balanceLamports, reserveLamports, maxSpendLamports, minimumLamports }) {
   const spendLamports = Math.min(maxSpendLamports, Math.max(0, balanceLamports - reserveLamports));

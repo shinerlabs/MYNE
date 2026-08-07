@@ -29,6 +29,7 @@ export const MYNE_INSTRUCTIONS = Object.freeze({
   registerMiner: 'register_miner',
   openRound: 'open_round',
   bindRoundRandomness: 'bind_round_randomness',
+  recordRoundRandomnessCommit: 'record_round_randomness_commit',
   deployMining: 'deploy',
   settleRound: 'settle_round',
   settleRoundVerified: 'settle_round_verified',
@@ -74,6 +75,6 @@ export function deploymentStatus() {
   if (!deployment.programId) missing.push('VITE_MYNE_PROGRAM_ID');
   if (!deployment.mint) missing.push('VITE_MYNE_MINT_ADDRESS');
   if (!deployment.randomnessProgramId) missing.push('VITE_MYNE_RANDOMNESS_PROGRAM_ID');
-  if (!deployment.indexerUrl) missing.push('VITE_MYNE_INDEXER_URL');
+  if (!deployment.indexerUrl) missing.push('VITE_SUPABASE_URL');
   return { ready: missing.length === 0, missing, ...deployment };
 }

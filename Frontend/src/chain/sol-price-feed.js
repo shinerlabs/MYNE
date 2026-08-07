@@ -31,10 +31,10 @@ export function parseSolPrice(source, body, now = Date.now()) {
   return null;
 }
 
-/** Prefer the site's cached endpoint; public providers are local/dev and outage fallbacks. */
+/** Prefer a configured cached endpoint; otherwise use the public providers directly. */
 export async function fetchSolPrice(backendUrl, fetchImpl = fetch) {
   const sources = [
-    ['backend', backendUrl],
+    ...(backendUrl ? [['backend', backendUrl]] : []),
     ['coingecko', COINGECKO_URL],
     ['kraken', KRAKEN_URL],
   ];

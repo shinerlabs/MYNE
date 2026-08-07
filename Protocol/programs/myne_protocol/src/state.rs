@@ -7,8 +7,14 @@ pub const REWARD_SCALE: u128 = 1_000_000_000_000_000_000;
 #[derive(InitSpace)]
 pub struct MiningPool {
     pub bump: u8,
+    /// Exact MYNE base-unit liability represented by all outstanding shares.
     pub total_unclaimed: u64,
+    /// v6: total outstanding unclaimed-reward shares. This field retains its
+    /// original name to preserve the binary account layout across migration.
     pub reward_per_unclaimed: u128,
+    /// Passive claim fees assessed when no eligible unclaimed holder exists.
+    /// These base units remain permanently unissued and never accrue to a
+    /// future miner.
     pub undistributed_base_units: u64,
 }
 
@@ -32,7 +38,10 @@ pub struct Miner {
     pub bump: u8,
     pub authority: Pubkey,
     pub referrer: Pubkey,
+    /// Cached share value, refreshed whenever this miner touches the program.
     pub unclaimed_myne: u64,
+    /// v6: this miner's unclaimed-reward shares. The legacy field name keeps
+    /// the account layout stable; v5 pools must be empty before migration.
     pub passive_reward_debt: u128,
     pub lifetime_deployed_lamports: u64,
     pub lifetime_sol_claimed: u64,

@@ -3,16 +3,16 @@ import { formatEther } from '../chain/units.js';
 import { readMiner } from '../chain/lottery.js';
 import { readStaking } from '../chain/staking.js';
 import {
-  supabase, REMOTE_SUPABASE_URL, SUPABASE_URL, FUNCTIONS_URL, ROUNDS_API, shortWallet,
+  supabase, REMOTE_SUPABASE_URL, SUPABASE_URL, FUNCTIONS_URL, shortWallet,
 } from './config.js';
-import { getSession, authedFetchJson } from './session.js';
+import { authedFetchJson } from './session.js';
 
 /**
  * Profiles: the hover card, follows, and the profile editor.
  *
  * The card merges two sources that are deliberately kept apart:
  *   - social stats (message count) from Supabase
- *   - on-chain stats (BULLION / STAKED / MINED) read straight from the contracts
+ *   - on-chain stats (MYNE / STAKED / MINED) read straight from the program
  *
  * The chain is authoritative for balances; Supabase never stores them. A stale
  * or hostile row in `profiles` therefore cannot misreport anyone's holdings.
@@ -26,18 +26,29 @@ export const getMyProfile = () => myProfile;
 export const getFollowingSet = () => followingSet;
 
 /**
- * Bio has no column until migration 0003, so Supabase always returns undefined
- * for it. Fall back to the backend, which stores it meanwhile. Returns null
- * rather than throwing — a missing bio must never blank the rest of the card.
+ * Public profile data comes from the schema checked into supabase/migrations. Do not route it
+ * through the retired Express compatibility service: production hosting has no /rounds/api.
  */
 async function fetchStoredBio(wallet) {
+  return (await loadPublicProfile(wallet))?.bio ?? null;
+}
+
+export async function loadPublicProfile(wallet) {
+  if (!wallet || !supabase) return null;
   try {
-    const res = await fetch(`${ROUNDS_API}/profile/${wallet}`, { cache: 'no-store' });
-    if (!res.ok) return null;
-    return (await res.json()).bio ?? null;
-  } catch {
-    return null;
-  }
+    const { data, error } = await supabase.from('profiles')
+      .select('wallet_address,display_name,avatar_url,bio,banned')
+      .eq('wallet_address', String(wallet))
+      .maybeSingle();
+    if (error || !data) return null;
+    return {
+      walletAddress: data.wallet_address,
+      displayName: data.display_name,
+      avatarUrl: data.avatar_url,
+      bio: data.bio,
+      banned: Boolean(data.banned),
+    };
+  } catch { return null; }
 }
 
 export const profileDisplayName = () => {
@@ -48,29 +59,70 @@ export const profileDisplayName = () => {
 
 // ----------------------------------------------------------------- avatars
 /**
- * An avatar may be a Supabase storage path, a backend URL (`/api/avatars/0x…`),
- * or missing — in which case we still probe the backend by wallet, since most
- * pictures currently exist only there (migration 0003 is not applied yet).
+ * An avatar may be a Supabase storage path, a data URL saved by the authenticated Edge Function,
+ * or missing. Missing avatars use the deterministic generated identity below.
  */
 export const avatarPublicUrl = (path, wallet) => {
   if (path) {
-    if (path.startsWith('data:image/')) return path;
-    if (path.startsWith('http://') || path.startsWith('https://')) return path;
-    if (path.startsWith('/api/avatars/')) return `/rounds${path}`;
-    if (path.startsWith('/')) return path;
+    // Profile fields are attacker-controlled public data. Only accept the raster formats produced
+    // by the editor, with an actual base64 payload, and never load insecure remote URLs.
+    if (path.length <= 250_000
+      && /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/]+={0,2}$/i.test(path)) return path;
+    if (path.startsWith('https://')) return path;
+    if (/^\/(?!\/)/.test(path)) return path;
     // Storage objects come from the hosted project (public bucket). Use the
     // remote URL so <img> never depends on the dev-only /supabase proxy.
     const storageBase = (REMOTE_SUPABASE_URL || SUPABASE_URL || '').replace(/\/$/, '');
     return `${storageBase}/storage/v1/object/public/${path}`;
-  }
-  if (wallet && /^0x[0-9a-fA-F]{40}$/.test(wallet)) {
-    return `/rounds/api/avatars/${wallet.toLowerCase()}`;
   }
   return null;
 };
 
 const initialsFor = (name) =>
   (name || '0x').replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase() || '0X';
+
+const AVATAR_SPECTRUM = ['#ffe66d', '#45e6ff', '#7668ff', '#ff4fd8', '#ffffff'];
+
+/**
+ * Produce a stable, wallet-specific variation of the MYNE spectrum.
+ *
+ * This deliberately uses a deterministic hash rather than Math.random(): two messages from the
+ * same wallet must never look like different people, and the identity should survive refreshes
+ * without storing another profile field. Display names are used only for legacy guest rows that
+ * predate wallet-authenticated chat.
+ */
+const generatedAvatarTheme = (wallet, name) => {
+  const identity = String(wallet || name || 'MYNE');
+  let seed = 2166136261;
+  for (let index = 0; index < identity.length; index += 1) {
+    seed ^= identity.charCodeAt(index);
+    seed = Math.imul(seed, 16777619);
+  }
+  seed >>>= 0;
+
+  const first = seed % AVATAR_SPECTRUM.length;
+  const second = (first + 1 + ((seed >>> 5) % (AVATAR_SPECTRUM.length - 1))) % AVATAR_SPECTRUM.length;
+  let third = (second + 1 + ((seed >>> 11) % (AVATAR_SPECTRUM.length - 1))) % AVATAR_SPECTRUM.length;
+  if (third === first) third = (third + 1) % AVATAR_SPECTRUM.length;
+
+  return {
+    angle: `${105 + (seed % 91)}deg`,
+    start: AVATAR_SPECTRUM[first],
+    middle: AVATAR_SPECTRUM[second],
+    end: AVATAR_SPECTRUM[third],
+  };
+};
+
+const applyGeneratedAvatar = (element, name, wallet) => {
+  const theme = generatedAvatarTheme(wallet, name);
+  element.classList.add('is-generated');
+  element.style.setProperty('--avatar-angle', theme.angle);
+  element.style.setProperty('--avatar-start', theme.start);
+  element.style.setProperty('--avatar-middle', theme.middle);
+  element.style.setProperty('--avatar-end', theme.end);
+  element.replaceChildren();
+  element.textContent = initialsFor(name);
+};
 
 /** Builds the avatar node. Never interpolates user text into markup. */
 export const buildAvatar = (name, avatarUrl, wallet) => {
@@ -80,7 +132,7 @@ export const buildAvatar = (name, avatarUrl, wallet) => {
   el.dataset.wallet = wallet || '';
   const url = avatarPublicUrl(avatarUrl, wallet);
   if (!url) {
-    el.textContent = initialsFor(name);
+    applyGeneratedAvatar(el, name, wallet);
     return el;
   }
   const img = document.createElement('img');
@@ -89,19 +141,8 @@ export const buildAvatar = (name, avatarUrl, wallet) => {
   img.loading = 'lazy';
   img.decoding = 'async';
   img.referrerPolicy = 'no-referrer';
-  // If the primary URL fails (missing avatar_url column, stale path), try the
-  // backend shim once before falling back to initials.
   img.addEventListener('error', () => {
-    const shim = wallet && /^0x[0-9a-fA-F]{40}$/.test(wallet)
-      ? `/rounds/api/avatars/${wallet.toLowerCase()}`
-      : null;
-    if (shim && img.src !== new URL(shim, window.location.origin).href && !img.dataset.retried) {
-      img.dataset.retried = '1';
-      img.src = shim;
-      return;
-    }
-    el.replaceChildren();
-    el.textContent = initialsFor(name);
+    applyGeneratedAvatar(el, name, wallet);
   });
   el.appendChild(img);
   return el;
@@ -110,12 +151,12 @@ export const buildAvatar = (name, avatarUrl, wallet) => {
 /** Repaint name + avatar on every on-screen message from this wallet. */
 export const applyProfileToChat = (wallet, displayName, avatarUrl, messageIndex) => {
   if (!wallet || !messageIndex) return;
-  const w = wallet.toLowerCase();
+  const w = String(wallet);
   for (const entry of messageIndex.values()) {
     const el = entry?.el;
     if (!el) continue;
     const av = el.querySelector('.chat-avatar');
-    if (!av || (av.dataset.wallet || '').toLowerCase() !== w) continue;
+    if (!av || av.dataset.wallet !== w) continue;
     const nameEl = el.querySelector('header b');
     if (nameEl && displayName) nameEl.textContent = displayName;
     av.replaceWith(buildAvatar(displayName || nameEl?.textContent || shortWallet(w), avatarUrl, w));
@@ -129,24 +170,10 @@ export async function loadFollowing() {
   const account = host.getAccount();
   if (!account) return;
   followingSet.clear();
-  const session = getSession();
   try {
-    if (session?.token) {
-      const res = await fetch(`${ROUNDS_API}/follows/me`, {
-        headers: { Authorization: `Bearer ${session.token}` },
-        cache: 'no-store',
-      });
-      if (res.ok) {
-        const json = await res.json();
-        for (const w of json.followingList || []) followingSet.add(String(w).toLowerCase());
-        return;
-      }
-    }
-  } catch { /* fall through to the table */ }
-  try {
-    const { data } = await supabase.from('follows').select('following').eq('follower', account.toLowerCase());
-    for (const row of data || []) followingSet.add(String(row.following).toLowerCase());
-  } catch { /* table missing until 0003 */ }
+    const { data } = await supabase.from('follows').select('following').eq('follower', account);
+    for (const row of data || []) followingSet.add(String(row.following));
+  } catch { /* optional social graph is not part of the launch schema */ }
 }
 
 // ----------------------------------------------------------- on-chain stats
@@ -156,7 +183,7 @@ const fmt = (wei, dp = 2) => {
 };
 
 /**
- * BULLION / STAKED / MINED for the card. Read from the chain, never cached in
+ * MYNE / STAKED / MINED for the card. Read from the chain, never cached in
  * Supabase. Failures degrade to nulls so a dead RPC can't blank the whole card.
  */
 async function readOnChainStats(wallet) {
@@ -168,7 +195,7 @@ async function readOnChainStats(wallet) {
     if (!miner && !staking) return null;
     const staked = staking ? (staking.flexStaked + staking.burnStaked) : null;
     return {
-      bullion: miner ? fmt(miner.bullionBalance) : null,
+      myne: miner ? fmt(miner.bullionBalance) : null,
       staked: staked != null ? fmt(staked) : null,
       mined: miner ? fmt(miner.rewardsBullion, 3) : null,
     };
@@ -259,7 +286,7 @@ export function bindProfileHover(el, wallet) {
 
 export async function openProfileCard(walletRaw, anchor) {
   if (!walletRaw || !anchor) return;
-  const wallet = String(walletRaw).toLowerCase();
+  const wallet = String(walletRaw);
 
   // Already showing this wallet — keep it open and reposition.
   if (profileCardEl && profileCardWallet === wallet) {
@@ -283,17 +310,14 @@ export async function openProfileCard(walletRaw, anchor) {
   positionCard(anchor);
   setTimeout(() => document.addEventListener('click', onDocCloseProfile), 0);
 
-  // profile_stats needs migration 0003; fall back to the base profiles table.
-  let data = null;
-  try {
-    const primary = await supabase.from('profile_stats').select('*').eq('wallet_address', wallet).maybeSingle();
-    if (!primary.error) data = primary.data;
-    else {
-      const fallback = await supabase.from('profiles')
-        .select('wallet_address,display_name,banned').eq('wallet_address', wallet).maybeSingle();
-      data = fallback.data;
-    }
-  } catch { /* card still renders from the chain */ }
+  const profile = await loadPublicProfile(wallet);
+  const data = profile ? {
+    wallet_address: profile.walletAddress,
+    display_name: profile.displayName,
+    avatar_url: profile.avatarUrl,
+    bio: profile.bio,
+    banned: profile.banned,
+  } : null;
 
   // The /follows count lookup that used to run here is gone with the two stats it fed — it was an
   // extra request on every card open for numbers nothing renders any more. The follows data itself
@@ -304,7 +328,7 @@ export async function openProfileCard(walletRaw, anchor) {
     messageCount = 0;
     try {
       const { count, error } = await supabase
-        .from('chat_messages').select('id', { count: 'exact', head: true })
+        .from('chat_feed').select('id', { count: 'exact', head: true })
         .eq('wallet_address', wallet);
       if (!error) messageCount = count ?? 0;
     } catch { /* ignore */ }
@@ -319,7 +343,7 @@ export async function openProfileCard(walletRaw, anchor) {
   const name = data?.display_name || shortWallet(wallet);
 
   const head = document.createElement('header');
-  head.appendChild(buildAvatar(name, data?.avatar_url || `/api/avatars/${wallet}`, wallet));
+  head.appendChild(buildAvatar(name, data?.avatar_url, wallet));
   const who = document.createElement('div');
   const nameEl = document.createElement('b');
   nameEl.textContent = name;
@@ -365,7 +389,7 @@ export async function openProfileCard(walletRaw, anchor) {
 
   // On-chain row first — it is what this app is actually about.
   const chainStats = statRow('chat-profile-stats onchain', [
-    ['MYNE', null, 'bullion'],   // label is the token symbol; the key stays 'bullion'
+    ['MYNE', null, 'myne'],
     ['STAKED', null, 'staked'],
     ['MINED', null, 'mined'],
   ]);
@@ -381,13 +405,13 @@ export async function openProfileCard(walletRaw, anchor) {
   // Chain reads are slower than the Supabase ones — fill them in when they land.
   void readOnChainStats(wallet).then((stats) => {
     if (!profileCardEl || profileCardWallet !== wallet || !stats) return;
-    if (stats.bullion != null) chainStats.refs.bullion.textContent = stats.bullion;
+    if (stats.myne != null) chainStats.refs.myne.textContent = stats.myne;
     if (stats.staked != null) chainStats.refs.staked.textContent = stats.staked;
     if (stats.mined != null) chainStats.refs.mined.textContent = stats.mined;
   });
 
   const account = host.getAccount();
-  const isMe = Boolean(account && wallet === account.toLowerCase());
+  const isMe = Boolean(account && wallet === account);
   // The Follow button is removed, so another wallet's card now ends at MESSAGES with no action.
   // Your own card keeps "Edit profile". The follow-toggle endpoint and followingSet are left intact
   // (see loadFollowing) so Follow can come back without rebuilding the plumbing.
@@ -409,26 +433,14 @@ export async function openProfileCard(walletRaw, anchor) {
 export async function loadMyProfile(messageIndex) {
   const account = host.getAccount();
   if (!account) { myProfile = null; return null; }
-  const wallet = account.toLowerCase();
-
-  let data = null;
-  try {
-    const primary = await supabase.from('profile_stats').select('*').eq('wallet_address', wallet).maybeSingle();
-    if (!primary.error) data = primary.data;
-    else {
-      const fallback = await supabase.from('profiles')
-        .select('wallet_address,display_name,banned').eq('wallet_address', wallet).maybeSingle();
-      data = fallback.data;
-    }
-  } catch { /* first-time wallet has no row yet */ }
+  const wallet = account;
+  const profile = await loadPublicProfile(wallet);
 
   myProfile = {
     walletAddress: wallet,
-    displayName: data?.display_name || null,
-    avatarUrl: data?.avatar_url || `/api/avatars/${wallet}`,
-    // Without this the editor opens with an empty bio field every time and
-    // saving would wipe whatever was already stored.
-    bio: data?.bio ?? await fetchStoredBio(wallet),
+    displayName: profile?.displayName || null,
+    avatarUrl: profile?.avatarUrl || null,
+    bio: profile?.bio || null,
   };
   // `await loadFollowing()` used to run here. Its only consumer was the Follow button's initial
   // state, so with the button gone it was a network round-trip that delayed the profile card for
@@ -441,7 +453,7 @@ export async function loadMyProfile(messageIndex) {
 export function applyProfileBroadcast(payload, messageIndex) {
   if (!payload?.walletAddress) return;
   applyProfileToChat(payload.walletAddress, payload.displayName, payload.avatarUrl, messageIndex);
-  if (myProfile && payload.walletAddress.toLowerCase() === myProfile.walletAddress) {
+  if (myProfile && payload.walletAddress === myProfile.walletAddress) {
     myProfile = {
       ...myProfile,
       displayName: payload.displayName ?? myProfile.displayName,
@@ -498,7 +510,7 @@ export async function checkNameAvailable(name) {
     let query = supabase.from('profiles').select('wallet_address')
       .ilike('display_name', trimmed).limit(1);
     // Your own current name must not read as taken.
-    if (account) query = query.neq('wallet_address', account.toLowerCase());
+    if (account) query = query.neq('wallet_address', account);
     const { data, error } = await query;
     if (error) return null;
     return !data?.length;
@@ -530,7 +542,7 @@ export async function saveProfile({ displayName, bio, avatarDataUrl }, messageIn
   if (!res.ok) throw new Error(data.error || 'Could not save profile');
 
   myProfile = {
-    walletAddress: account.toLowerCase(),
+    walletAddress: account,
     displayName: data.profile.displayName,
     avatarUrl: data.profile.avatarUrl,
     bio: data.profile.bio,
@@ -633,7 +645,7 @@ export function openProfileEditor(messageIndex) {
       }, 30000);
       if (!res.ok) throw new Error(data.error || 'Could not save profile');
       myProfile = {
-        walletAddress: account.toLowerCase(),
+        walletAddress: account,
         displayName: data.profile.displayName,
         avatarUrl: data.profile.avatarUrl,
         bio: data.profile.bio,

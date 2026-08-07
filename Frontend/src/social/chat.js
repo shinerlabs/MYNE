@@ -141,7 +141,9 @@ const normaliseMessage = (row) => {
     ? decodedImage.body
     : (decodedReply.replyId != null ? decodedReply.body : (row.body ?? ''));
 
-  const wallet = (row.wallet_address ?? row.walletAddress ?? '').toLowerCase();
+  // Solana base58 public keys are case-sensitive. Lowercasing here changes the identity and
+  // breaks profile/moderation/on-chain lookups for almost every wallet.
+  const wallet = String(row.wallet_address ?? row.walletAddress ?? '');
   return {
     id: row.id,
     wallet,
@@ -401,8 +403,8 @@ const renderChatMessage = (row) => {
     img.loading = 'lazy';
     img.decoding = 'async';
     img.fetchPriority = 'low';
-    img.width = 128;
-    img.height = 128;
+    img.width = 88;
+    img.height = 88;
     media.appendChild(img);
     col.appendChild(media);
   }
@@ -693,10 +695,6 @@ export async function wireChatRealtime(handlers = {}) {
     .on('broadcast', { event: 'profile' }, ({ payload }) => handlers.onProfile?.(payload))
     .on('broadcast', { event: 'message_delete' }, ({ payload }) => {
       if (payload?.id != null) removeChatMessageLocal(payload.id);
-    })
-    .on('broadcast', { event: 'news' }, ({ payload }) => { if (payload) handlers.onNews?.(payload); })
-    .on('broadcast', { event: 'news_delete' }, ({ payload }) => {
-      if (payload?.id != null) handlers.onNewsDelete?.(payload.id);
     })
     .subscribe((status, err) => {
       if (status === 'SUBSCRIBED') { setChatStatus('live'); return; }

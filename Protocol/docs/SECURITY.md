@@ -8,6 +8,9 @@ No MYNE program should reach mainnet until every gate below is satisfied.
 - Generate a unique program keypair; run `anchor keys sync`; verify every declared ID.
 - Run unit, integration, property and adversarial tests locally.
 - Test checked arithmetic at `u64` boundaries and every basis-point rounding path.
+- Prove version-6 fee conservation for every round: 8% gross staking becomes 0.8% direct admin plus
+  7.2% net stakers, alongside 2% Motherlode, 1% buyback and 1% direct admin; total fee is exactly
+  12%, and all rounding dust is emitted and routed by the documented rule.
 - Test duplicate accounts, wrong PDAs, wrong mint/token program, signer substitution and replay.
 - Test pause behavior while ensuring withdrawals and already-earned claims remain recoverable.
 - Test oracle replay, duplicate fulfilment, stale fulfilment and wrong request identity.
@@ -26,12 +29,15 @@ No MYNE program should reach mainnet until every gate below is satisfied.
 
 ## Operational gates
 
-- Use an offline/hardware-backed key for the single-developer upgrade authority, and separate it
-  from the online admin, Switchboard keeper and buyback keeper keys. A multisig is not part of the
-  chosen operating model; that makes backups, access logging and tested key rotation mandatory.
+- Use exactly three distinct controlled funded roles: admin/upgrade/direct-fee/fallback,
+  Switchboard/randomness/lifecycle, and buyback. Do not alias their addresses. Keep the admin key
+  hardware-backed/offline except for reviewed operations. A multisig is not part of the chosen
+  operating model; that makes backups, access logging and tested key rotation mandatory.
 - Keep deployment keys out of the repository and frontend environment files.
 - Fund and rehearse devnet deployment from a dedicated deployer.
 - Publish program ID, mint, IDL hash, build provenance and authority addresses.
+- Apply and verify every versioned production Supabase migration in order, and retain indexed `RoundFeesDistributed`
+  evidence before any round is archived.
 - Commission an independent security audit and resolve findings.
 - Run a public devnet period with capped funds and an incident-response plan.
 - Only then consider mainnet; revoke or timelock upgrade authority according to the published policy.

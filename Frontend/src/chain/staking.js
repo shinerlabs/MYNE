@@ -3,6 +3,9 @@ import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.j
 import { connection, getAccount } from './client.js';
 import { parseEther } from './units.js';
 import { apyPercent } from './staking-apy.js';
+import { totalStakedBaseUnits, totalStakedMyne } from './staking-totals.js';
+import { loadStakingRewardWindow } from './rounds-index.js';
+import { getLiveMynePerSol } from '../sol-price.js';
 import {
   asBn, derivePda, fetchProtocolAccount, getProtocolConfig,
   getWritableProgram, protocolPdas, sendInstructions,
@@ -14,9 +17,49 @@ export const toWei = (value) => parseEther(String(value || 0));
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 const toBig = (value) => BigInt(value?.toString?.() ?? value ?? 0);
-let apySample = null;
-let lastApy = { aprPct: null, aprStatus: 'window', windowMinutes: 0, rewardPerMinuteSol: 0 };
 export const APY_WINDOW_MINUTES = 30;
+const STAKE_POOL_CACHE_MS = 4_000;
+let stakePoolCache = null;
+let stakePoolCacheAt = 0;
+let stakePoolRequest = null;
+let stakePoolCacheGeneration = 0;
+
+const baseUnitsToTokens = (value) => {
+  const units = toBig(value);
+  return Number(units / 1_000_000_000n) + Number(units % 1_000_000_000n) / 1e9;
+};
+
+const invalidateStakePoolCache = () => {
+  stakePoolCacheGeneration += 1;
+  stakePoolCache = null;
+  stakePoolCacheAt = 0;
+  // Do not let a pre-transaction in-flight snapshot satisfy the first refresh
+  // after a confirmed mutation. Its original callers may still receive it,
+  // while new callers start a current read under the new generation.
+  stakePoolRequest = null;
+};
+
+async function readStakePool() {
+  if (stakePoolCache && Date.now() - stakePoolCacheAt < STAKE_POOL_CACHE_MS) return stakePoolCache;
+  if (stakePoolRequest) return stakePoolRequest;
+  const generation = stakePoolCacheGeneration;
+  const request = fetchProtocolAccount('StakePool', protocolPdas.stakePool)
+    .then((pool) => {
+      // A transaction may have invalidated the cache while this RPC was in
+      // flight. Return that snapshot to its original caller, but never publish
+      // it as the next caller's current state.
+      if (generation === stakePoolCacheGeneration) {
+        stakePoolCache = pool;
+        stakePoolCacheAt = Date.now();
+      }
+      return pool;
+    })
+    .finally(() => {
+      if (stakePoolRequest === request) stakePoolRequest = null;
+    });
+  stakePoolRequest = request;
+  return request;
+}
 const positionPda = (owner) => derivePda('stake_position', new PublicKey(owner));
 const minerPda = (owner) => derivePda('miner', new PublicKey(owner));
 const associatedToken = (owner, mint) => PublicKey.findProgramAddressSync(
@@ -38,13 +81,16 @@ const createAtaInstruction = (payer, owner, mint, ata) => new TransactionInstruc
 
 async function livePending(position, pool) {
   if (!position || !pool || !toBig(position.rewardWeight)) return toBig(position?.pendingSol);
-  const delta = toBig(pool.rewardPerWeight) - toBig(position.rewardDebt);
+  const currentIndex = toBig(pool.rewardPerWeight);
+  const debt = toBig(position.rewardDebt);
+  if (currentIndex < debt) throw new Error('Stake reward index is behind the position checkpoint');
+  const delta = currentIndex - debt;
   return toBig(position.pendingSol) + (toBig(position.rewardWeight) * delta) / 1_000_000_000_000_000_000n;
 }
 
 export async function readStaking(account = getAccount()) {
   const [config, pool] = await Promise.all([
-    getProtocolConfig(), fetchProtocolAccount('StakePool', protocolPdas.stakePool),
+    getProtocolConfig(), readStakePool(),
   ]);
   let position = null;
   let walletBullion = 0n;
@@ -57,12 +103,16 @@ export async function readStaking(account = getAccount()) {
   const burnStaked = toBig(position?.burnPrincipal);
   const weight = toBig(position?.rewardWeight);
   const totalWeight = toBig(pool?.totalWeight);
+  const pendingSol = await livePending(position, pool);
   return {
     stocks: [], hasClaimableStocks: false,
-    totalStaked: toBig(pool?.totalStandard) + toBig(pool?.totalBurn), totalWeight,
+    totalStaked: totalStakedBaseUnits(pool?.totalStandard, pool?.totalBurn), totalWeight,
     walletBullion, flexStaked, burnStaked, weight,
-    pendingEth: await livePending(position, pool), claimedEth: 0n,
-    lifetimeEth: await livePending(position, pool), pendingBullion: 0n,
+    pendingEth: pendingSol,
+    // StakePosition intentionally stores only the current pending balance.
+    // Claim history is event-derived and not yet part of the production index;
+    // null prevents the UI from presenting a fabricated lifetime zero/total.
+    claimedEth: null, lifetimeEth: null, pendingBullion: 0n,
     unstakeClaimable: position && BigInt(Math.floor(Date.now() / 1000)) >= toBig(position.cooldownUnlockAt) ? toBig(position.cooldownAmount) : 0n,
     unstakePending: position && BigInt(Math.floor(Date.now() / 1000)) < toBig(position.cooldownUnlockAt) ? toBig(position.cooldownAmount) : 0n,
     share: totalWeight > 0n ? Number((weight * 1_000_000n) / totalWeight) / 10_000 : 0,
@@ -95,13 +145,17 @@ async function stakeInstruction(amount, tier) {
     ? { config: protocolPdas.config, stakePool: protocolPdas.stakePool, stakePosition, ownerTokens, mint, authority, tokenProgram: TOKEN_PROGRAM_ID }
     : { config: protocolPdas.config, stakePool: protocolPdas.stakePool, stakePosition, ownerTokens, vaultTokens, mint, authority, tokenProgram: TOKEN_PROGRAM_ID };
   instructions.push(await method.accounts(accounts).instruction());
-  return sendInstructions(instructions);
+  const signature = await sendInstructions(instructions);
+  invalidateStakePoolCache();
+  return signature;
 }
 export const stake = stakeInstruction;
 
 export async function requestUnstake(amount) {
   const account = getAccount(); const authority = new PublicKey(account); const { program } = await getWritableProgram();
-  return sendInstructions([await program.methods.requestUnstake(asBn(amount)).accounts({ stakePool: protocolPdas.stakePool, stakePosition: positionPda(account), authority }).instruction()]);
+  const signature = await sendInstructions([await program.methods.requestUnstake(asBn(amount)).accounts({ stakePool: protocolPdas.stakePool, stakePosition: positionPda(account), authority }).instruction()]);
+  invalidateStakePoolCache();
+  return signature;
 }
 export async function withdrawUnstaked() {
   const account = getAccount(); const authority = new PublicKey(account); const config = await getProtocolConfig(); const mint = new PublicKey(config.mint);
@@ -114,45 +168,45 @@ export async function withdrawUnstaked() {
 }
 export async function claimStakingRewards() {
   const account = getAccount(); const authority = new PublicKey(account); const { program } = await getWritableProgram();
-  return sendInstructions([await program.methods.claimStakingRewards().accounts({ stakePool: protocolPdas.stakePool, stakePosition: positionPda(account), authority }).instruction()]);
+  const signature = await sendInstructions([await program.methods.claimStakingRewards().accounts({ stakePool: protocolPdas.stakePool, stakePosition: positionPda(account), authority }).instruction()]);
+  invalidateStakePoolCache();
+  return signature;
 }
 
 export async function readStakingMetrics() {
-  const pool = await fetchProtocolAccount('StakePool', protocolPdas.stakePool);
-  const standard = Number(toBig(pool?.totalStandard)) / 1e9;
-  const burn = Number(toBig(pool?.totalBurn)) / 1e9;
-  const totalStakedPrincipal = standard + burn;
+  const [pool, rewardWindow] = await Promise.all([
+    readStakePool(),
+    loadStakingRewardWindow(APY_WINDOW_MINUTES),
+  ]);
+  const standard = baseUnitsToTokens(pool?.totalStandard);
+  const burn = baseUnitsToTokens(pool?.totalBurn);
+  const totalStakedPrincipal = totalStakedMyne(pool?.totalStandard, pool?.totalBurn);
   // Rewards accrue by pool weight: standard MYNE contributes 1× and burn-staked MYNE 5×.
   // APY for a standard position must therefore use total weight, not raw principal.
-  const totalWeight = Number(toBig(pool?.totalWeight)) / 1e9;
-  const fundedSol = Number(toBig(pool?.totalFundedLamports)) / 1e9;
-  const now = Date.now();
-  if (!apySample) {
-    apySample = { at: now, fundedSol };
-    lastApy = { aprPct: null, aprStatus: 'window', windowMinutes: 0, rewardPerMinuteSol: 0 };
-  } else {
-    const windowMinutes = (now - apySample.at) / 60_000;
-    if (windowMinutes >= APY_WINDOW_MINUTES) {
-      const rewardDeltaSol = Math.max(0, fundedSol - apySample.fundedSol);
-      const rewardPerMinuteSol = rewardDeltaSol / windowMinutes;
-      lastApy = {
-        aprPct: apyPercent(rewardPerMinuteSol, totalWeight),
-        aprStatus: totalStakedPrincipal > 0 ? 'live' : 'stake',
-        windowMinutes,
-        rewardPerMinuteSol,
-      };
-      apySample = { at: now, fundedSol };
-    }
-  }
+  const totalWeight = baseUnitsToTokens(pool?.totalWeight);
+  const mynePerSol = getLiveMynePerSol();
+  const windowMinutes = rewardWindow?.complete ? rewardWindow.windowMinutes : 0;
+  const rewardPerMinuteSol = rewardWindow?.complete
+    ? baseUnitsToTokens(rewardWindow.rewardLamports) / rewardWindow.windowMinutes
+    : 0;
+  let aprStatus = 'live';
+  if (!(totalWeight > 0)) aprStatus = 'stake';
+  else if (!(mynePerSol > 0)) aprStatus = 'price';
+  else if (!rewardWindow?.complete) aprStatus = 'window';
+  const aprPct = aprStatus === 'live'
+    ? apyPercent(rewardPerMinuteSol, totalWeight, mynePerSol)
+    : null;
+  if (aprStatus === 'live' && aprPct === null) aprStatus = 'math';
   const stakers = Number(toBig(pool?.activeStakers));
+  const rewardPoolLamports = toBig(pool?.totalFundedLamports) - toBig(pool?.totalClaimedLamports);
   return {
     totalStakedPrincipal, flexStaked: standard, burnStaked: burn,
     totalWeight,
-    rewardsPoolEth: Number(toBig(pool?.totalFundedLamports) - toBig(pool?.totalClaimedLamports)) / 1e9,
-    queuedLegacyStockEth: 0, rewardMode: 'eth', stakers, aprPct: lastApy.aprPct,
-    aprStatus: lastApy.aprStatus, aprWindowDays: lastApy.windowMinutes / 1440,
-    rewardsToStakersEth: lastApy.rewardPerMinuteSol * 1440,
-    aprMinWeightGld: 1000,
+    rewardsPoolEth: baseUnitsToTokens(rewardPoolLamports),
+    queuedLegacyStockEth: 0, rewardMode: 'eth', stakers, aprPct,
+    aprStatus, aprWindowDays: windowMinutes / 1440,
+    rewardsToStakersEth: rewardPerMinuteSol * 1440,
+    aprWindowRounds: rewardWindow?.rounds ?? 0,
   };
 }
 export async function readStakingHistory() {

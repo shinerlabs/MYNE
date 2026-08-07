@@ -15,6 +15,7 @@ import {
   TransactionMessage,
   VersionedTransaction,
 } from '@solana/web3.js';
+import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -58,6 +59,12 @@ const pda = (seed, ...extra) => PublicKey.findProgramAddressSync(
 const config = pda('config');
 const miningPool = pda('mining_pool');
 const stakePool = pda('stake_pool');
+const lifecycleConfig = await program.account.protocolConfig.fetch(config);
+assert.equal(Number(lifecycleConfig.version), 6, 'Lifecycle keeper requires protocol fee schedule v6');
+requireMatchingSolanaNetwork({
+  genesisHash: await provider.connection.getGenesisHash(),
+  randomnessProgram: lifecycleConfig.randomnessProgram.toBase58(),
+});
 const roundPda = (roundId) => pda('round', u64Seed(roundId));
 const minerPda = (authority) => pda('miner', new PublicKey(authority).toBuffer());
 const stakePda = (authority) => pda('stake_position', new PublicKey(authority).toBuffer());
@@ -190,7 +197,7 @@ async function closeReceipts(roundAddress, rows) {
 }
 
 async function maybeCloseRandomness(indexedRound) {
-  if (!indexedRound.randomness_id || indexedRound.randomness_closed_at) return null;
+  if (!indexedRound.archive_verified || !indexedRound.randomness_id || indexedRound.randomness_closed_at) return null;
   const archivedAt = Date.parse(indexedRound.archived_at || '');
   if (!Number.isFinite(archivedAt) || Date.now() - archivedAt < randomnessRetentionSeconds * 1000) return null;
   const randomness = new PublicKey(indexedRound.randomness_id);
@@ -231,12 +238,14 @@ async function processRound(indexedRound) {
   }
   let closedReceipts = [];
   if (asBig(roundState.archivedAtSlot) > 0n
+      && indexedRound.archive_verified === true
       && asBig(roundState.closedReceipts) < asBig(roundState.totalReceipts)) {
     closedReceipts = await closeReceipts(address, receipts);
     roundState = await program.account.round.fetch(address);
   }
   let closedRound = null;
   if (asBig(roundState.archivedAtSlot) > 0n
+      && indexedRound.archive_verified === true
       && asBig(roundState.processedReceipts) === asBig(roundState.totalReceipts)
       && asBig(roundState.closedReceipts) === asBig(roundState.totalReceipts)
       && (!roundState.settled || roundState.buybackCompleted)) {
@@ -260,7 +269,7 @@ async function processRound(indexedRound) {
 export async function lifecycleTick() {
   const [activeRows, randomnessRows] = await Promise.all([
     rest('mine_rounds?closed_signature=is.null&select=*&order=round_id.asc&limit=25'),
-    rest('mine_rounds?randomness_id=not.is.null&archive_hash=not.is.null&randomness_closed_at=is.null&select=*&order=round_id.asc&limit=25'),
+    rest('mine_rounds?randomness_id=not.is.null&archive_verified=eq.true&randomness_closed_at=is.null&select=*&order=round_id.asc&limit=25'),
   ]);
   const byRound = new Map();
   for (const row of [...(activeRows || []), ...(randomnessRows || [])]) byRound.set(String(row.round_id), row);

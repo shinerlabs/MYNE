@@ -7,6 +7,10 @@ import { parseEther } from './units.js';
 import { intervalReward } from './round-rewards.js';
 import { roundIdsForRange } from './round-range.js';
 import { loadReceiptIndex } from './rounds-index.js';
+import { aggregateMiners } from './miner-aggregation.js';
+import { effectiveUnclaimedMyne } from './mining-shares.js';
+import { deriveRoundProof, randomnessEqual, randomnessHex } from './randomness-proof.js';
+import { createReceiptNonce } from './receipt-nonce.js';
 import {
   asBn, decodeProtocolAccount, derivePda, fetchProtocolAccount, getProtocolConfig, getWritableProgram,
   protocolPdas, protocolProgramId, sendInstructions, u64Seed,
@@ -114,6 +118,9 @@ const roundFromAccount = (roundId, account) => {
     requestedAt: toBig(account.openedAt),
     resolved: account.settled,
     randomnessValue: account.randomness,
+    randomnessHex: randomnessHex(account.randomness),
+    randomnessId: account.randomnessAccount?.toBase58?.() ?? null,
+    randomnessCommitSlot: toBig(account.randomnessCommitSlot),
     winningSquare: winning,
     jackpotHit: account.motherlodeHit,
     singleMinerRound: account.soloMode,
@@ -164,10 +171,11 @@ export async function readMiner(address) {
     connection.getBalance(new PublicKey(address), 'confirmed'),
     fetchProtocolAccount('MiningPool', protocolPdas.miningPool),
   ]);
+  const effectiveRewards = effectiveUnclaimedMyne(miner, miningPool);
   return {
     balance: BigInt(balance),
     bullionBalance: await tokenBalance(address, config.mint),
-    rewardsBullion: toBig(miner?.unclaimedMyne),
+    rewardsBullion: effectiveRewards,
     refinedAccrued: 0n,
     hasAccount: Boolean(miner),
     totalUnclaimed: toBig(miningPool?.totalUnclaimed),
@@ -176,6 +184,9 @@ export async function readMiner(address) {
   };
 }
 
+// V6 credits a round only when its receipt is settled and never back-dates new
+// shares into passive fees paid before that settlement. `readMiner` already
+// values all existing shares at the current pool asset value.
 export function passiveOnRounds() { return 0n; }
 export function netClaimable({ grossMined, refinedAccrued = 0n }) { return grossMined - (grossMined * 1000n) / 10000n + refinedAccrued; }
 
@@ -203,12 +214,15 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
   for (const tile of tiles) amounts[Number(tile) - 1] = perTile;
   const total = amounts.reduce((sum, amount) => sum + amount, 0n);
   if (total < MIN_ROUND_DEPLOYMENT) throw new Error('Minimum total deployment is 0.05 SOL per round');
-  const nonce = BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
+  const nonce = createReceiptNonce();
   const round = roundPda(roundId);
   const miner = minerPda(account);
   const stakePosition = stakePositionPda(account);
   const receipt = receiptPda(roundId, account, nonce);
   const { program } = await getWritableProgram();
+  const configState = await getProtocolConfig();
+  const providerRandomness = !new PublicKey(configState.randomnessProgram).equals(PublicKey.default);
+  const roundState = await fetchProtocolAccount('Round', round);
   const instructions = [];
   if (!(await connection.getAccountInfo(miner, 'confirmed'))) {
     const referrer = referralFromLocation();
@@ -218,17 +232,24 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
       authority, systemProgram: SystemProgram.programId,
     }).instruction());
   }
-  if (!(await connection.getAccountInfo(round, 'confirmed'))) {
-    const configState = await getProtocolConfig();
-    if (!new PublicKey(configState.randomnessProgram).equals(PublicKey.default)) {
+  if (!roundState) {
+    if (providerRandomness) {
       throw new Error('This round is being prepared by the verified-randomness keeper. Please try again shortly.');
     }
     instructions.push(await program.methods.openRound(asBn(roundId)).accounts({
       config: protocolPdas.config, round, payer: authority, systemProgram: SystemProgram.programId,
     }).instruction());
   }
+  const randomnessAccount = providerRandomness ? roundState?.randomnessAccount : null;
+  if (providerRandomness && (!randomnessAccount || new PublicKey(randomnessAccount).equals(PublicKey.default))) {
+    throw new Error('This round is waiting for its uncommitted Switchboard request. Please try again shortly.');
+  }
+  if (providerRandomness && toBig(roundState.randomnessCommitSlot) > 0n) {
+    throw new Error('Betting has closed and this round randomness is already committed.');
+  }
   instructions.push(await program.methods.deploy(asBn(roundId), asBn(nonce), amounts.map(asBn)).accounts({
-    config: protocolPdas.config, miner, round, receipt, authority, systemProgram: SystemProgram.programId,
+    config: protocolPdas.config, miner, round, receipt, randomnessAccount, authority,
+    systemProgram: SystemProgram.programId,
   }).instruction());
   const signature = await sendInstructions(instructions);
   invalidateReceiptCache();
@@ -287,16 +308,23 @@ export async function withdrawUnrefined() {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
   const authority = new PublicKey(account);
-  const [config, miner] = await Promise.all([getProtocolConfig(), fetchProtocolAccount('Miner', minerPda(account))]);
-  if (!miner || toBig(miner.unclaimedMyne) === 0n) throw new Error('Nothing to claim');
+  const [config, miner, miningPool] = await Promise.all([
+    getProtocolConfig(),
+    fetchProtocolAccount('Miner', minerPda(account)),
+    fetchProtocolAccount('MiningPool', protocolPdas.miningPool),
+  ]);
+  if (effectiveUnclaimedMyne(miner, miningPool) === 0n) throw new Error('Nothing to claim');
   const mint = new PublicKey(config.mint);
   const destinationTokens = associatedToken(authority, mint);
   const adminFeeWallet = new PublicKey(config.adminFeeWallet);
-  const adminFeeTokens = associatedToken(adminFeeWallet, mint);
+  const hasReferrer = !miner.referrer.equals(PublicKey.default);
+  const adminFeeTokens = hasReferrer ? null : associatedToken(adminFeeWallet, mint);
   const { program } = await getWritableProgram();
   const instructions = [];
   if (!(await connection.getAccountInfo(destinationTokens, 'confirmed'))) instructions.push(createAtaInstruction(authority, authority, mint, destinationTokens));
-  if (!(await connection.getAccountInfo(adminFeeTokens, 'confirmed'))) instructions.push(createAtaInstruction(authority, adminFeeWallet, mint, adminFeeTokens));
+  if (adminFeeTokens && !(await connection.getAccountInfo(adminFeeTokens, 'confirmed'))) {
+    instructions.push(createAtaInstruction(authority, adminFeeWallet, mint, adminFeeTokens));
+  }
   const referrerMiner = miner.referrer.equals(PublicKey.default) ? null : minerPda(miner.referrer);
   instructions.push(await program.methods.claimMyne().accounts({
     config: protocolPdas.config, miningPool: protocolPdas.miningPool, miner: minerPda(account),
@@ -314,8 +342,11 @@ export async function withdrawUnrefined() {
 export async function burnUnclaimedMyne() {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
-  const miner = await fetchProtocolAccount('Miner', minerPda(account));
-  if (!miner || toBig(miner.unclaimedMyne) === 0n) throw new Error('Nothing to stake and burn');
+  const [miner, miningPool] = await Promise.all([
+    fetchProtocolAccount('Miner', minerPda(account)),
+    fetchProtocolAccount('MiningPool', protocolPdas.miningPool),
+  ]);
+  if (effectiveUnclaimedMyne(miner, miningPool) === 0n) throw new Error('Nothing to stake and burn');
   const authority = new PublicKey(account);
   const { program } = await getWritableProgram();
   const instruction = await program.methods.burnUnclaimedMyne().accounts({
@@ -408,39 +439,6 @@ export async function readRoundWinners(roundId) {
     winners: enriched.filter((miner) => miner.won),
     miners: enriched,
   };
-}
-
-function aggregateMiners(receiptRows) {
-  const grouped = new Map();
-  for (const { account } of receiptRows) {
-    if (account.refunded) continue;
-    const address = account.authority.toBase58();
-    const miner = grouped.get(address) ?? {
-      address,
-      tileBets: Array(GRID).fill(0n),
-      deployed: 0n,
-      receiptCount: 0,
-      claimed: true,
-    };
-    account.amounts.forEach((amount, index) => { miner.tileBets[index] += toBig(amount); });
-    miner.deployed += toBig(account.totalLamports);
-    miner.receiptCount += 1;
-    miner.claimed = miner.claimed && Boolean(account.claimed);
-    grouped.set(address, miner);
-  }
-  const miners = [...grouped.values()]
-    .map((miner) => ({ ...miner, tiles: miner.tileBets.filter((amount) => amount > 0n).length }))
-    .sort((a, b) => a.deployed === b.deployed ? a.address.localeCompare(b.address) : (a.deployed > b.deployed ? -1 : 1));
-  // Local viewer fixture: four persistent demo miners represent Auto-burn so the branded name
-  // treatment can be reviewed. This never runs on devnet/mainnet and is not protocol metadata.
-  if (typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)) {
-    miners.slice(0, 4).forEach((miner) => {
-      miner.autoRound = true;
-      miner.autoBurn = true;
-      miner.autoMode = 'burn';
-    });
-  }
-  return miners;
 }
 
 export async function readRoundMiners(roundId) {
@@ -588,5 +586,22 @@ export async function waitForTx(signature) {
 }
 export async function readDrandTargetRound() { return null; }
 export async function verifyRoundFairness(roundId, randomnessValue, winningSquare) {
-  return { ok: (await readRound(roundId)).winningSquare === Number(winningSquare), randomnessValue };
+  const round = await readRound(roundId);
+  if (!round.resolved) return { ok: false, reason: 'Round is not settled' };
+  const proof = await deriveRoundProof(roundId, round.randomnessValue);
+  const randomnessMatches = randomnessEqual(round.randomnessValue, randomnessValue);
+  const squareMatches = proof.winningSquare === Number(winningSquare)
+    && proof.winningSquare === round.winningSquare;
+  const modeMatches = proof.soloMode === round.singleMinerRound;
+  const motherlodeMatches = proof.motherlodeHit === round.jackpotHit;
+  return {
+    ...proof,
+    ok: randomnessMatches && squareMatches && modeMatches && motherlodeMatches,
+    randomnessMatches,
+    squareMatches,
+    modeMatches,
+    motherlodeMatches,
+    randomnessAccount: round.randomnessId,
+    randomnessCommitSlot: round.randomnessCommitSlot,
+  };
 }
