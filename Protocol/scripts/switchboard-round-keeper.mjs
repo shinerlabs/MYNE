@@ -45,6 +45,13 @@ const pda = (seed, ...extra) => PublicKey.findProgramAddressSync(
 const config = pda('config');
 const configState = await myne.account.protocolConfig.fetch(config);
 assert.equal(Number(configState.version), 6, 'Round keeper requires protocol fee schedule v6');
+if (configState.paused) {
+  console.log(JSON.stringify({
+    event: 'switchboard-round-idle',
+    reason: 'protocol-paused',
+  }));
+  process.exit(0);
+}
 assert.equal(
   configState.randomnessAuthority.toBase58(),
   keypair.publicKey.toBase58(),

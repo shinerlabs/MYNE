@@ -37,6 +37,8 @@ test('provider keeper binds uncommitted randomness, commits after close, then re
   assert.match(source, /if \(response\.ok\) directlyHealthy\.push\(candidate\)/);
   assert.match(source, /No Switchboard randomness oracle has a directly reachable healthy gateway/);
   assert.match(source, /randomness-oracle-selected/);
+  const pauseGuard = source.indexOf("reason: 'protocol-paused'");
+  assert.ok(pauseGuard > 0 && pauseGuard < create, 'paused keeper must exit before creating randomness');
 });
 
 test('Switchboard keeper converts the native round id to BN at every Anchor u64 boundary', async () => {
