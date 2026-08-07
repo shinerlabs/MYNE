@@ -94,8 +94,11 @@ const stakePool = pda('stake_pool');
 const liquidityGate = pda('liquidity_gate');
 const round = pda('round', roundSeed);
 
-const buildKeeperTransaction = async (ixs, extraSigners, units) => {
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(commitment);
+const buildKeeperTransaction = async (ixs, extraSigners, units, blockhashCommitment = 'finalized') => {
+  // Production RPCs may load-balance getLatestBlockhash and simulation across
+  // different backend nodes. A finalized hash is old enough to be visible to
+  // every healthy backend while still leaving ample transaction lifetime.
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(blockhashCommitment);
   const message = new TransactionMessage({
     recentBlockhash: blockhash,
     payerKey: keypair.publicKey,
@@ -119,6 +122,10 @@ const sendKeeperInstructions = async (ixs, extraSigners = []) => {
   const simulation = await connection.simulateTransaction(simulationBuild.transaction, {
     commitment,
     sigVerify: false,
+    // This pass only measures compute and rejects instruction errors. Allow
+    // the selected simulation backend to substitute a blockhash it knows so
+    // RPC load balancing cannot cause a false BlockhashNotFound failure.
+    replaceRecentBlockhash: true,
   });
   assert.equal(simulation.value.err, null, `Keeper simulation failed: ${JSON.stringify(simulation.value.err)}\n${(simulation.value.logs || []).join('\n')}`);
   const measuredUnits = Math.max(50_000, Number(simulation.value.unitsConsumed || 1_400_000));

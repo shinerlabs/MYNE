@@ -30,6 +30,8 @@ test('provider keeper binds uncommitted randomness, commits after close, then re
   assert.ok(reveal < settle && settle < atomicSettle, 'Reveal and settlement ordering is invalid');
   assert.doesNotMatch(source, /createAndCommitIxs/);
   assert.match(source, /executeAutoPlan[\s\S]*randomnessAccount: randomnessPubkey/);
+  assert.match(source, /replaceRecentBlockhash:\s*true/);
+  assert.match(source, /blockhashCommitment\s*=\s*'finalized'/);
 });
 
 test('Switchboard keeper converts the native round id to BN at every Anchor u64 boundary', async () => {
