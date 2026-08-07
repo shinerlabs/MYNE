@@ -43,3 +43,13 @@ test('production indexer acquires an atomic lease before each tick', async () =>
   assert.match(source, /round-indexer-lease-held-by-another-instance/);
   assert.match(source, /if \(!\(await acquireIndexerLease\(\)\)\)/);
 });
+
+test('observing RoundArchived never downgrades canonical archive verification', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const archivedCase = source.slice(
+    source.indexOf("case 'RoundArchived'"),
+    source.indexOf("case 'RoundClosed'"),
+  );
+  assert.match(archivedCase, /archive_hash:/);
+  assert.doesNotMatch(archivedCase, /archive_verified:\s*false/);
+});

@@ -362,7 +362,6 @@ async function processEvent(event, signature, slot) {
       await upsert('mine_rounds', {
         round_id: asString(data.roundId),
         archive_hash: bytes(data.archiveHash).toString('hex'),
-        archive_verified: false,
         archive_slot: asString(data.slot),
         archived_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
