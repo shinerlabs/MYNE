@@ -130,7 +130,7 @@ async function refreshJackpot() {
 
 /** Auto-round plan state. Only meaningful with a wallet connected. */
 async function refreshPlan() {
-  if (!state.account) { state.plan = null; return emit(); }
+  if (!state.account) { state.plan = null; state.autoPlanMaxFee = null; return emit(); }
   try {
     const [planResult, feeResult] = await Promise.allSettled([
       readPlan(state.account),
