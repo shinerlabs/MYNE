@@ -220,6 +220,12 @@ write their private keys to the repository or an ordinary keeper journal.
 
 Create the MYNE/WSOL DLMM pool. Independently verify the Meteora program owner, pool address, both reserve PDAs, mint order and reserve thresholds. Register that exact gate while paused. The gate is immutable for this initialization and is checked again at every settlement.
 
+Run `pnpm mainnet:register-liquidity` first without `SUBMIT_MAINNET_LIQUIDITY_GATE`. The guarded
+script decodes the 904-byte Meteora LbPair directly on-chain, derives both reserve accounts,
+verifies the MYNE/WSOL mint order and reserve balances, simulates the transaction and prints the
+exact submission confirmation. Repeat only after independently reviewing every printed address and
+threshold.
+
 ## 6. Rehearse randomness and buyback while paused/controlled
 
 Run the exact Switchboard sequence with measured compute: atomically create/open/bind a fresh
@@ -233,7 +239,11 @@ authorize one tiny direct-pool canary. Verify swap and burn signatures appear in
 
 ## 7. Activate once and observe one complete round
 
-Only after all gates pass, submit `set_paused(false)` with the exact pool and reserve accounts. Save the config snapshot and activation signature. Observe one complete low-volume round through:
+Only after all gates pass, run `pnpm mainnet:activate` without its submission flag. The activation
+script repeats the on-chain LbPair/reserve checks, simulates `set_paused(false)`, and requires exact
+acknowledgements for production service health and the independent security review. Repeat with the
+printed `SUBMIT_MAINNET_ACTIVATE` value only when those statements are true. Save the config
+snapshot and activation signature. Observe one complete low-volume round through:
 
 1. receipt creation;
 2. Switchboard settlement;

@@ -120,6 +120,29 @@ test('Mainnet initialization is atomic, paused, and exact-address guarded', asyn
   assert.match(source, /mintState\.mintAuthority\?\.equals\(config\)/);
 });
 
+test('Mainnet liquidity registration decodes Meteora and is simulation-first', async () => {
+  const [policy, register, activate] = await Promise.all([
+    readFile(new URL('../scripts/mainnet-liquidity-policy.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/mainnet-register-liquidity-gate.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/mainnet-activate.mjs', import.meta.url), 'utf8'),
+  ]);
+  assert.match(policy, /LB_PAIR_ACCOUNT_LEN = 904/);
+  assert.match(policy, /LB_PAIR_DISCRIMINATOR/);
+  assert.match(policy, /reserveX/);
+  assert.match(policy, /reserveY/);
+  assert.match(register, /inspectMeteoraPool/);
+  assert.match(register, /CONFIRM_METEORA_MYNE_VAULT/);
+  assert.match(register, /CONFIRM_METEORA_SOL_VAULT/);
+  assert.match(register, /simulateTransaction/);
+  assert.match(register, /SUBMIT_MAINNET_LIQUIDITY_GATE/);
+  assert.match(register, /confirmTransaction[\s\S]*'finalized'/);
+  assert.match(activate, /CONFIRM_PRODUCTION_SERVICES_READY/);
+  assert.match(activate, /CONFIRM_INDEPENDENT_SECURITY_REVIEW/);
+  assert.match(activate, /simulateTransaction/);
+  assert.match(activate, /SUBMIT_MAINNET_ACTIVATE/);
+  assert.match(activate, /activeConfig\.paused, false/);
+});
+
 test('Mainnet artifact provenance requires the production feature in the binary', async () => {
   const [workspace, build, manifest, preflight, workflow] = await Promise.all([
     readFile(new URL('../Cargo.toml', import.meta.url), 'utf8'),
