@@ -29,7 +29,9 @@ test('keeper-accrued receipts refresh both the claim index and durable SOL ledge
 test('result and miners card resolve through independent bounded indexes', () => {
   assert.match(mine, /loadLatestSettledRoundId\(roundId\)/);
   assert.match(mine, /loadLatestPlayedSettledRoundId\(roundId\)/);
-  assert.match(mine, /state\.lastResolved = \{ roundId: BigInt\(resolvedRoundId\), \.\.\.round \}/);
+  assert.match(mine, /const resolvedId = BigInt\(resolvedRoundId\)/);
+  assert.match(mine, /state\.lastResolved = \{ roundId: resolvedId, \.\.\.round \}/);
+  assert.match(mine, /state\.winnerDisplayUntil = nowSeconds\(\) \+ WINNER_DISPLAY_DURATION/);
   assert.match(mine, /state\.lastPlayedResolved = participantRound/);
 });
 

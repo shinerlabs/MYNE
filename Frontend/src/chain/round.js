@@ -138,15 +138,16 @@ export const displayedWinningRound = ({
   protocolPaused = false,
   currentRound = null,
   lastResolved = null,
+  winnerDisplayUntil = 0n,
+  currentTime = nowSeconds(),
 }) => {
   if (protocolPaused) {
     if (currentRound?.resolved) return currentRound;
     if (lastResolved?.resolved) return lastResolved;
     return null;
   }
-  return roundPresentation(phase).showWinningTile && currentRound?.resolved
-    ? currentRound
-    : null;
+  if (roundPresentation(phase).showWinningTile && currentRound?.resolved) return currentRound;
+  return lastResolved?.resolved && currentTime < winnerDisplayUntil ? lastResolved : null;
 };
 
 if (BETTING_DURATION + RESOLUTION_COUNTDOWN_DURATION + WINNER_DISPLAY_DURATION !== ROUND_DURATION) {

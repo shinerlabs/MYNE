@@ -4041,10 +4041,11 @@ const renderChainResult = (state) => {
   column?.classList.remove('results-open');
 };
 
-// During live mining, highlight only the resolved current round in its five-second result window.
-// During a protocol pause no bid can be accepted, so pin the latest verified result even when the
-// scheduled current Round PDA does not exist. This keeps the published outcome visible throughout
-// maintenance without ever painting an old winner over an active betting board.
+// Every verified result receives a full five-second display window. Provider/RPC confirmation can
+// arrive near the next scheduled boundary, so this window is anchored to when the client first sees
+// the settled account rather than disappearing with the fixed wall-clock result phase. Tiles remain
+// interactive for the live round underneath the unmistakable previous-round winner overlay.
+// During a protocol pause, pin the newest verified result until mining resumes.
 const renderGridWinner = (state) => {
   const visibleWinner = displayedWinningRound(state);
   const inResult = state.phase === 'result';
@@ -5426,7 +5427,7 @@ const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty 
   if (roundMinersLabel) {
     roundMinersLabel.textContent = confirmedEmpty
       ? `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · 0 MINERS · 0 MYNE REWARDED`
-      : `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · ${confirmedMiners.length} MINER${confirmedMiners.length === 1 ? '' : 'S'} · SOL DEPLOYED`;
+      : `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · ${confirmedMiners.length} MINER${confirmedMiners.length === 1 ? '' : 'S'}`;
   }
   roundMinersList.textContent = '';
   const pageCount = Math.max(1, Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE));

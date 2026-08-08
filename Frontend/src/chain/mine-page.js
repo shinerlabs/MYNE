@@ -26,7 +26,9 @@ import { subscribeAccountActivity } from './protocol-realtime.js';
 import {
   loadLatestIndexedRoundId, loadLatestPlayedSettledRoundId, loadLatestSettledRoundId,
 } from './rounds-index.js';
-import { ROUND_DURATION, BETTING_DURATION, isPremine } from './config.js';
+import {
+  ROUND_DURATION, BETTING_DURATION, WINNER_DISPLAY_DURATION, isPremine,
+} from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
 import { claimStakingRewards as withdrawClaimableSol } from './staking.js';
 
@@ -74,6 +76,10 @@ export const state = {
   // lastResolved and publish their winning tile, but must not erase the most
   // recent participant/reward card.
   lastPlayedResolved: null,
+  // A provider result can finalize near (or just after) the next round boundary.
+  // Give every newly verified winner its own full five-second display window
+  // instead of tying visibility only to the fixed schedule's result phase.
+  winnerDisplayUntil: 0n,
   currentRound: null, // full readRound() of state.roundId — carries its own `resolved`/winner
   plan: null, // MYNE auto-plan for the connected account (null = none configured)
   autoPlanMaxFee: null, // live rent for one BetReceipt; null means the RPC quote is unavailable
@@ -385,7 +391,12 @@ async function loadResolved(roundId, attempt = 0) {
         : readRound(playedRoundId).catch(() => null),
     ]);
     if (round.resolved && state.roundId === BigInt(roundId) + 1n) {
-      state.lastResolved = { roundId: BigInt(resolvedRoundId), ...round };
+      const resolvedId = BigInt(resolvedRoundId);
+      const isNewResult = state.lastResolved?.roundId !== resolvedId;
+      state.lastResolved = { roundId: resolvedId, ...round };
+      if (isNewResult) {
+        state.winnerDisplayUntil = nowSeconds() + WINNER_DISPLAY_DURATION;
+      }
       const participantRound = playedRound?.resolved && playedRound.totalWager > 0n
         ? { roundId: BigInt(playedRoundId), ...playedRound }
         : round.totalWager > 0n
