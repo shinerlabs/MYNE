@@ -52,7 +52,7 @@ test('both initial funding and top-ups enforce the 90% boundary before submissio
   assert.doesNotMatch(main, /AUTO_FEE_WEI|AUTO_FEE_PER_ROUND|GAS_RESERVE_ETH/);
 });
 
-test('an existing auto plan owns the primary Mine action', async () => {
+test('an existing auto plan replaces the primary Mine action', async () => {
   const [minePage, main, styles] = await Promise.all([
     readFile(new URL('../src/chain/mine-page.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
@@ -60,9 +60,12 @@ test('an existing auto plan owns the primary Mine action', async () => {
   ]);
   assert.match(main, /const planOwnsAction = Boolean\(existingPlan\)/);
   assert.match(main, /deploy\.disabled = !protocolReady \|\| protocolPaused \|\| planOwnsAction/);
-  assert.match(main, /planStalled \? `\$\{planModeLabel\} NEEDS TOP-UP` : `\$\{planModeLabel\} ACTIVE`/);
+  assert.match(main, /deploy\.hidden = planOwnsAction/);
+  assert.match(main, /id="auto-plan-topup-amount"[\s\S]*id="topup-plan">Top up<[\s\S]*id="cancel-plan">Cancel &amp; withdraw/);
+  assert.match(main, /chain\.topUpPlan\(input\?\.value \?\? ''\)/);
+  assert.match(minePage, /export async function topUpPlan\(amountSol\)[\s\S]*value = parseEther\(amountSol\)/);
   assert.match(minePage, /if \(state\.plan\?\.enabled\)[\s\S]*is already active\. Use the plan controls to top up or cancel it/);
-  assert.match(styles, /#deploy\.auto-plan-status:disabled \{[\s\S]*background:\s*#f3f3f4 !important;[\s\S]*opacity:\s*1 !important/);
+  assert.match(styles, /\.auto-plan-topup-input \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) auto auto/);
 });
 
 test('Auto-mine controls use the final MYNE surface hierarchy', async () => {
