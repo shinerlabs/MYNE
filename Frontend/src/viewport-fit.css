@@ -833,6 +833,14 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
   }
 }
 
+/* PAUSED is wider than the numeric timer. Give the status word its own
+   container-relative scale so the summary column never crops its outer letters. */
+body[data-route="mine"] .round-summary.motherlode-inline > .time-stat.paused > strong {
+  max-width: calc(100% - 4px);
+  font-size: clamp(20px, 5.4cqw, 32px) !important;
+  letter-spacing: .01em !important;
+}
+
 /* Desktop route authority ---------------------------------------------------------------
    The legacy styles contain several mutually exclusive desktop experiments. Keep the final
    geometry here, after every visual layer, so changing window width never changes control scale

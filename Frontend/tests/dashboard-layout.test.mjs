@@ -192,6 +192,10 @@ test('desktop Mine uses a stable viewport frame and a bounded control rail', () 
   assert.match(fitStyles, /\.workspace\.page-view\.active \.control-column \{[\s\S]*overflow-y:\s*auto !important/);
 });
 
+test('paused Mine status scales inside the timer column without clipping', () => {
+  assert.match(fitStyles, /\.round-summary\.motherlode-inline > \.time-stat\.paused > strong \{[\s\S]*max-width:\s*calc\(100% - 4px\);[\s\S]*font-size:\s*clamp\(20px, 5\.4cqw, 32px\) !important/);
+});
+
 test('collapsing Social preserves Mine board and control tracks', () => {
   assert.match(fitStyles, /\.workspace\.page-view\.active\.chat-hidden \{[\s\S]*grid-template-columns:\s*clamp\(240px, 20vw, 360px\) minmax\(480px, 1fr\) clamp\(400px, 29vw, 500px\) !important/);
   assert.match(fitStyles, /\.workspace\.page-view\.active\.chat-hidden \{[\s\S]*margin:\s*8px 18px 0 !important/);
