@@ -182,9 +182,9 @@ test('server entropy delay fits inside the five-second winner phase', async () =
   );
 });
 
-test('generated keeper IDL includes every server commit-reveal instruction', async () => {
+test('committed synchronized IDL includes every server commit-reveal instruction', async () => {
   const idl = JSON.parse(await readFile(
-    new URL('../target/idl/myne_protocol.json', import.meta.url),
+    new URL('../../Frontend/src/generated/myne_protocol.json', import.meta.url),
     'utf8',
   ));
   const instructions = new Set(idl.instructions.map(({ name }) => name));
