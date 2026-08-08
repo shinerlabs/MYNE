@@ -7,6 +7,7 @@
   "scripts": {
     "build:mainnet": "./scripts/build-mainnet.sh",
     "test:local": "node tests/local-protocol.mjs",
+    "test:mainnet-receipt-upgrade-fork": "./scripts/test-mainnet-receipt-upgrade-fork.sh",
     "test:local:staking": "node tests/local-staking-smoke.mjs",
     "local:bootstrap": "node scripts/local-bootstrap.mjs",
     "local:keeper": "node scripts/local-keeper.mjs",

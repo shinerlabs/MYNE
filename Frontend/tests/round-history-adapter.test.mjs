@@ -5,6 +5,7 @@ import test from 'node:test';
 import { roundIdsForRange } from '../src/chain/round-range.js';
 
 const indexedReader = await readFile(new URL('../src/chain/rounds-index.js', import.meta.url), 'utf8');
+const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
 
 test('round history scans newest to oldest when requested by the Rounds page', () => {
   assert.deepEqual(roundIdsForRange(4n, 0n), {
@@ -25,8 +26,18 @@ test('round history supports ascending callers and reports its scan cap', () => 
 });
 
 test('paused round history counts indexed records instead of advancing with wall-clock ids', () => {
-  assert.match(indexedReader, /from\('mine_rounds'\)[\s\S]*select\('round_id', \{ count: 'exact' \}\)[\s\S]*range\(0, 0\)/);
-  assert.match(indexedReader, /const total = totalRounds\.count \?\? 0/);
-  assert.match(indexedReader, /summary: \{ count: total, mined, deployed, minted, jackpots \}/);
+  const statsReader = indexedReader.slice(
+    indexedReader.indexOf('export async function loadIndexedRoundStats'),
+    indexedReader.indexOf('export async function loadIndexedRounds'),
+  );
+  assert.match(statsReader, /from\('mine_rounds'\)[\s\S]*select\('round_id', \{ count: 'exact' \}\)[\s\S]*range\(0, 0\)/);
+  assert.match(statsReader, /count: totalRounds\.count \?\? 0/);
   assert.doesNotMatch(indexedReader, /total:\s*currentRoundId > 0n/);
+});
+
+test('Rounds headline stats refresh while paused or reconnecting after an upgrade', () => {
+  assert.match(main, /if \(target === 'rounds'\) \{\s*void refreshRoundStats\(\);\s*if \(protocolReady\) refreshRoundHistory/);
+  assert.match(main, /document\.body\.dataset\.route !== 'rounds'\) return;\s*void refreshRoundStats\(\);\s*if \(protocolReady/);
+  assert.match(main, /if \(route === 'rounds'\) \{\s*void refreshRoundStats\(\);\s*if \(protocolReady\) refreshRoundHistory/);
+  assert.match(main, /const refreshRoundStats = async \(\) => \{[\s\S]*loadIndexedRoundStats\(\)[\s\S]*renderRoundMetrics\(\)/);
 });

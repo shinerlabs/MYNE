@@ -15,7 +15,8 @@ import {
 import * as chain from './chain/mine-page.js';
 import { WALLET_LOGOS } from './wallet-logos.js';
 import {
-  loadRoundBets, countMyBetRounds, loadIndexedRounds, loadRoundRandomnessProof,
+  loadRoundBets, countMyBetRounds, loadIndexedRounds, loadIndexedRoundStats,
+  loadRoundRandomnessProof,
 } from './chain/rounds-index.js';
 import { loadRoundHistory } from './chain/rounds-page.js';
 import {
@@ -310,7 +311,7 @@ document.querySelector('#app').innerHTML = `
 
   <main class="workspace page-view" data-page="mine">
     ${socialPanel}
-    <section class="board-panel panel" aria-label="Mining tiles"><div class="slot-grid">${slots.map(([id, value]) => `<button class="slot" data-slot="${id}" aria-label="Tile ${id}, ${value} SOL deployed" aria-pressed="false"><span>#${id}</span><strong>${value}</strong></button>`).join('')}</div><div class="board-footer"><div class="round-reward" tabindex="0" aria-describedby="round-reward-tip"><span class="round-reward-label"><img src="/myne-token-icon.svg" alt=""/><b>+${isPremine ? '0.3' : '1'}</b><small>/ ROUND</small></span><aside class="round-reward-tip" id="round-reward-tip" role="tooltip"><strong>Mine ${isPremine ? '0.3' : '1'} MYNE</strong><p>${isPremine ? 'Premine emission is reduced until launch, and mined MYNE stays locked until liquidity opens.' : 'Mine MYNE every round for a chance to receive the Motherlode and staking bonus.'}</p></aside></div><button class="switchboard-proof-trigger" id="switchboard-proof-trigger" type="button" aria-haspopup="dialog" aria-label="Verify the round randomness proof"><span>Verifiably random on</span><img src="/solana-logo.svg" alt="Solana"/><b aria-hidden="true">↗</b></button></div></section>
+    <section class="board-panel panel" aria-label="Mining tiles"><div class="slot-grid">${slots.map(([id, value]) => `<button class="slot" data-slot="${id}" aria-label="Tile ${id}, ${value} SOL deployed" aria-pressed="false"><span>#${id}</span><strong>${value}</strong></button>`).join('')}</div><div class="board-footer"><div class="round-reward" tabindex="0" aria-describedby="round-reward-tip"><span class="round-reward-label"><img src="/myne-token-icon.svg" alt=""/><b>+${isPremine ? '0.3' : '1'}</b><small>/ ROUND</small></span><aside class="round-reward-tip" id="round-reward-tip" role="tooltip"><strong>Mine ${isPremine ? '0.3' : '1'} MYNE</strong><p>${isPremine ? 'Premine emission is reduced until launch, and mined MYNE stays locked until liquidity opens.' : 'Mine MYNE every round for a chance to receive the Motherlode and staking bonus.'}</p></aside></div><button class="switchboard-proof-trigger" id="switchboard-proof-trigger" type="button" aria-haspopup="dialog" aria-label="Verify the on-chain round randomness proof"><span>Verifiably random · on-chain</span><b aria-hidden="true">↗</b></button></div></section>
     <aside class="control-column"><section class="round-summary panel"><div class="summary-stat"><span>DEPLOYED</span><strong>${solIcon('summary-eth')} 0.00</strong><small>≈— USDC</small></div><div class="summary-stat"><span>MOTHERLODE</span><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong><small>MYNE</small></div><div class="summary-stat"><span>TIME</span><strong>—</strong><small>Round #—</small></div></section><section class="deploy-panel panel"><div class="deploy-head"><div><span class="eyebrow">MINT MYNE</span><h2>Configure mine</h2></div><div class="refine-chip" id="mined-chip"><span>${isPremine ? 'MINED · LOCKED' : 'UNCLAIMED'}</span><b><img src="/myne-token-icon.svg" alt=""/> <em id="mined-chip-value">0.000</em></b></div></div><button class="last-round" data-route="rounds"><span>Last round</span><aside>${icon('grid')} #— <b>—</b> ${icon('chevron')}</aside></button><div class="amount-label-bar"><label class="amount-label" for="amount"><span>SOL per tile</span><small>Balance — SOL</small></label><button class="mine-currency-toggle" id="mine-currency-toggle" type="button" aria-pressed="false" aria-label="Show mining values in USDC"><span>SOL</span><i></i><b><span>USDC</span></b></button></div><div class="amount-display"><i class="extraction-field" aria-hidden="true"></i>${solIcon('amount-eth mine-sol-mark')}${usdcIcon('amount-usd-mark mine-usdc-mark')}<input id="amount" value="" placeholder="0.00" inputmode="decimal" aria-label="SOL per tile" autocomplete="off" autocorrect="off" spellcheck="false"/><span>SOL</span></div><div class="quick-amounts"><button data-add="0.0001">+0.0001</button><button data-add="0.001">+0.001</button><button data-add="0.01">+0.01</button><button data-add="0.1">+0.1</button></div><small class="amount-min" hidden></small><div class="configuration"><div class="config-row"><div><b>Tiles</b><small id="tile-helper">No tiles selected</small></div><div class="stepper"><button id="all">ALL</button><button id="tiles-minus" aria-label="Remove tile">${icon('minus')}</button><strong id="tile-count">0</strong><button id="tiles-plus" aria-label="Add tile">${icon('plus')}</button></div></div><div class="config-row auto-row"><div><b>Auto-round</b><small id="auto-helper">Manually enter each round</small></div><button class="auto-toggle" id="auto-round" role="switch" aria-checked="false"><span></span><b>Off</b></button></div><div class="config-row rounds-config"><div><b>Rounds</b><small id="round-helper">Repeat deployment</small></div><div class="stepper compact"><button id="rounds-minus" aria-label="Remove round">${icon('minus')}</button><strong id="round-count">1</strong><button id="rounds-plus" aria-label="Add round">${icon('plus')}</button></div><button class="until-balance-toggle" id="until-balance" role="switch" aria-checked="false" title="Fund as many rounds as your wallet balance allows"><span></span><b>Max</b></button></div><div class="config-row auto-claim-row" hidden><div><b>Auto-claim</b><small>Settle and reclaim after each round</small></div><button class="auto-toggle" id="auto-claim" role="switch" aria-checked="true"><span></span><b>On</b></button></div></div><div class="total-row per-round-row" id="per-round-row" hidden><div><span>Total per round</span></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('per-round-eth mine-sol-mark')}${usdcIcon('per-round-usdc mine-usdc-mark')}</span><em id="per-round-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="total-row"><div><span>Total deployment</span><small id="total-detail">0 tiles × 0.00 SOL × 1 round</small></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('total-eth mine-sol-mark')}${usdcIcon('total-usdc mine-usdc-mark')}</span><em id="total-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="auto-plan" id="auto-plan" hidden></div><button class="deploy" id="deploy"><i class="mine-button-mark"><img src="/myne-token-icon.svg" alt=""/></i><span>MINE</span><b aria-hidden="true">→</b></button><div class="security-note">${icon('shield')} Transactions settle on Solana</div></section><section class="miners round-results panel" hidden aria-live="polite"><div class="miners-head"><div><span class="eyebrow">CONFIRMED ROUND · #—</span><h2>Miners</h2></div><button data-route="rounds">History</button></div><div class="settlement-result"><span><small>WINNING TILE</small><strong>#—</strong></span><span><small>OUTCOME · 50/50</small><strong>${solIcon()} 0.00</strong></span><span><small>REWARD</small><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong></span></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="next-round"><span>NEXT ROUND</span><b>—</b></div></section></aside>
   </main>
 
@@ -799,7 +800,7 @@ const openRandomnessProof = async () => {
       const result = await verifyRoundFairness(BigInt(roundId), randomness, winningSquare, indexedProof);
       const status = panel.querySelector('[data-proof-status]');
       status.textContent = result?.ok
-        ? (serverMode ? 'Verified against Solana entropy' : 'Verified on-chain')
+        ? 'Verified by Solana'
         : serverMode && result?.outcomeMatches && result?.serverCommitmentMatches
           && result?.serverOutputMatches && result?.solanaSlotHashMatches === null
           ? 'Hashes verified · historical block unavailable from RPC'
@@ -2985,7 +2986,10 @@ const setRoute = (route, { updateHash = true, aboutTarget } = {}) => {
   scheduleSocialLoad(target);
   if (target === 'mine') renderChain(chain.state);
   if (target === 'about') setAboutSection(aboutTarget || 'intro');
-  if (protocolReady && target === 'rounds') refreshRoundHistory({ force: true });
+  if (target === 'rounds') {
+    void refreshRoundStats();
+    if (protocolReady) refreshRoundHistory({ force: true });
+  }
   if (protocolReady && target === 'referrals') { refreshReferral(); renderLeaderboard(); renderMyReferrals(); }
   if (protocolReady && target === 'stake') refreshStaking();
   if (protocolReady && target === 'swap') refreshSwap();
@@ -4306,17 +4310,25 @@ window.setInterval(() => {
 
 // Rounds page gets its own faster loop — history should land seconds after settlement.
 window.setInterval(() => {
-  if (document.hidden || !protocolReady || document.body.dataset.route !== 'rounds') return;
-  if (!document.querySelector('.round-entry.expanded')) refreshRoundHistory({ force: true });
+  if (document.hidden || document.body.dataset.route !== 'rounds') return;
+  void refreshRoundStats();
+  if (protocolReady && !document.querySelector('.round-entry.expanded')) {
+    refreshRoundHistory({ force: true });
+  }
 }, ROUNDS_POLL_MS);
 
 // Catch up immediately when the tab regains focus, rather than waiting for the next tick.
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden || !protocolReady) return;
+  if (document.hidden) return;
   const route = document.body.dataset.route;
+  if (route === 'rounds') {
+    void refreshRoundStats();
+    if (protocolReady) refreshRoundHistory({ force: true });
+    return;
+  }
+  if (!protocolReady) return;
   if (route === 'referrals') { refreshReferral(true); renderLeaderboard(true); }
   else if (route === 'stake') refreshStaking();
-  else if (route === 'rounds') refreshRoundHistory({ force: true });
   else if (route === 'about' && document.querySelector('[data-about-panel="stats"].active')) void refreshProtocolStats(true);
 });
 
@@ -4926,6 +4938,7 @@ let roundHistory = [];
 // query is still in flight; without this guard that late response can restore
 // wallet A's actionable buttons after the UI has switched to wallet B.
 let roundHistoryRefreshId = 0;
+let roundStatsRefreshId = 0;
 // Paginated FULL history (see chain/rounds-page.js). These mirror loadRoundHistory's return.
 let roundPage = 0;
 let roundPages = 1;
@@ -5309,6 +5322,10 @@ const renderRoundHistory = () => {
   }
 
   renderPagination();
+  renderRoundMetrics();
+};
+
+const renderRoundMetrics = () => {
   // Metrics summarise ALL of history (from loadRoundHistory), not just the visible page.
   const s = roundStats;
   if (s && roundMetrics.length >= 4) {
@@ -5359,6 +5376,16 @@ const refreshRoundHistory = async ({ force = false } = {}) => {
   } catch (error) {
     console.warn('round history failed', error);
   }
+};
+
+const refreshRoundStats = async () => {
+  const requestId = ++roundStatsRefreshId;
+  const stats = await loadIndexedRoundStats();
+  if (requestId !== roundStatsRefreshId || !stats) return;
+  roundStats = stats;
+  roundTruncated = false;
+  renderRoundMetrics();
+  void renderSupply();
 };
 
 // Jump to a page and reload. `first`/`prev`/`next`/`last` or an absolute index.

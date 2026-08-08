@@ -200,6 +200,46 @@ export async function indexAvailable() {
 }
 
 /**
+ * Finalized lifetime totals for the Rounds headline.
+ *
+ * This read deliberately has no wallet, IDL, or live-program dependency. The
+ * metrics therefore remain available while mining is paused and while a newly
+ * upgraded program client is still reconnecting. The index remains a cache of
+ * finalized chain events; an unavailable index returns null rather than a
+ * fabricated zero.
+ */
+export async function loadIndexedRoundStats() {
+  if (!(await indexAvailable())) return null;
+  try {
+    const summaryQuery = supabase
+      .from('mine_round_stats')
+      .select('mined, deployed_wei::text, minted_wei::text, jackpots')
+      .single();
+
+    // Count records that actually exist. Scheduled ids continue advancing
+    // while paused, so they are not a truthful lifetime-round total.
+    const totalQuery = supabase
+      .from('mine_rounds')
+      .select('round_id', { count: 'exact' })
+      .range(0, 0);
+
+    const [summary, totalRounds] = await Promise.all([summaryQuery, totalQuery]);
+    if (summary.error || totalRounds.error) return null;
+
+    const row = summary.data ?? {};
+    return {
+      count: totalRounds.count ?? 0,
+      mined: Number(row.mined ?? 0),
+      deployed: unwrap(row.deployed_wei),
+      minted: unwrap(row.minted_wei),
+      jackpots: Number(row.jackpots ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * One page of history plus the totals across ALL rounds.
  *
  * The summary is deliberately computed server-side: it covers every round ever played, which is
@@ -217,39 +257,14 @@ export async function loadIndexedRounds({ page, pageSize, filter }) {
       filter,
     ).order('round_id', { ascending: false }).range(from, from + pageSize - 1);
 
-    // Totals come from a Postgres view, not from summing rows here: PostgREST caps an unbounded
-    // select at 1000 rows, and with 1140 resolved rounds a client-side sum silently aggregated
-    // an arbitrary subset — it reported 0 motherlodes while the motherlode filter showed 9.
-    const summaryQuery = supabase
-      .from('mine_round_stats')
-      .select('mined, deployed_wei::text, minted_wei::text, jackpots')
-      .single();
-
-    // History counts records that actually exist, not schedule ids derived
-    // from the clock. The latter continues increasing while mining is paused
-    // and made the ROUNDS metric disagree with both the ledger and paginator.
-    // This exact-count query returns at most one row, so it remains constant
-    // size as history grows.
-    const totalQuery = supabase
-      .from('mine_rounds')
-      .select('round_id', { count: 'exact' })
-      .range(0, 0);
-
-    const [list, summary, totalRounds] = await Promise.all([listQuery, summaryQuery, totalQuery]);
-    if (list.error || summary.error || totalRounds.error) return null;
-
-    const st = summary.data ?? {};
-    const deployed = unwrap(st.deployed_wei);
-    const minted = unwrap(st.minted_wei);
-    const jackpots = Number(st.jackpots ?? 0);
-    const mined = Number(st.mined ?? 0);
-    const total = totalRounds.count ?? 0;
+    const [list, stats] = await Promise.all([listQuery, loadIndexedRoundStats()]);
+    if (list.error || !stats) return null;
 
     return {
       rows: (list.data ?? []).map(fromRow),
       filteredTotal: list.count ?? 0,
-      total,
-      summary: { count: total, mined, deployed, minted, jackpots },
+      total: stats.count,
+      summary: stats,
     };
   } catch {
     return null;

@@ -71,6 +71,14 @@ test('server deploy omits the optional account and proof UI never Explorer-links
   assert.doesNotMatch(main, /explorerAddress\(commitment\)/);
 });
 
+test('randomness UI distinguishes the on-chain claim from the Solana verification result', async () => {
+  const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+  assert.match(main, /<span>Verifiably random · on-chain<\/span>/);
+  assert.doesNotMatch(main, /<span>Verifiably random on<\/span><img[^>]+solana-logo/);
+  assert.match(main, /status\.textContent = result\?\.ok[\s\S]*\? 'Verified by Solana'/);
+  assert.doesNotMatch(main, /Verified against Solana entropy/);
+});
+
 test('an emergency protocol pause is reported before any randomness preparation error', async () => {
   const [lottery, autoPlan, minePage, main] = await Promise.all([
     readFile(new URL('../src/chain/lottery.js', import.meta.url), 'utf8'),
