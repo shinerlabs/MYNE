@@ -88,8 +88,9 @@ test('an emergency protocol pause is reported before any randomness preparation 
   assert.match(autoPlan, /const configState = await getProtocolConfig\(\);[\s\S]*if \(configState\.paused\)[\s\S]*Auto-round cannot be started right now/);
   assert.match(autoPlan, /export async function depositToPlan[\s\S]*getProtocolConfig\(\)[\s\S]*Auto-round cannot be funded right now/);
   assert.match(minePage, /protocolPaused:\s*null/);
-  assert.match(minePage, /getProtocolConfig\(\)\.catch\(\(\) => null\)/);
-  assert.match(minePage, /state\.protocolPaused = Boolean\(config\.paused\)/);
+  assert.match(minePage, /Promise\.allSettled\(\[[\s\S]*getProtocolConfig\(\)/);
+  assert.match(minePage, /configResult\.status === 'fulfilled'[\s\S]*state\.protocolPaused = Boolean\(configResult\.value\.paused\)/);
+  assert.match(minePage, /roundResult\.status === 'rejected'[\s\S]*emit\(\)/);
   assert.match(main, /const protocolPaused = chain\.state\.protocolPaused === true/);
   assert.match(main, /deploy\.disabled = !protocolReady \|\| protocolPaused/);
   assert.match(main, /protocolPaused \? 'MINING PAUSED'/);

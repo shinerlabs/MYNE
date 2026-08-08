@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { setGenesisTime } from '../src/chain/config.js';
-import { roundPhaseLabel, roundPresentation, roundState } from '../src/chain/round.js';
+import {
+  displayedWinningRound, roundPhaseLabel, roundPresentation, roundState,
+} from '../src/chain/round.js';
 import { minuteApyPercent } from '../src/chain/staking-apy.js';
 
 test('round timing is 60 seconds betting followed directly by 5 showing the winner', () => {
@@ -37,6 +39,25 @@ test('result highlights the winning tile without replacing the mining UI', () =>
     showWinningTile: true,
     showResultTakeover: false,
   });
+});
+
+test('a protocol pause pins the latest verified winner without leaking it into live betting', () => {
+  const current = { resolved: true, winningSquare: 7 };
+  const unresolved = { resolved: false, winningSquare: 255 };
+  const previous = { resolved: true, winningSquare: 20 };
+
+  assert.equal(displayedWinningRound({
+    phase: 'betting', protocolPaused: false, currentRound: null, lastResolved: previous,
+  }), null);
+  assert.equal(displayedWinningRound({
+    phase: 'result', protocolPaused: false, currentRound: current, lastResolved: previous,
+  }), current);
+  assert.equal(displayedWinningRound({
+    phase: 'betting', protocolPaused: true, currentRound: unresolved, lastResolved: previous,
+  }), previous);
+  assert.equal(displayedWinningRound({
+    phase: 'betting', protocolPaused: true, currentRound: current, lastResolved: previous,
+  }), current);
 });
 
 test('winner tile reuses the branded multi-colour countdown overlay', async () => {

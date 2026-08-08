@@ -112,13 +112,23 @@ async function refreshRound() {
     const { roundId } = state;
     // One Round PDA contains both tile totals and tile participant counts. Reading it once avoids
     // two duplicate getAccountInfo calls on every five-second refresh (and during the result poll).
-    const [round, config] = await Promise.all([
+    const [roundResult, configResult] = await Promise.allSettled([
       readRound(roundId),
       // A temporary config read failure must not hide public round data. Leave
       // the previous pause value intact and let the next five-second poll retry.
-      getProtocolConfig().catch(() => null),
+      getProtocolConfig(),
     ]);
-    if (config) state.protocolPaused = Boolean(config.paused);
+    if (configResult.status === 'fulfilled') {
+      state.protocolPaused = Boolean(configResult.value.paused);
+    }
+    // A paused schedule may have no current Round PDA. Preserve the separately
+    // fetched pause flag so the renderer can pin the latest verified winner,
+    // then surface the round read failure through the existing retry path.
+    if (roundResult.status === 'rejected') {
+      emit();
+      throw roundResult.reason;
+    }
+    const round = roundResult.value;
     state.squareTotals = round.tileLamports ?? Array(25).fill(0n);
     state.squareMiners = round.tileReceipts ?? Array(25).fill(0n);
     state.totalWager = round.totalWager;

@@ -38,6 +38,7 @@ import {
   shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
+import { displayedWinningRound } from './chain/round.js';
 import { readSupplyStats } from './chain/supply.js';
 import { renderProtocolStats } from './about-stats.js';
 import {
@@ -3757,14 +3758,15 @@ const renderChainResult = (state) => {
   column?.classList.remove('results-open');
 };
 
-// Highlight the winning tile on the grid ONLY for the current round, and only during its final
-// five-second result window. Never paint an older round's winner onto a
-// fresh betting grid — that's the current round people are betting on right now.
+// During live mining, highlight only the resolved current round in its five-second result window.
+// During a protocol pause no bid can be accepted, so pin the latest verified result even when the
+// scheduled current Round PDA does not exist. This keeps the published outcome visible throughout
+// maintenance without ever painting an old winner over an active betting board.
 const renderGridWinner = (state) => {
-  const cur = state.currentRound;
+  const visibleWinner = displayedWinningRound(state);
   const inResult = state.phase === 'result';
-  const show = chain.format.roundPresentation(state.phase).showWinningTile && Boolean(cur?.resolved);
-  const winSquare = show ? Number(cur.winningSquare) : -1;
+  const show = Boolean(visibleWinner);
+  const winSquare = show ? Number(visibleWinner.winningSquare) : -1;
   document.querySelectorAll('.slot').forEach((tile) => {
     const isWinner = Number(tile.dataset.slot) - 1 === winSquare;
     tile.classList.toggle('round-winner', isWinner);
@@ -3774,11 +3776,14 @@ const renderGridWinner = (state) => {
     const picked = selected.has(tile.dataset.slot);
     tile.classList.toggle('selected', picked);
     tile.setAttribute('aria-pressed', String(picked));
+    const label = (tile.getAttribute('aria-label') || '').replace(/, winning tile$/, '');
+    tile.setAttribute('aria-label', `${label}${isWinner ? ', winning tile' : ''}`);
   });
   document.querySelector('.slot-grid')?.classList.toggle('revealing', show);
   // Hide current-selection markers throughout the short result window, including the RPC
-  // confirmation gap before the settled round account arrives.
-  document.querySelector('.slot-grid')?.classList.toggle('in-reveal', inResult);
+  // confirmation gap before the settled round account arrives. Keep them hidden while paused too,
+  // so the persistent winner overlay remains the board's unmistakable primary state.
+  document.querySelector('.slot-grid')?.classList.toggle('in-reveal', inResult || show);
 };
 
 // --- chain rendering -----------------------------------------------------------------

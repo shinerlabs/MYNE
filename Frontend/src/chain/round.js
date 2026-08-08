@@ -80,6 +80,31 @@ export const roundPresentation = (phase) => ({
   showResultTakeover: false,
 });
 
+/**
+ * Select the verified round whose winner may be painted on the live grid.
+ *
+ * During normal operation an older winner must never cover a board that is
+ * accepting bids, so only the resolved current round is visible in its result
+ * window. A protocol pause is different: no bid can be accepted, and the
+ * scheduled current Round PDA may not exist. Keep the newest resolved result
+ * visible for transparency until mining resumes.
+ */
+export const displayedWinningRound = ({
+  phase,
+  protocolPaused = false,
+  currentRound = null,
+  lastResolved = null,
+}) => {
+  if (protocolPaused) {
+    if (currentRound?.resolved) return currentRound;
+    if (lastResolved?.resolved) return lastResolved;
+    return null;
+  }
+  return roundPresentation(phase).showWinningTile && currentRound?.resolved
+    ? currentRound
+    : null;
+};
+
 if (BETTING_DURATION + RESOLUTION_COUNTDOWN_DURATION + WINNER_DISPLAY_DURATION !== ROUND_DURATION) {
   throw new Error('Frontend round phases do not add up to the configured round duration');
 }

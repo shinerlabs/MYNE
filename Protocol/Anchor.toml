@@ -29,7 +29,7 @@ upgradeable = true
 [test.validator]
 # Keep automated integration tests isolated from the long-running local viewer
 # validator, which uses Solana's default RPC/faucet ports (8899/9900).
-rpc_port = 19999
-faucet_port = 20151
-gossip_port = 20152
-dynamic_port_range = "20153-20300"
+rpc_port = 29999
+faucet_port = 30151
+gossip_port = 30152
+dynamic_port_range = "30153-30300"
