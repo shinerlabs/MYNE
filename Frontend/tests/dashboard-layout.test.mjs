@@ -45,10 +45,11 @@ test('stake shell uses scrollbar-safe gutters and clears retired reward-card off
   assert.match(styles, /@media \(max-width: 560px\)[\s\S]*width:\s*calc\(100% - 20px\) !important/);
 });
 
-test('stake reward actions share one compact row on mobile', () => {
-  assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-dashboard \.eth-claim-actions \{[\s\S]*grid-template-columns:\s*auto minmax\(0, 1fr\) !important;[\s\S]*grid-template-rows:\s*44px !important/);
-  assert.match(fitStyles, /\.eth-claim-actions > \.staking-share-group \{[\s\S]*grid-column:\s*1 !important;[\s\S]*justify-content:\s*flex-start !important/);
-  assert.match(fitStyles, /\.eth-claim-actions > #claim-stake-rewards \{[\s\S]*grid-column:\s*2 !important;[\s\S]*grid-row:\s*1 !important/);
+test('stake claim, FLEX and calculator actions share one compact row on mobile', () => {
+  assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-overview > \.stake-rewards > \.eth-claim-actions \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) auto minmax\(86px, auto\) !important;[\s\S]*grid-template-rows:\s*44px !important/);
+  assert.match(fitStyles, /\.eth-claim-actions > #claim-stake-rewards \{[\s\S]*grid-column:\s*1 !important;[\s\S]*grid-row:\s*1 !important/);
+  assert.match(fitStyles, /\.eth-claim-actions > \.staking-share-group \{[\s\S]*grid-column:\s*2 !important;[\s\S]*grid-row:\s*1 !important/);
+  assert.match(fitStyles, /\.eth-claim-actions > \.stake-calculator-trigger \{[\s\S]*grid-column:\s*3 !important;[\s\S]*grid-row:\s*1 !important/);
 });
 
 test('compact Stake keeps rewards bounded and APY metadata readable', () => {
@@ -86,7 +87,19 @@ test('staking history lives only in About while Stake stays operational', () => 
 
 test('claimable SOL actions stack below the primary balance without collisions', () => {
   assert.match(styles, /\.staking-dashboard \.eth-claim-actions \{[\s\S]*grid-template-rows:\s*auto 44px !important/);
-  assert.match(styles, /#claim-stake-rewards \{[\s\S]*grid-column:\s*1 \/ -1 !important/);
+  assert.match(fitStyles, /\.eth-claim-actions > #claim-stake-rewards \{[\s\S]*grid-column:\s*2 !important;[\s\S]*grid-row:\s*1 !important/);
+  assert.match(fitStyles, /\.eth-claim-actions > \.stake-calculator-trigger \{[\s\S]*grid-column:\s*1 \/ -1 !important;[\s\S]*grid-row:\s*2 !important/);
+});
+
+test('staking calculator is a responsive shareable dialog with both staking tiers', () => {
+  assert.match(source, /id="open-stake-calculator"[\s\S]*aria-controls="stake-calculator"/);
+  assert.match(source, /id="stake-calculator" role="dialog" aria-modal="true"/);
+  assert.match(source, /data-calculator-tier="standard"[\s\S]*data-calculator-tier="burn"/);
+  assert.match(source, /const share = projectedTotalWeight > 0 \? weight \/ projectedTotalWeight : null/);
+  assert.match(source, /rewardsToStakersEth/);
+  assert.match(source, /#stake\?\$\{params\.toString\(\)\}/);
+  assert.match(fitStyles, /\.staking-calculator-overlay \{[\s\S]*position:\s*fixed;[\s\S]*place-items:\s*center/);
+  assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-calculator-overlay \.projection-card \{[\s\S]*display:\s*none/);
 });
 
 test('staking overview and actions finish on the same desktop baseline', () => {

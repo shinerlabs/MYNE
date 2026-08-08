@@ -355,8 +355,9 @@ document.querySelector('#app').innerHTML = `
       </div>
       <div class="eth-claim-actions">
         <div class="eth-lifetime"><span>CLAIMED SOL</span><strong id="stake-lifetime-eth">—</strong><small>History not indexed</small></div>
-        <div class="staking-share-group"><div><button id="stake-flex-card" class="stake-flex-trigger" type="button">FLEX</button></div></div>
         <button id="claim-stake-rewards">Connect to claim</button>
+        <div class="staking-share-group"><div><button id="stake-flex-card" class="stake-flex-trigger" type="button">FLEX</button></div></div>
+        <button id="open-stake-calculator" class="stake-calculator-trigger" type="button" aria-haspopup="dialog" aria-controls="stake-calculator">CALCULATOR</button>
       </div>
       <aside class="stake-reward-estimate" aria-live="polite">
         <div class="stake-estimate-values">
@@ -379,14 +380,16 @@ document.querySelector('#app').innerHTML = `
         <section class="staking-layout">
           <article class="stake-composer panel"><div class="stake-heading"><span class="eyebrow">NEW POSITION</span><h2>Stake</h2></div><label class="stake-amount-label" for="stake-amount"><span>Amount</span><small>2,500 MYNE</small></label><div class="stake-amount"><img src="/myne-token-icon.svg" alt=""/><input id="stake-amount" value="0" inputmode="decimal" aria-label="MYNE to stake"/><span>MYNE</span><button id="stake-max">MAX</button></div><div class="unstake-policy"><i>30</i><div><span>UNSTAKING</span><b>30-day withdrawal queue</b><p>Request withdrawal at any time. Your MYNE becomes claimable 30 days later.</p></div></div><button class="stake-submit" id="stake-submit">Enter amount</button><small class="stake-caution">Unstaking requests have a 30-day cooldown.</small></article>
         </section>
-        <section class="staking-calculator panel" hidden>
-      <header class="calculator-head"><div><span class="eyebrow">REWARD CALCULATOR</span><h2>Project your stake.</h2><p>SOL rewards funded by 8% of mining volume.</p></div><div class="projection-period" role="group" aria-label="Projection period"><button class="active" data-projection-days="30">30D</button><button data-projection-days="90">90D</button><button data-projection-days="180">180D</button><button data-projection-days="365">1Y</button></div></header>
+        <div class="staking-calculator-overlay" hidden>
+        <section class="staking-calculator panel" id="stake-calculator" role="dialog" aria-modal="true" aria-labelledby="stake-calculator-title">
+      <header class="calculator-head"><div><span class="eyebrow">REWARD CALCULATOR</span><h2 id="stake-calculator-title">Plan your MYNE stake.</h2><p>Compare flexible staking with permanent Stake + Burn.</p></div><div class="calculator-head-actions"><div class="projection-period" role="group" aria-label="Projection period"><button class="active" data-projection-days="30">30D</button><button data-projection-days="90">90D</button><button data-projection-days="180">180D</button><button data-projection-days="365">1Y</button></div><button class="calculator-close" type="button" data-calculator-close aria-label="Close staking calculator">×</button></div></header>
       <div class="calculator-layout">
-        <div class="projection-controls"><label for="calculator-amount"><span>MYNE STAKED</span><small>Revenue-based estimate</small></label><div class="calculator-input"><img src="/myne-token-icon.svg" alt=""/><input id="calculator-amount" value="150" inputmode="decimal" aria-label="MYNE staking projection amount"/><span>MYNE</span></div><div class="projection-results"><article><span>EST. MINING SOL</span><strong>${solIcon()} <b id="projected-eth">—</b></strong><small class="projection-usd" id="projected-eth-usd" aria-label="Estimated mining SOL value in US dollars">—</small></article></div><p class="projection-note">Uses the same live standard APY snapshot shown across MYNE. Actual rewards follow mining volume and market price.</p></div>
-        <article class="projection-card" id="projection-card" aria-label="Shareable staking projection"><header><div><img src="/myne-token-icon.svg" alt=""/><b>MYNE</b></div><span>STAKING PROJECTION</span></header><div class="projection-card-principal"><small>STAKING</small><strong><b id="card-principal">150</b> MYNE</strong><span id="card-period">30 DAYS</span></div><div class="projection-card-rewards"><span><small>MINING SOL</small><strong>${solIcon()} <b id="card-eth">—</b></strong></span><span><small>STANDARD APY</small><strong><b id="card-apy">—</b></strong></span></div><footer><span>Powered by Solana</span><code id="card-link">—</code></footer></article>
+        <div class="projection-controls"><div class="calculator-tier" role="group" aria-label="Staking type"><button class="active" type="button" data-calculator-tier="standard" aria-pressed="true"><b>Standard Stake</b><small>1× weight · flexible</small></button><button type="button" data-calculator-tier="burn" aria-pressed="false"><b>Stake + Burn</b><small>5× weight · permanent</small></button></div><label for="calculator-amount"><span>MYNE AMOUNT</span><small>Wallet connection not required</small></label><div class="calculator-input"><img src="/myne-token-icon.svg" alt=""/><input id="calculator-amount" value="150" inputmode="decimal" aria-label="MYNE staking projection amount"/><span>MYNE</span></div><div class="projection-results"><article><span>EST. PERIOD REWARD</span><strong>${solIcon()} <b id="projected-eth">—</b></strong><small class="projection-usd" id="projected-eth-usd" aria-label="Estimated reward value in US dollars">—</small></article><article><span>EST. DAILY</span><strong>${solIcon()} <b id="projected-daily">—</b></strong><small>SOL / DAY</small></article><article><span>POOL WEIGHT</span><strong><b id="projected-weight">—</b></strong><small>MYNE WEIGHT</small></article><article><span>PROJECTED SHARE</span><strong><b id="projected-share">—</b></strong><small>OF STAKING POOL</small></article></div><p class="projection-note" id="projection-note">Waiting for the latest verified staking reward window.</p></div>
+        <article class="projection-card" id="projection-card" aria-label="Shareable staking projection"><header><div><img src="/myne-token-icon.svg" alt=""/><b>MYNE</b></div><span>STAKING PROJECTION</span></header><div class="projection-card-principal"><small id="card-tier">STANDARD STAKE · 1× WEIGHT</small><strong><b id="card-principal">150</b> MYNE</strong><span id="card-period">30 DAYS</span></div><div class="projection-card-rewards"><span><small>EST. SOL</small><strong>${solIcon()} <b id="card-eth">—</b></strong></span><span><small>EST. APY</small><strong><b id="card-apy">—</b></strong></span></div><footer><span>Current-rate estimate · not guaranteed</span><code id="card-link">myne.supply</code></footer></article>
       </div>
-      <div class="calculator-actions"><button id="share-projection"><span>Share card</span><b>↗</b></button><a id="share-projection-x" href="#" target="_blank" rel="noreferrer">${icon('x')} Share on X</a><button id="copy-projection-link">Copy referral link</button></div>
+      <div class="calculator-actions"><button id="share-projection"><span>Share card</span><b>↗</b></button><a id="share-projection-x" href="#" target="_blank" rel="noreferrer">${icon('x')} Share on X</a><button id="copy-projection-link">Copy estimate link</button></div>
         </section>
+        </div>
       </div>
     </div>
   </main>
@@ -1153,8 +1156,11 @@ const formerLiquidityLine = [...feeAbout.querySelectorAll('small')].find((line) 
 if (formerLiquidityLine) formerLiquidityLine.remove();
 feeAbout.querySelector('.worked-example p').innerHTML = '<b>0.12 SOL</b>: 0.072 stakers · 0.008 staking admin · 0.02 Motherlode · 0.01 buyback and burn · 0.01 direct admin.';
 feeAbout.querySelector('.liquidity-callout p').textContent = 'The net 7.2% staker allocation is deposited into MYNE’s on-chain staking reward vault every round.';
-const stakingCalculator = document.querySelector('.staking-calculator');
-stakingCalculator.hidden = true;
+const stakingCalculatorOverlay = document.querySelector('.staking-calculator-overlay');
+const stakingCalculator = stakingCalculatorOverlay?.querySelector('.staking-calculator');
+// The compact Stake dashboard hides its inactive Actions panel. Mount the modal at document level
+// so the calculator remains available from the Rewards panel at every viewport size.
+if (stakingCalculatorOverlay) document.body.append(stakingCalculatorOverlay);
 
 const referralShell = document.querySelector('[data-page="referrals"]');
 if (referralShell) {
@@ -2433,19 +2439,61 @@ stakeFlexDialog?.querySelectorAll('#stake-flex-x, #stake-flex-tg').forEach((shar
 
 const REF_SHARE_TEXT = 'Mine scarce MYNE on Solana';
 let projectionDays = 30;
-let latestProjection = { principal: 150, eth: null, ethUsd: null, apy: null };
+let projectionTier = 'standard';
+let latestProjection = {
+  principal: 150, tier: 'standard', tierLabel: 'Standard Stake', weight: 150,
+  sharePct: null, daily: null, eth: null, ethUsd: null, apy: null,
+};
 const compactAmount = (value, digits = 3) => value == null ? '—' : Number(value).toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const projectionSol = (value) => value == null ? '—' : Number(value).toLocaleString(undefined, {
+  minimumFractionDigits: value > 0 && value < .001 ? 6 : 3,
+  maximumFractionDigits: 6,
+});
+const calculatorHash = () => {
+  const params = new URLSearchParams({
+    calculator: '1',
+    amount: String(latestProjection.principal),
+    tier: latestProjection.tier,
+    days: String(projectionDays),
+  });
+  return `#stake?${params.toString()}`;
+};
+const calculatorUrl = () => `${window.location.origin}/${calculatorHash()}`;
 
 const updateProjection = () => {
   const principal = Math.max(0, Number(calculatorAmount.value || 0));
-  const apy = stakingMetricsState?.apyStandardPct;
-  const mynePerSol = getLiveMynePerSol();
-  const ethReward = Number.isFinite(apy) && apy >= 0 && mynePerSol > 0
-    ? (principal / mynePerSol) * (apy / 100) * (projectionDays / 365)
+  const metrics = stakingMetricsState;
+  const multiplier = projectionTier === 'burn' ? 5 : 1;
+  const tierLabel = projectionTier === 'burn' ? 'Stake + Burn' : 'Standard Stake';
+  const weight = principal * multiplier;
+  const currentWeight = Number(metrics?.totalWeight);
+  const projectedTotalWeight = Number.isFinite(currentWeight) && currentWeight >= 0
+    ? currentWeight + weight
+    : null;
+  const share = projectedTotalWeight > 0 ? weight / projectedTotalWeight : null;
+  const dailyPool = Number(metrics?.rewardsToStakersEth);
+  const dailyReward = share != null && Number.isFinite(dailyPool) && dailyPool >= 0
+    ? dailyPool * share
+    : null;
+  const ethReward = dailyReward == null ? null : dailyReward * projectionDays;
+  const mynePerSol = Number(metrics?.mynePerSol ?? getLiveMynePerSol());
+  const principalSol = mynePerSol > 0 ? principal / mynePerSol : null;
+  const apy = principalSol > 0 && dailyReward != null
+    ? ((dailyReward * 365) / principalSol) * 100
     : null;
   const solUsd = getSolUsd();
   const ethUsd = ethReward != null && solUsd != null ? ethReward * solUsd : null;
-  latestProjection = { principal, eth: ethReward, ethUsd, apy: Number.isFinite(apy) ? apy : null };
+  latestProjection = {
+    principal,
+    tier: projectionTier,
+    tierLabel,
+    weight,
+    sharePct: share == null ? null : share * 100,
+    daily: dailyReward,
+    eth: ethReward,
+    ethUsd,
+    apy: Number.isFinite(apy) ? apy : null,
+  };
   // The projection/FLEX card is optional on the current referral surface. Keep the
   // shared updater safe when that retired card is not mounted; an absent presentation
   // element must not abort boot before routing and navigation are initialized.
@@ -2457,18 +2505,31 @@ const updateProjection = () => {
     const node = document.querySelector(selector);
     if (node) node.href = value;
   };
-  setText('#projected-eth', compactAmount(ethReward));
+  setText('#projected-eth', projectionSol(ethReward));
+  setText('#projected-daily', projectionSol(dailyReward));
+  setText('#projected-weight', weight.toLocaleString(undefined, { maximumFractionDigits: 2 }));
+  setText('#projected-share', share == null ? '—' : `${(share * 100).toLocaleString(undefined, { minimumFractionDigits: share < .0001 ? 4 : 2, maximumFractionDigits: 4 })}%`);
   const cardLink = document.querySelector('#card-link');
-  if (cardLink) cardLink.textContent = referralShortLink(chain.state.account);
+  if (cardLink) cardLink.textContent = 'myne.supply/#stake';
   setText('#projected-eth-usd', ethUsd == null ? '—' : `$${ethUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
   setText('#card-principal', principal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
   setText('#card-period', `${projectionDays} DAYS`);
-  setText('#card-eth', compactAmount(ethReward));
+  setText('#card-tier', `${tierLabel.toUpperCase()} · ${multiplier}× WEIGHT`);
+  setText('#card-eth', projectionSol(ethReward));
   setText('#card-apy', formatApyPercent(latestProjection.apy));
+  const note = document.querySelector('#projection-note');
+  if (note) note.textContent = ethReward == null
+    ? 'Waiting for a complete verified reward window and live MYNE/SOL price.'
+    : `Estimate uses the ${metrics?.aprFallback ? 'latest verified historical' : 'latest verified'} 30-minute reward rate and current pool weight. Mining volume, pool participation and market prices can change; returns are not guaranteed.`;
+  document.querySelectorAll('[data-calculator-tier]').forEach((button) => {
+    const active = button.dataset.calculatorTier === projectionTier;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
   const shareText = ethReward == null
     ? 'MYNE staking projection is waiting for live reward and market data.'
-    : `My ${projectionDays}-day MYNE standard staking projection: ${compactAmount(ethReward)} SOL.`;
-  setHref('#share-projection-x', `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(referralUrl)}`);
+    : `${principal.toLocaleString()} MYNE in ${tierLabel} currently estimates ${projectionSol(ethReward)} SOL over ${projectionDays} days.`;
+  setHref('#share-projection-x', `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(calculatorUrl())}`);
 };
 
 const roundedRect = (context, x, y, width, height, radius) => {
@@ -2515,7 +2576,7 @@ const createProjectionCard = async () => {
   context.textAlign = 'left';
   context.fillStyle = '#777166';
   context.font = '700 16px "DM Sans", sans-serif';
-  context.fillText('STAKING', 70, 184);
+  context.fillText(latestProjection.tierLabel.toUpperCase(), 70, 184);
   context.fillStyle = '#f2eee5';
   context.font = '650 64px "Roboto Mono", monospace';
   context.fillText(latestProjection.principal.toLocaleString(undefined, { maximumFractionDigits: 2 }), 68, 255);
@@ -2532,20 +2593,20 @@ const createProjectionCard = async () => {
   context.fillText('PROJECTED SOL', 105, 348);
   context.fillStyle = '#f0ece4';
   context.font = '650 46px "Roboto Mono", monospace';
-  context.fillText(`${compactAmount(latestProjection.eth)} SOL`, 105, 417);
+  context.fillText(`${projectionSol(latestProjection.eth)} SOL`, 105, 417);
   context.fillStyle = '#73829a';
   context.font = '700 16px "DM Sans", sans-serif';
-  context.fillText('STANDARD APY', 635, 348);
+  context.fillText('ESTIMATED APY', 635, 348);
   context.fillStyle = '#e5cf87';
   context.font = '650 46px "Roboto Mono", monospace';
   context.fillText(formatApyPercent(latestProjection.apy), 635, 417);
   context.fillStyle = '#8c8475';
   context.font = '600 17px "DM Sans", sans-serif';
-  context.fillText(`${projectionDays} DAY PROJECTION · ESTIMATES VARY WITH PROTOCOL REVENUE`, 70, 548);
+  context.fillText(`${projectionDays} DAY PROJECTION · CURRENT RATE · NOT GUARANTEED`, 70, 548);
   context.fillStyle = '#c6b371';
   context.font = '600 18px "Roboto Mono", monospace';
   context.textAlign = 'right';
-  context.fillText(referralShortLink(chain.state.account), 1130, 548);
+  context.fillText('myne.supply/#stake', 1130, 548);
   context.textAlign = 'left';
   return new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
 };
@@ -2795,23 +2856,48 @@ const updateMine = () => {
 
   const deploy = document.querySelector('#deploy');
   const protocolPaused = chain.state.protocolPaused === true;
-  const mineAvailable = Boolean(chain.state.account) && protocolReady && !protocolPaused;
+  const existingPlan = chain.state.plan;
+  const planRunning = existingPlan?.enabled === true;
+  const planReceiptRent = typeof chain.state.autoPlanMaxFee === 'bigint'
+    ? chain.state.autoPlanMaxFee
+    : null;
+  const planRoundCost = planRunning && planReceiptRent != null
+    ? existingPlan.amountPerPlay + planReceiptRent
+    : null;
+  const planStalled = planRoundCost != null && existingPlan.balance < planRoundCost;
+  const planModeLabel = existingPlan?.rewardMode === 'burn' ? 'AUTO-BURN' : 'AUTO-MINE';
+  const planOwnsAction = Boolean(existingPlan);
+  const mineAvailable = Boolean(chain.state.account) && protocolReady && !protocolPaused && !planOwnsAction;
   const ready = mineAvailable && selected.size > 0 && entered > 0 && autoFundingReady;
   // A manual action during reveal becomes a one-round keeper queue for the next open round.
   deploy.classList.toggle('mine-available', mineAvailable);
   deploy.classList.toggle('ready', ready);
+  deploy.classList.toggle('auto-plan-status', planOwnsAction && protocolReady && !protocolPaused);
+  deploy.classList.toggle('auto-plan-stalled', planOwnsAction && planStalled);
   // Clickable even when "not ready", so mine() can explain what's missing via a toast
   // instead of the button silently doing nothing.
-  deploy.disabled = !protocolReady || protocolPaused;
+  // An existing plan owns this slot: its top-up and cancel controls are the only valid actions,
+  // so the primary control becomes a truthful status instead of offering a second plan.
+  deploy.disabled = !protocolReady || protocolPaused || planOwnsAction;
   deploy.querySelector('span').textContent = !protocolReady
     ? 'PREVIEW ONLY'
     : protocolPaused ? 'MINING PAUSED'
+    : planOwnsAction
+      ? !planRunning
+        ? 'WITHDRAW PLAN ABOVE'
+        : planStalled ? `${planModeLabel} NEEDS TOP-UP` : `${planModeLabel} ACTIVE`
     : autoRound ? 'START AUTO'
       : bettingOpen ? 'MINE' : 'BID NEXT ROUND';
   deploy.setAttribute('aria-label', !protocolReady
     ? 'Mining becomes available after the audited Solana program is connected'
     : protocolPaused
       ? 'Mining is temporarily paused while maintenance is completed'
+    : planOwnsAction
+      ? !planRunning
+        ? 'Auto-round has ended. Withdraw its remaining balance using the plan controls above'
+        : planStalled
+          ? `${planModeLabel} needs a top-up before it can mine another round`
+          : `${planModeLabel} is active and will continue automatically; use the plan controls above to top up or cancel`
     : ready
     ? autoRound
       ? `Fund an auto-round plan with ${mineCostLabel(total)}; 10% of wallet SOL remains reserved`
@@ -3335,19 +3421,67 @@ document.querySelectorAll('[data-projection-days]').forEach((button) => button.a
   document.querySelectorAll('[data-projection-days]').forEach((item) => item.classList.toggle('active', item === button));
   updateProjection();
 }));
+document.querySelectorAll('[data-calculator-tier]').forEach((button) => button.addEventListener('click', () => {
+  projectionTier = button.dataset.calculatorTier === 'burn' ? 'burn' : 'standard';
+  updateProjection();
+}));
+
+const routeFromHash = () => window.location.hash.slice(1).split('?')[0] || 'home';
+const closeStakeCalculator = ({ preserveHash = false } = {}) => {
+  if (!stakingCalculatorOverlay || stakingCalculatorOverlay.hidden) return;
+  stakingCalculatorOverlay.classList.remove('open');
+  stakingCalculatorOverlay.hidden = true;
+  document.body.classList.remove('stake-calculator-open');
+  if (!preserveHash && routeFromHash() === 'stake' && window.location.hash.includes('calculator=1')) {
+    window.history.replaceState(null, '', '#stake');
+  }
+  document.querySelector('#open-stake-calculator')?.focus({ preventScroll: true });
+};
+const openStakeCalculator = ({ updateUrl = true } = {}) => {
+  if (!stakingCalculatorOverlay) return;
+  updateProjection();
+  stakingCalculatorOverlay.hidden = false;
+  stakingCalculatorOverlay.classList.add('open');
+  document.body.classList.add('stake-calculator-open');
+  if (updateUrl) window.history.replaceState(null, '', calculatorHash());
+  requestAnimationFrame(() => stakingCalculator?.querySelector('#calculator-amount')?.focus({ preventScroll: true }));
+};
+const syncStakeCalculatorFromHash = () => {
+  if (routeFromHash() !== 'stake') return closeStakeCalculator({ preserveHash: true });
+  const query = window.location.hash.split('?')[1] || '';
+  const params = new URLSearchParams(query);
+  if (params.get('calculator') !== '1') return closeStakeCalculator({ preserveHash: true });
+  const amount = Number(params.get('amount'));
+  if (Number.isFinite(amount) && amount >= 0) calculatorAmount.value = String(amount);
+  projectionTier = params.get('tier') === 'burn' ? 'burn' : 'standard';
+  const requestedDays = Number(params.get('days'));
+  if ([30, 90, 180, 365].includes(requestedDays)) projectionDays = requestedDays;
+  document.querySelectorAll('[data-projection-days]').forEach((button) => {
+    button.classList.toggle('active', Number(button.dataset.projectionDays) === projectionDays);
+  });
+  openStakeCalculator({ updateUrl: false });
+};
+document.querySelector('#open-stake-calculator')?.addEventListener('click', () => openStakeCalculator());
+stakingCalculator?.querySelector('[data-calculator-close]')?.addEventListener('click', () => closeStakeCalculator());
+stakingCalculatorOverlay?.addEventListener('click', (event) => {
+  if (event.target === stakingCalculatorOverlay) closeStakeCalculator();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !stakingCalculatorOverlay?.hidden) closeStakeCalculator();
+});
 document.querySelector('#copy-projection-link').addEventListener('click', () => {
-  void copyText(referralUrl);
-  notify('Referral link copied');
+  void copyText(calculatorUrl());
+  notify('Calculator link copied');
 });
 document.querySelector('#share-projection').addEventListener('click', async () => {
   if (latestProjection.eth == null) return notify('Projection needs live APY and MYNE/SOL price data');
   const blob = await createProjectionCard();
   if (!blob) return notify('Could not create projection card');
   const file = new File([blob], 'myne-staking-projection.png', { type: 'image/png' });
-  const shareText = `My ${projectionDays}-day MYNE standard staking projection: ${compactAmount(latestProjection.eth)} SOL.`;
+  const shareText = `${latestProjection.principal.toLocaleString()} MYNE in ${latestProjection.tierLabel} currently estimates ${projectionSol(latestProjection.eth)} SOL over ${projectionDays} days.`;
   try {
     if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-      await navigator.share({ title: 'MYNE staking projection', text: shareText, url: referralUrl, files: [file] });
+      await navigator.share({ title: 'MYNE staking projection', text: shareText, url: calculatorUrl(), files: [file] });
       return;
     }
   } catch (error) {
@@ -3359,8 +3493,8 @@ document.querySelector('#share-projection').addEventListener('click', async () =
   download.download = file.name;
   download.click();
   URL.revokeObjectURL(downloadUrl);
-  void copyText(referralUrl);
-  notify('Card downloaded · referral link copied');
+  void copyText(calculatorUrl());
+  notify('Card downloaded · calculator link copied');
 });
 // --- staking (real, backed by the MYNE program) --------------------------------------
 const runStakeTx = async (pending, action) => {
@@ -5845,12 +5979,16 @@ document.querySelectorAll('[data-copy-ref]').forEach((button) => button.addEvent
 }));
 updateProjection();
 
-window.addEventListener('hashchange', () => setRoute(window.location.hash.slice(1), { updateHash: false }));
+window.addEventListener('hashchange', () => {
+  setRoute(routeFromHash(), { updateHash: false });
+  syncStakeCalculatorFromHash();
+});
 window.addEventListener('resize', syncNavIndicator);
 syncAutoControls();
 updateMine();
 updateStake();
-setRoute(window.location.hash.slice(1) || 'home', { updateHash: false });
+setRoute(routeFromHash(), { updateHash: false });
+syncStakeCalculatorFromHash();
 // Hash routing can land directly on Mine before the deferred scheduler is installed. Ensure the
 // composer is mounted for that deep link as well as for normal in-app navigation.
 if (document.body.dataset.route === 'mine') void ensureSocial();

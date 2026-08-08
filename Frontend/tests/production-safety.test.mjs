@@ -122,6 +122,11 @@ test('public bundle uses MYNE-named brand assets and omits legacy prototype file
       '../public/apple-touch-icon.png',
       '../public/icon-192.png',
       '../public/icon-512.png',
+      '../public/myne-wallet-icon-v1-16.png',
+      '../public/myne-wallet-icon-v1-32.png',
+      '../public/myne-wallet-icon-v1-180.png',
+      '../public/myne-wallet-icon-v1-192.png',
+      '../public/myne-wallet-icon-v1-512.png',
       '../public/myne-x-banner.png',
       '../public/myne-social-card.png',
     ].map((path) => readFile(new URL(path, import.meta.url)))),
@@ -140,17 +145,24 @@ test('public bundle uses MYNE-named brand assets and omits legacy prototype file
   assert.match(index, /property="og:image" content="https:\/\/www\.myne\.supply\/myne-social-card\.png\?v=myne-3"/);
   assert.match(index, /name="twitter:card" content="summary_large_image"/);
   assert.match(index, /name="twitter:image" content="https:\/\/www\.myne\.supply\/myne-social-card\.png\?v=myne-3"/);
-  assert.match(index, /rel="icon"[^>]*\/myne-token-icon\.svg\?v=myne-3/);
-  assert.match(index, /rel="alternate icon"[^>]*\/favicon\.ico\?v=myne-3/);
-  assert.match(index, /rel="apple-touch-icon"[^>]*\/apple-touch-icon\.png\?v=myne-3/);
-  assert.match(localViewer, /rel="icon"[^>]*\/myne-token-icon\.svg\?v=myne-3/);
+  assert.match(index, /rel="icon"[^>]*\/myne-wallet-icon-v1-192\.png/);
+  assert.match(index, /rel="icon"[^>]*\/myne-token-icon\.svg\?v=myne-wallet-1/);
+  assert.match(index, /rel="shortcut icon"[^>]*\/myne-wallet-icon-v1-32\.png/);
+  assert.match(index, /rel="alternate icon"[^>]*\/favicon\.ico\?v=myne-wallet-1/);
+  assert.match(index, /rel="apple-touch-icon"[^>]*\/myne-wallet-icon-v1-180\.png/);
+  assert.match(localViewer, /rel="icon"[^>]*\/myne-wallet-icon-v1-192\.png/);
   assert.deepEqual(manifest.icons.map(({ src }) => src), [
-    '/favicon-16x16.png?v=myne-3',
-    '/favicon-32x32.png?v=myne-3',
-    '/icon-192.png?v=myne-3',
-    '/icon-512.png?v=myne-3',
+    '/myne-wallet-icon-v1-16.png',
+    '/myne-wallet-icon-v1-32.png',
+    '/myne-wallet-icon-v1-192.png',
+    '/myne-wallet-icon-v1-512.png',
   ]);
   assert.deepEqual(brandImages.map((image) => [image.readUInt32BE(16), image.readUInt32BE(20)]), [
+    [16, 16],
+    [32, 32],
+    [180, 180],
+    [192, 192],
+    [512, 512],
     [16, 16],
     [32, 32],
     [180, 180],

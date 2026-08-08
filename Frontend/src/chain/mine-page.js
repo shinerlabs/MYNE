@@ -445,7 +445,16 @@ export async function mine({
 
   // Auto-round doesn't bet directly — it prepays a plan the keeper executes each round, so
   // unlike a manual bet it can be set up while betting is closed (it starts next round).
-  if (auto) return configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoClaim, rewardMode });
+  if (auto) {
+    if (state.plan?.enabled) {
+      const mode = state.plan.rewardMode === 'burn' ? 'Auto-burn' : 'Auto-mine';
+      return notify(`${mode} is already active. Use the plan controls to top up or cancel it.`);
+    }
+    if ((state.plan?.balance ?? 0n) > 0n) {
+      return notify('Withdraw the previous Auto-round balance before starting another plan');
+    }
+    return configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoClaim, rewardMode });
+  }
 
   // The lottery rejects future round ids and rejects the current id after betting closes. A
   // finite one-play keeper plan is the safe on-chain queue: fund it now, execute next round.

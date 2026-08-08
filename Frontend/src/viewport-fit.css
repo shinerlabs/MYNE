@@ -833,6 +833,321 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
   }
 }
 
+/* Stake reward actions + projection calculator. Claim stays close to the claimed-SOL summary;
+   the former full-width claim row becomes a clear, shareable calculator entry point. */
+body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+  grid-template-columns: minmax(0, 1fr) minmax(142px, .62fr) auto !important;
+  grid-template-rows: auto 44px !important;
+  gap: 10px !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .eth-lifetime {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 44px !important;
+  height: 44px !important;
+  margin: 0 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .staking-share-group {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-calculator-trigger {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, #19191b, #111113) padding-box,
+    var(--gld-spectrum) border-box;
+  color: var(--surface-text-primary);
+  font: 800 11px/1 var(--font-sans);
+  letter-spacing: .13em;
+  cursor: pointer;
+  transition: filter .18s ease, transform .18s ease;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-calculator-trigger:is(:hover, :focus-visible) {
+  filter: brightness(1.18);
+  transform: translateY(-1px);
+}
+
+body.stake-calculator-open {
+  overflow: hidden !important;
+}
+
+.staking-calculator-overlay[hidden] {
+  display: none !important;
+}
+
+.staking-calculator-overlay {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  overflow: auto;
+  background: rgba(0, 0, 0, .76);
+  backdrop-filter: blur(16px);
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+
+.staking-calculator-overlay.open {
+  opacity: 1;
+}
+
+body .staking-calculator-overlay > .staking-calculator {
+  position: relative;
+  width: min(1080px, 100%);
+  max-height: calc(100dvh - 56px);
+  margin: 0 !important;
+  padding: 24px !important;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 12% 0, rgba(45, 212, 191, .09), transparent 34%),
+    radial-gradient(circle at 88% 10%, rgba(217, 70, 239, .08), transparent 30%),
+    #0b0b0d !important;
+  box-shadow: 0 34px 110px rgba(0, 0, 0, .7), inset 0 1px rgba(255, 255, 255, .07) !important;
+}
+
+body .staking-calculator-overlay > .staking-calculator::before {
+  display: block !important;
+  right: 7% !important;
+  left: 7% !important;
+  background: var(--gld-spectrum) !important;
+}
+
+.staking-calculator-overlay .calculator-head {
+  min-height: 0 !important;
+  margin: 0 0 18px !important;
+  padding: 0 0 18px !important;
+  align-items: center;
+  box-shadow: inset 0 -1px rgba(255, 255, 255, .08) !important;
+}
+
+.staking-calculator-overlay .calculator-head h2 {
+  margin: 6px 0 5px !important;
+  font-size: clamp(25px, 3vw, 38px) !important;
+}
+
+.staking-calculator-overlay .calculator-head p {
+  display: block !important;
+}
+
+.calculator-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.calculator-close {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, .11);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .055);
+  color: #f4f4f5;
+  font: 400 25px/1 var(--font-sans);
+  cursor: pointer;
+}
+
+.staking-calculator-overlay .calculator-layout {
+  grid-template-columns: minmax(0, .9fr) minmax(380px, 1.1fr);
+}
+
+.calculator-tier {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.calculator-tier button {
+  display: grid;
+  gap: 5px;
+  min-height: 62px;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .035);
+  color: var(--surface-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.calculator-tier button b {
+  color: inherit;
+  font: 780 11px/1.15 var(--font-sans);
+}
+
+.calculator-tier button small {
+  color: var(--surface-text-tertiary);
+  font: 650 9px/1.2 var(--font-sans);
+}
+
+.calculator-tier button.active {
+  border-color: transparent;
+  background:
+    linear-gradient(145deg, #202023, #151517) padding-box,
+    var(--gld-spectrum) border-box;
+  color: #fff;
+}
+
+.staking-calculator-overlay .projection-results {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.staking-calculator-overlay .projection-results article {
+  min-width: 0;
+  min-height: 104px;
+}
+
+.staking-calculator-overlay .projection-results strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: clamp(16px, 1.55vw, 21px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staking-calculator-overlay .projection-note {
+  min-height: 42px;
+  color: #a5a5aa;
+}
+
+.staking-calculator-overlay .calculator-actions :is(button, a) {
+  min-height: 44px;
+}
+
+@media (max-width: 900px) {
+  .staking-calculator-overlay {
+    padding: 16px;
+  }
+
+  body .staking-calculator-overlay > .staking-calculator {
+    max-height: calc(100dvh - 32px);
+  }
+
+  .staking-calculator-overlay .calculator-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .staking-calculator-overlay .projection-card {
+    min-height: 270px;
+  }
+}
+
+@media (max-width: 720px) {
+  body[data-route="stake"] .staking-overview > .stake-rewards > .eth-claim-actions {
+    grid-template-columns: minmax(0, 1fr) auto minmax(86px, auto) !important;
+    grid-template-rows: 44px !important;
+    gap: 6px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > .staking-share-group {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-calculator-trigger {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    min-width: 86px;
+    padding: 0 8px;
+    font-size: 8px;
+    letter-spacing: .07em;
+  }
+
+  .staking-calculator-overlay {
+    place-items: end center;
+    padding: 0;
+  }
+
+  body .staking-calculator-overlay > .staking-calculator {
+    width: 100%;
+    max-height: calc(100dvh - 12px);
+    padding: 18px 14px calc(18px + env(safe-area-inset-bottom)) !important;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 22px 22px 0 0;
+  }
+
+  .staking-calculator-overlay .calculator-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+  }
+
+  .staking-calculator-overlay .calculator-head > div:first-child p {
+    max-width: 260px;
+    font-size: 10px;
+  }
+
+  .staking-calculator-overlay .calculator-head-actions {
+    align-self: start;
+  }
+
+  .staking-calculator-overlay .projection-period {
+    position: absolute;
+    top: 90px;
+    right: 14px;
+    left: 14px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .staking-calculator-overlay .calculator-layout {
+    padding-top: 50px;
+  }
+
+  .staking-calculator-overlay .projection-card {
+    display: none;
+  }
+
+  .staking-calculator-overlay .projection-controls {
+    padding: 12px;
+  }
+
+  .staking-calculator-overlay .calculator-input {
+    min-height: 58px;
+  }
+
+  .staking-calculator-overlay .projection-results article {
+    min-height: 88px;
+    padding: 12px;
+  }
+
+  .staking-calculator-overlay .calculator-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .staking-calculator-overlay .calculator-actions :is(button, a) {
+    min-width: 0 !important;
+    padding: 0 8px;
+    font-size: 8px;
+  }
+}
+
 /* PAUSED is wider than the numeric timer. Give the status word its own
    container-relative scale so the summary column never crops its outer letters. */
 body[data-route="mine"] .round-summary.motherlode-inline > .time-stat.paused > strong {
@@ -3438,30 +3753,45 @@ body[data-route="stake"] .staking-dashboard .stake-estimate-values .stake-estima
    mean the tile and amount inputs are valid. Paused and disconnected states retain the quiet
    neutral surface. */
 html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled),
-html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) {
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled),
+html body[data-route="mine"] .deploy-panel > #deploy.auto-plan-status:disabled {
   background: #f3f3f4 !important;
   color: #09090b !important;
+  opacity: 1 !important;
   box-shadow:
     inset 0 1px rgba(255, 255, 255, .9),
     0 10px 26px rgba(0, 0, 0, .28) !important;
 }
 
 html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled) > span,
-html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) > span {
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) > span,
+html body[data-route="mine"] .deploy-panel > #deploy.auto-plan-status:disabled > span {
   color: #09090b !important;
   font-weight: 850 !important;
 }
 
 html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled) .mine-button-mark,
-html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) .mine-button-mark {
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) .mine-button-mark,
+html body[data-route="mine"] .deploy-panel > #deploy.auto-plan-status:disabled .mine-button-mark {
   background: rgba(0, 0, 0, .075) !important;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .09) !important;
   opacity: 1 !important;
 }
 
 html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled) .mine-button-mark img,
-html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) .mine-button-mark img {
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) .mine-button-mark img,
+html body[data-route="mine"] .deploy-panel > #deploy.auto-plan-status:disabled .mine-button-mark img {
   filter: none !important;
+}
+
+html body[data-route="mine"] .deploy-panel > #deploy.auto-plan-status:disabled {
+  cursor: default !important;
+}
+
+html body[data-route="mine"] .deploy-panel > #deploy.auto-plan-status.auto-plan-stalled:disabled {
+  background: #d9d9dc !important;
+  color: #26262a !important;
+  box-shadow: inset 0 1px rgba(255, 255, 255, .72) !important;
 }
 
 html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled):is(:hover, :focus-visible),
@@ -3569,5 +3899,55 @@ body[data-route="stake"] .staking-dashboard .stake-reward-estimate > small {
 
   body[data-route="rounds"] .feature-shell[data-page="rounds"] > .feature-metrics.supply-metrics {
     margin-top: 0 !important;
+  }
+}
+
+/* Final Stake action placement: later than the legacy responsive experiments above. */
+body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+  grid-template-columns: minmax(0, 1fr) minmax(142px, .62fr) auto !important;
+  grid-template-rows: auto 44px !important;
+  gap: 10px !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .eth-lifetime {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .staking-share-group {
+  grid-column: 3 !important;
+  grid-row: 1 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-calculator-trigger {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+}
+
+@media (max-width: 720px) {
+  body[data-route="stake"] .staking-overview > .stake-rewards > .eth-claim-actions {
+    grid-template-columns: minmax(0, 1fr) auto minmax(86px, auto) !important;
+    grid-template-rows: 44px !important;
+    gap: 6px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > .staking-share-group {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-calculator-trigger {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
   }
 }

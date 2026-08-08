@@ -51,3 +51,16 @@ test('both initial funding and top-ups enforce the 90% boundary before submissio
   assert.match(main, /plan\.rewardMode === 'burn'/);
   assert.doesNotMatch(main, /AUTO_FEE_WEI|AUTO_FEE_PER_ROUND|GAS_RESERVE_ETH/);
 });
+
+test('an existing auto plan owns the primary Mine action', async () => {
+  const [minePage, main, styles] = await Promise.all([
+    readFile(new URL('../src/chain/mine-page.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/viewport-fit.css', import.meta.url), 'utf8'),
+  ]);
+  assert.match(main, /const planOwnsAction = Boolean\(existingPlan\)/);
+  assert.match(main, /deploy\.disabled = !protocolReady \|\| protocolPaused \|\| planOwnsAction/);
+  assert.match(main, /planStalled \? `\$\{planModeLabel\} NEEDS TOP-UP` : `\$\{planModeLabel\} ACTIVE`/);
+  assert.match(minePage, /if \(state\.plan\?\.enabled\)[\s\S]*is already active\. Use the plan controls to top up or cancel it/);
+  assert.match(styles, /#deploy\.auto-plan-status:disabled \{[\s\S]*background:\s*#f3f3f4 !important;[\s\S]*opacity:\s*1 !important/);
+});
