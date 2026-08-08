@@ -13,6 +13,7 @@ const [
   remove,
   profile,
   config,
+  myneBalance,
 ] = await Promise.all([
   load('../_shared/common.ts'),
   load('../solana-nonce/index.ts'),
@@ -23,6 +24,7 @@ const [
   load('../chat-delete/index.ts'),
   load('../profile-update/index.ts'),
   load('../../config.toml'),
+  load('../_shared/myne-chat-balance.ts'),
 ]);
 
 test('CORS is fail-closed to MYNE production origins and explicit loopback development origins', () => {
@@ -88,10 +90,38 @@ test('all custom-wallet functions bypass platform JWT parsing and enforce auth i
   assert.match(verify, /ensureWalletProfile\(walletAddress\)/);
 });
 
-test('chat eligibility uses the indexed count RPC instead of scanning bet rows', () => {
-  assert.match(send, /rpc\('wallet_mined_round_count'/);
+test('chat eligibility requires 0.01 MYNE across liquid, mining, and every staking form', () => {
+  assert.match(send, /readMyneChatBalance\(session\.walletAddress\)/);
+  assert.match(send, /Hold at least 0\.01 MYNE/);
+  assert.match(myneBalance, /CHAT_MIN_MYNE_BASE_UNITS = 10_000_000n/);
+  assert.match(myneBalance, /liquidBaseUnits/);
+  assert.match(myneBalance, /miningRewardsBaseUnits/);
+  assert.match(myneBalance, /standardStakeBaseUnits/);
+  assert.match(myneBalance, /burnStakeBaseUnits/);
+  assert.match(myneBalance, /cooldownStakeBaseUnits/);
+  assert.match(myneBalance, /const values = \[liquidBaseUnits, miningRewardsBaseUnits, standardStakeBaseUnits, burnStakeBaseUnits, cooldownStakeBaseUnits\]/);
+  assert.match(myneBalance, /totalBaseUnits >= CHAT_MIN_MYNE_BASE_UNITS/);
+  assert.doesNotMatch(send, /wallet_mined_round_count/);
+  assert.doesNotMatch(send, /MINED_ROUNDS_REQUIRED/);
   assert.doesNotMatch(send, /mine_round_bets/);
   assert.doesNotMatch(send, /limit\(10000\)/);
+});
+
+test('MYNE balance verification pins the chain, deployment, account layouts, and one snapshot', () => {
+  assert.match(myneBalance, /getGenesisHash/);
+  assert.match(myneBalance, /UPGRADEABLE_LOADER_ID/);
+  assert.match(myneBalance, /TOKEN_PROGRAM_ID/);
+  assert.match(myneBalance, /getTokenAccountsByOwner/);
+  assert.match(myneBalance, /getMultipleAccounts/);
+  assert.match(myneBalance, /minContextSlot/);
+  assert.match(myneBalance, /MINING_POOL_DISCRIMINATOR/);
+  assert.match(myneBalance, /MINER_DISCRIMINATOR/);
+  assert.match(myneBalance, /STAKE_POSITION_DISCRIMINATOR/);
+  assert.match(myneBalance, /assertAuthority/);
+  assert.match(myneBalance, /\(totalUnclaimed \* minerShares\) \/ totalShares/);
+  assert.match(myneBalance, /standardStakeBaseUnits = readU64\(stakeData, 41\)/);
+  assert.match(myneBalance, /burnStakeBaseUnits = readU64\(stakeData, 49\)/);
+  assert.match(myneBalance, /cooldownStakeBaseUnits = readU64\(stakeData, 89\)/);
 });
 
 test('wallet ownership is derived server-side for messages, reactions, and profiles', () => {

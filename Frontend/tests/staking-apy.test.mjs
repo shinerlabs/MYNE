@@ -47,6 +47,10 @@ test('all APY surfaces share one formatter and explicit tier/position variants',
   assert.equal(formatApyPercent(12.34), '12.3%');
   assert.equal(formatApyPercent(1_234), '1,234%');
   assert.equal(formatApyPercent(1_234, { compact: true }), '1.2k%');
+  assert.equal(formatApyPercent(100_000), '100,000%');
+  assert.equal(formatApyPercent(100_000, { compact: true }), '100k%');
+  assert.equal(formatApyPercent(100_000.01), '100,000%+');
+  assert.equal(formatApyPercent(30_000_000, { compact: true }), '100,000%+');
   assert.equal(formatApyPercent(null), '—');
   assert.deepEqual(stakingApyVariants(12), { standard: 12, burn: 60 });
   assert.deepEqual(stakingApyVariants(null), { standard: null, burn: null });

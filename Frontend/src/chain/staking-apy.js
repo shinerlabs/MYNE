@@ -1,4 +1,5 @@
 const APY_MINUTES_PER_YEAR = 365 * 24 * 60;
+const APY_DISPLAY_CAP_PERCENT = 100_000;
 
 const finitePositive = (value) => Number.isFinite(value) && value > 0;
 
@@ -31,6 +32,7 @@ export const minuteApyPercent = apyPercent;
 /** One formatter for every APY surface. `compact` is reserved for the narrow header pill. */
 export const formatApyPercent = (value, { compact = false } = {}) => {
   if (!Number.isFinite(value) || value < 0) return '—';
+  if (value > APY_DISPLAY_CAP_PERCENT) return '100,000%+';
   if (compact && value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, '')}k%`;
   return value >= 1000
     ? `${Math.round(value).toLocaleString()}%`

@@ -2154,14 +2154,18 @@ body[data-route="mine"] .round-summary.motherlode-inline > .time-stat.paused > s
 }
 
 @media (min-width: 901px) {
-  /* About's visual hero is intentionally retired by about-compact.css. Do not reserve a phantom
-     header row for a display:none grid item; the chapter navigator and article own the frame. */
+  /* About uses the shared route heading. Keep it in an explicit first row so the content grid
+     cannot claim row one and force the auto-placed heading into an implicit row at the bottom. */
   body[data-route="about"] .about-shell.page-view.active {
-    grid-template-rows: minmax(0, 1fr) !important;
+    grid-template-rows: clamp(72px, 11dvh, 102px) minmax(0, 1fr) !important;
+  }
+
+  body[data-route="about"] .about-shell.page-view.active > .feature-hero.route-header {
+    grid-row: 1 !important;
   }
 
   body[data-route="about"] .about-shell.page-view.active > .about-layout {
-    grid-row: 1 / -1 !important;
+    grid-row: 2 !important;
   }
 
   /* There are exactly two independently disclosed fee schedules. Keep them paired on desktop

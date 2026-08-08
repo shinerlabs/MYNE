@@ -8,8 +8,12 @@ import {
   requireSession,
   supabase,
 } from '../_shared/common.ts';
+import { CHAT_MIN_MYNE_BASE_UNITS, readMyneChatBalance } from '../_shared/myne-chat-balance.ts';
 
-const MINED_ROUNDS_REQUIRED = 5n;
+const balanceGateEnabled = (): boolean =>
+  Deno.env.get('CHAT_REQUIRE_MYNE_BALANCE') === 'true'
+  // One-release compatibility: the former flag now enables the safer balance gate.
+  || Deno.env.get('CHAT_REQUIRE_MINED_ROUNDS') === 'true';
 
 Deno.serve(async (req) => {
   const corsResponse = guardCors(req);
@@ -21,29 +25,26 @@ Deno.serve(async (req) => {
   const rateLimited = await rateLimitGuard(req, 'chat_send', session.walletAddress, 12, 60);
   if (rateLimited) return rateLimited;
 
-  // Mainnet can enable this indexed eligibility check at genesis without scanning bet rows.
-  if (Deno.env.get('CHAT_REQUIRE_MINED_ROUNDS') === 'true') {
-    const { data: count, error: countError } = await supabase.rpc('wallet_mined_round_count', {
-      p_wallet_address: session.walletAddress,
-    });
-    let minedRounds = 0n;
-    try {
-      minedRounds = BigInt(count ?? 0);
-    } catch {
-      return json(req, { error: 'Could not verify chat access' }, 500);
-    }
-    if (countError) return json(req, { error: 'Could not verify chat access' }, 500);
-    if (minedRounds < MINED_ROUNDS_REQUIRED) {
-      return json(req, { error: 'Mine at least 5 rounds to unlock chat' }, 403);
-    }
-  }
-
   const payload = await bodyJson(req, 4_096);
   const body = payload?.body;
   if (typeof body !== 'string') return json(req, { error: 'Message must be 1–300 characters' }, 400);
   const normalizedBody = body.trim();
   if (normalizedBody.length < 1 || normalizedBody.length > 300) {
     return json(req, { error: 'Message must be 1–300 characters' }, 400);
+  }
+
+  if (balanceGateEnabled()) {
+    try {
+      const balance = await readMyneChatBalance(session.walletAddress);
+      if (!balance.eligible || balance.totalBaseUnits < CHAT_MIN_MYNE_BASE_UNITS) {
+        return json(req, {
+          error: 'Hold at least 0.01 MYNE in your wallet, mining rewards, or staking position to unlock chat',
+        }, 403);
+      }
+    } catch {
+      console.error('MYNE chat balance verification failed');
+      return json(req, { error: 'Could not verify your MYNE balance' }, 500);
+    }
   }
 
   if (!await ensureWalletProfile(session.walletAddress)) {

@@ -212,6 +212,9 @@ test('Rounds and About reserve the fixed footer and own their internal overflow'
   assert.match(fitStyles, /body\[data-route="rounds"\] \.feature-shell\[data-page="rounds"\] > \.feature-metrics\.supply-metrics \{[\s\S]*margin-top:\s*0 !important/);
   assert.match(fitStyles, /body\[data-route="rounds"\] \.round-list \{[\s\S]*overflow-y:\s*auto !important/);
   assert.match(fitStyles, /\.about-shell\.page-view\.active \{[\s\S]*grid-template-rows:[\s\S]*minmax\(0, 1fr\) !important/);
+  assert.match(fitStyles, /body\[data-route="about"\] \.about-shell\.page-view\.active \{[\s\S]*grid-template-rows:\s*clamp\(72px, 11dvh, 102px\) minmax\(0, 1fr\) !important/);
+  assert.match(fitStyles, /body\[data-route="about"\] \.about-shell\.page-view\.active > \.feature-hero\.route-header \{[\s\S]*grid-row:\s*1 !important/);
+  assert.match(fitStyles, /body\[data-route="about"\] \.about-shell\.page-view\.active > \.about-layout \{[\s\S]*grid-row:\s*2 !important/);
   assert.match(fitStyles, /body\[data-route="about"\] \.about-layout \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(210px, 240px\) !important/);
   assert.match(fitStyles, /body\[data-route="about"\] \.about-nav \{[\s\S]*grid-column:\s*2 !important;[\s\S]*grid-row:\s*1 !important/);
   assert.match(fitStyles, /body\[data-route="about"\] \.about-content \{[\s\S]*overflow-y:\s*auto !important/);

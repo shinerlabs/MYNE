@@ -56,6 +56,28 @@ The Edge Functions and migration are one security release. Deploying only one
 side fails closed and will make chat authentication unavailable; do not restore
 guest mode as a workaround.
 
+Set `CHAT_REQUIRE_MYNE_BALANCE=true` on `chat-send` to require at least 0.01
+MYNE (10,000,000 base units). The server verifies and adds every eligible form:
+
+- liquid MYNE in the wallet's SPL token accounts;
+- effective unclaimed mining rewards from the v6 asset/share ledger;
+- standard staked MYNE;
+- permanently burned Stake + Burn MYNE; and
+- MYNE currently in the unstaking cooldown.
+
+This is an on-chain eligibility check, not a browser claim. Set the server-only
+`CHAT_SOLANA_RPC_URL` to a restricted HTTPS Mainnet RPC. The function pins the
+Mainnet genesis, production program, production mint, PDA owners,
+discriminators, wallet authorities, and token-account layouts before accepting
+the balance. `CHAT_MYNE_PROGRAM_ID`, `CHAT_MYNE_MINT_ADDRESS`, and
+`CHAT_SOLANA_GENESIS_HASH` exist only for explicit non-production testing.
+Successful wallet snapshots are cached for ten seconds; failures are not.
+
+For one release, an existing `CHAT_REQUIRE_MINED_ROUNDS=true` setting also
+enables this new balance rule, so production fails safely during the variable
+rename. Replace it with `CHAT_REQUIRE_MYNE_BALANCE=true`; round count no longer
+controls chat access.
+
 Production CORS origins are built into the functions as `https://myne.supply`
 and `https://www.myne.supply`. Local browser testing is disabled unless
 `MYNE_CORS_LOCAL_ORIGINS` explicitly lists comma-separated loopback origins,
@@ -102,7 +124,7 @@ enforce_chat_rate_limit(
   p_window_seconds integer
 ) -> jsonb               -- allowed, remaining, retry_after_seconds
 
-wallet_mined_round_count(
+wallet_mined_round_count( -- retained for legacy analytics; not chat eligibility
   p_wallet_address text
 ) -> bigint
 ```
@@ -111,8 +133,8 @@ Valid rate-limit actions are `solana_nonce`, `solana_verify`, `chat_send`,
 `chat_react`, `chat_reactions`, `chat_delete`, and `profile_update`. The rate
 limit RPC increments the wallet and IP buckets in one database transaction.
 The nonce RPC consumes a challenge with one conditional update, so concurrent
-verification attempts cannot both succeed. Mined-round eligibility counts
-distinct, resolved rounds in the indexed on-chain read model.
+verification attempts cannot both succeed. The mined-round RPC remains an
+indexed analytics helper and is no longer an authorization decision.
 
 Every authenticated request must call `is_chat_session_current`; a missing or
 stale epoch, missing profile, invalid wallet, or banned profile returns false.
