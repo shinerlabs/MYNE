@@ -17,3 +17,17 @@ test('staking SOL claim revalidates its canonical position before wallet signing
     'account checks must happen before the wallet-backed program is requested',
   );
 });
+
+test('staking resolves any funded MYNE token account by mint and amount', () => {
+  const stake = source.slice(source.indexOf('async function stakeInstruction'), source.indexOf('export const stake'));
+  assert.match(stake, /getParsedTokenAccountsByOwner\(authority, \{ mint \}, 'confirmed'\)/);
+  assert.match(stake, /selectTokenAccountForAmount\(ownerTokenRows, amountBaseUnits, ownerAta\)/);
+  assert.match(stake, /No single MYNE token account has enough tokens/);
+  assert.doesNotMatch(stake, /getAccountInfo\(ownerTokens, 'confirmed'\)/);
+});
+
+test('unstaking creates the canonical destination account when the wallet has none', () => {
+  const withdraw = source.slice(source.indexOf('export async function withdrawUnstaked'), source.indexOf('export async function claimStakingRewards'));
+  assert.match(withdraw, /createAtaInstruction\(authority, authority, mint, ownerTokens\)/);
+  assert.match(withdraw, /ownerTokens, vaultTokens/);
+});

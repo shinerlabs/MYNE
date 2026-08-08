@@ -6,6 +6,7 @@ import { apyPercent, stakingApyVariants } from './staking-apy.js';
 import { totalStakedBaseUnits, totalStakedMyne } from './staking-totals.js';
 import { loadStakingRewardWindow } from './rounds-index.js';
 import { getLiveMynePerSol } from '../sol-price.js';
+import { selectTokenAccountForAmount, tokenAccountBalance } from './token-account.js';
 import {
   asBn, derivePda, fetchProtocolAccount, getProtocolConfig,
   getWritableProgram, protocolPdas, sendInstructions,
@@ -100,7 +101,7 @@ export async function readStaking(account = getAccount()) {
   if (account) {
     position = await fetchProtocolAccount('StakePosition', positionPda(account));
     const rows = await connection.getParsedTokenAccountsByOwner(new PublicKey(account), { mint: config.mint }, 'confirmed');
-    walletBullion = rows.value.reduce((sum, row) => sum + BigInt(row.account.data.parsed.info.tokenAmount.amount), 0n);
+    walletBullion = tokenAccountBalance(rows.value);
   }
   const flexStaked = toBig(position?.standardPrincipal);
   const burnStaked = toBig(position?.burnPrincipal);
@@ -131,11 +132,18 @@ async function stakeInstruction(amount, tier) {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
   const authority = new PublicKey(account);
+  const amountBaseUnits = toBig(amount);
+  if (amountBaseUnits <= 0n) throw new Error('Enter a MYNE amount');
   const config = await getProtocolConfig();
   const mint = new PublicKey(config.mint);
-  const ownerTokens = associatedToken(authority, mint);
+  const ownerAta = associatedToken(authority, mint);
+  const ownerTokenRows = (await connection.getParsedTokenAccountsByOwner(authority, { mint }, 'confirmed')).value;
+  const ownerTokens = selectTokenAccountForAmount(ownerTokenRows, amountBaseUnits, ownerAta);
+  if (!ownerTokens) {
+    if (!ownerTokenRows.length) throw new Error('Your wallet has no MYNE token account. Receive MYNE first.');
+    throw new Error('No single MYNE token account has enough tokens for this stake. Consolidate your MYNE and try again.');
+  }
   const vaultTokens = associatedToken(protocolPdas.stakePool, mint);
-  if (!(await connection.getAccountInfo(ownerTokens, 'confirmed'))) throw new Error('Your wallet has no MYNE token account');
   const { program } = await getWritableProgram();
   const instructions = [];
   const miner = minerPda(account);
@@ -165,11 +173,16 @@ export async function requestUnstake(amount) {
 export async function withdrawUnstaked() {
   const account = getAccount(); const authority = new PublicKey(account); const config = await getProtocolConfig(); const mint = new PublicKey(config.mint);
   const { program } = await getWritableProgram();
-  return sendInstructions([await program.methods.withdrawUnstaked().accounts({
+  const ownerTokens = associatedToken(authority, mint);
+  const ownerTokenInfo = await connection.getAccountInfo(ownerTokens, 'confirmed');
+  const instructions = [];
+  if (!ownerTokenInfo) instructions.push(createAtaInstruction(authority, authority, mint, ownerTokens));
+  instructions.push(await program.methods.withdrawUnstaked().accounts({
     config: protocolPdas.config, stakePool: protocolPdas.stakePool, stakePosition: positionPda(account),
-    ownerTokens: associatedToken(authority, mint), vaultTokens: associatedToken(protocolPdas.stakePool, mint),
+    ownerTokens, vaultTokens: associatedToken(protocolPdas.stakePool, mint),
     mint, authority, tokenProgram: TOKEN_PROGRAM_ID,
-  }).instruction()]);
+  }).instruction());
+  return sendInstructions(instructions);
 }
 export async function claimStakingRewards() {
   const account = getAccount();
