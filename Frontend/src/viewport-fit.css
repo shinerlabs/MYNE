@@ -4403,6 +4403,8 @@ body[data-route="mine"] .auto-claim-row[hidden] {
 }
 
 body[data-route="mine"] .auto-funding-options {
+  grid-column: 1 / -1;
+  justify-self: end;
   display: grid;
   grid-template-columns: repeat(2, minmax(58px, 1fr));
   gap: 4px;

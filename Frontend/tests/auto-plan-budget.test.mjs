@@ -73,6 +73,7 @@ test('Auto-round offers an exact fixed SOL deposit without weakening the live 90
   ]);
   assert.match(main, /data-auto-funding="max"[\s\S]*data-auto-funding="fixed"/);
   assert.match(main, /id="auto-funding-amount"[\s\S]*Fixed SOL funding for Auto-round/);
+  assert.doesNotMatch(main, /Plan funding|round-helper|Loading live receipt rent/);
   assert.match(main, /fundingMode: autoFundingMode/);
   assert.match(minePage, /fundingMode === 'fixed'[\s\S]*parseEther\(String\(fixedFundingSol\)\)/);
   assert.match(minePage, /deposit < perRoundCost/);
