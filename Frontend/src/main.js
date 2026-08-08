@@ -43,6 +43,7 @@ import {
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
 import { displayedPausedRoundId, displayedWinningRound, roundCountdownView } from './chain/round.js';
 import { readSupplyStats } from './chain/supply.js';
+import { formatMyneBaseUnits } from './chain/burn-accounting.js';
 import { renderProtocolStats } from './about-stats.js';
 import {
   mountSolPrice, usdFor, usdcFor, getSolUsd, getSolUsdc, getMyneUsd,
@@ -1526,15 +1527,17 @@ const refreshProtocolStats = async (force = false) => {
 
     const supply = supplyResult.status === 'fulfilled' ? supplyResult.value : null;
     if (supply) {
-      const current = statsTokenAmount(supply.current);
-      const burned = statsTokenAmount(supply.burned);
-      const max = statsTokenAmount(supply.max);
-      const remaining = Math.max(0, max - current);
-      add('supply.current', current, statsNumber(current));
-      add('supply.burned', burned, statsNumber(burned));
-      add('supply.remaining', remaining, statsNumber(remaining));
-      add('supply.max', max, statsNumber(max, 0));
-      if (marketMyneUsd != null) add('market.marketCap', current * marketMyneUsd, statsUsd(current * marketMyneUsd));
+      const current = supply.current == null ? null : statsTokenAmount(supply.current);
+      const burned = supply.burned == null ? null : statsTokenAmount(supply.burned);
+      const max = supply.max == null ? null : statsTokenAmount(supply.max);
+      if (current != null) add('supply.current', current, statsNumber(current));
+      if (burned != null) add('supply.burned', burned, statsNumber(burned));
+      if (current != null && max != null) {
+        const remaining = Math.max(0, max - current);
+        add('supply.remaining', remaining, statsNumber(remaining));
+      }
+      if (max != null) add('supply.max', max, statsNumber(max, 0));
+      if (current != null && marketMyneUsd != null) add('market.marketCap', current * marketMyneUsd, statsUsd(current * marketMyneUsd));
     }
 
     const rounds = roundResult.status === 'fulfilled' ? roundResult.value : null;
@@ -4955,29 +4958,44 @@ const setSupplyMetricsUnavailable = () => {
   supplyMetrics?.setAttribute('aria-label', 'Supply and burn totals temporarily unavailable');
   if (supplyMetrics) supplyMetrics.dataset.status = 'unavailable';
 };
-const gld = (x) => `<img src="/myne-token-icon.svg" alt=""/> ${(x / 10n ** 9n).toLocaleString()}`;
+const gld = (x, suffix = '') => {
+  const amount = formatMyneBaseUnits(x);
+  return amount === null ? '—' : `<img src="/myne-token-icon.svg" alt=""/> ${amount}${suffix}`;
+};
+const setSupplyMetricUnavailable = (selector, detailIndex) => {
+  const value = document.querySelector(selector);
+  if (value) value.textContent = '—';
+  if (supplyMetricDetails[detailIndex]) supplyMetricDetails[detailIndex].textContent = 'temporarily unavailable';
+};
 const renderSupply = async () => {
   try {
     const s = await readSupplyStats();
     supplyMetricDetails.forEach((detail, index) => {
       detail.textContent = supplyMetricDefaultDetails[index] ?? '';
     });
-    supplyMetrics?.removeAttribute('aria-label');
-    if (supplyMetrics) supplyMetrics.dataset.status = 'ready';
     document.querySelector('#sup-max').innerHTML = gld(s.max);
-    // Keep mined emissions separate from current supply: current includes the 100 MYNE genesis
-    // mint plus every subsequent on-chain emission (and reflects any burns).
-    // Current supply is the protocol accounting view: genesis mint + mining emissions - burns.
-    // This keeps the displayed figure meaningful even when an RPC token-supply snapshot lags.
-    const mined = roundStats?.minted ?? 0n;
-    const burned = s.burned ?? 0n;
-    const genesis = BigInt(LAUNCH_GENESIS_MYNE) * 10n ** 9n;
-    const current = genesis + mined - burned;
-    document.querySelector('#sup-supplied').innerHTML = gld(mined);
-    document.querySelector('#sup-current').innerHTML = gld(current > 0n ? current : 0n);
-    document.querySelector('#sup-burned').innerHTML = gld(s.burned);
-    document.querySelector('#sup-burned-detail').textContent =
-      `buyback ${(s.burnedBuyback / 10n ** 9n).toLocaleString()} · staking ${(s.burnedStaking / 10n ** 9n).toLocaleString()}`;
+    if (roundStats?.minted != null) document.querySelector('#sup-supplied').innerHTML = gld(roundStats.minted);
+    else setSupplyMetricUnavailable('#sup-supplied', 1);
+    if (s.current != null) document.querySelector('#sup-current').innerHTML = gld(s.current);
+    else setSupplyMetricUnavailable('#sup-current', 2);
+
+    if (s.burned != null) {
+      document.querySelector('#sup-burned').innerHTML = gld(s.burned);
+      document.querySelector('#sup-burned-detail').textContent =
+        `buyback ${formatMyneBaseUnits(s.burnedBuyback)} · staking ${formatMyneBaseUnits(s.burnedStaking)}`;
+    } else if (s.burnedStaking != null) {
+      // This is a verified lower bound, not an invented total. Keep the plus sign and explanation
+      // until the completed-buyback aggregate is available again.
+      document.querySelector('#sup-burned').innerHTML = gld(s.burnedStaking, '+');
+      document.querySelector('#sup-burned-detail').textContent = 'staking verified · buyback index unavailable';
+    } else {
+      setSupplyMetricUnavailable('#sup-burned', 3);
+    }
+
+    const complete = roundStats?.minted != null && s.current != null && s.burned != null;
+    if (complete) supplyMetrics?.removeAttribute('aria-label');
+    else supplyMetrics?.setAttribute('aria-label', 'Supply totals shown from currently verified sources');
+    if (supplyMetrics) supplyMetrics.dataset.status = complete ? 'ready' : 'partial';
   } catch (err) {
     setSupplyMetricsUnavailable();
     console.warn('supply stats failed', err);

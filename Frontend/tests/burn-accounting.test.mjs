@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
-  combineBurnTotals, completedBuybackBurnFromStatsRow,
+  assembleSupplySnapshot, combineBurnTotals, completedBuybackBurnFromStatsRow,
+  formatMyneBaseUnits,
 } from '../src/chain/burn-accounting.js';
 
 test('completed buyback aggregate preserves exact base units', () => {
@@ -56,6 +57,29 @@ test('burn totals fail closed on unsafe or malformed quantities', () => {
   assert.equal(combineBurnTotals({ ...valid, currentSupplyBaseUnits: Number.MAX_SAFE_INTEGER + 1 }), null);
 });
 
+test('supply snapshot keeps independent on-chain values when the buyback index is unavailable', () => {
+  assert.deepEqual(assembleSupplySnapshot({
+    maxTokenUnits: '2000000',
+    currentSupplyBaseUnits: '69560645636',
+    stakingBurnBaseUnits: '156028937975',
+    completedBuybackBurnBaseUnits: null,
+  }), {
+    max: 2_000_000_000_000_000n,
+    current: 69_560_645_636n,
+    supplied: null,
+    burned: null,
+    burnedStaking: 156_028_937_975n,
+    burnedBuyback: null,
+  });
+});
+
+test('MYNE metric formatting preserves useful fractional base units without Number casts', () => {
+  assert.equal(formatMyneBaseUnits(2_000_000_000_000_000n), '2,000,000');
+  assert.equal(formatMyneBaseUnits(69_560_645_636n), '69.56');
+  assert.equal(formatMyneBaseUnits(156_028_937_975n), '156.028');
+  assert.equal(formatMyneBaseUnits(-1n), null);
+});
+
 test('frontend reads one completed-buyback aggregate instead of scanning execution history', async () => {
   const [reader, migration, ui] = await Promise.all([
     readFile(new URL('../src/chain/burn-index.js', import.meta.url), 'utf8'),
@@ -71,4 +95,6 @@ test('frontend reads one completed-buyback aggregate instead of scanning executi
   assert.match(migration, /grant select on public\.mine_burn_stats to anon, authenticated/);
   assert.match(ui, /setSupplyMetricsUnavailable/);
   assert.match(ui, /Supply and burn totals temporarily unavailable/);
+  assert.match(ui, /staking verified · buyback index unavailable/);
+  assert.match(ui, /s\.current != null/);
 });

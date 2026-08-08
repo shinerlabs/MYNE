@@ -150,6 +150,7 @@ test('aggregate reward stats exclude empty-round Motherlode samples', async () =
     new URL('../../supabase/migrations/20260808123000_empty_round_stats.sql', import.meta.url),
     'utf8',
   );
+  assert.match(migration, /create or replace view public\.mine_round_stats[\s\S]*security_invoker = true/);
   assert.match(migration, /total_wager_wei > 0 and jackpot_hit/);
   assert.match(migration, /zero-bid resolved rounds publish outcomes but never count as mining or Motherlode awards/);
 });

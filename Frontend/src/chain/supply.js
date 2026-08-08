@@ -2,7 +2,7 @@ import { connection } from './client.js';
 import {
   fetchProtocolAccount, getProtocolConfig, protocolPdas,
 } from './anchor-client.js';
-import { combineBurnTotals } from './burn-accounting.js';
+import { assembleSupplySnapshot } from './burn-accounting.js';
 import { loadCompletedBuybackBurnBaseUnits } from './burn-index.js';
 
 const TTL_MS = 5_000;
@@ -13,22 +13,24 @@ export async function readSupplyStats(force = false) {
   if (request) return request;
   request = (async () => {
     const config = await getProtocolConfig({ force });
-    const [supply, stakePool, completedBuybackBurn] = await Promise.all([
+    const [supplyResult, stakePoolResult, completedBuybackResult] = await Promise.allSettled([
       connection.getTokenSupply(config.mint, 'confirmed'),
       fetchProtocolAccount('StakePool', protocolPdas.stakePool),
       loadCompletedBuybackBurnBaseUnits({ force }),
     ]);
-    if (!stakePool || completedBuybackBurn === null) {
-      throw new Error('Verified burn accounting is unavailable');
-    }
-    const totals = combineBurnTotals({
-      currentSupplyBaseUnits: supply.value.amount,
-      stakingBurnBaseUnits: stakePool.totalBurn,
+    const supply = supplyResult.status === 'fulfilled' ? supplyResult.value : null;
+    const stakePool = stakePoolResult.status === 'fulfilled' ? stakePoolResult.value : null;
+    const completedBuybackBurn = completedBuybackResult.status === 'fulfilled'
+      ? completedBuybackResult.value
+      : null;
+    const snapshot = assembleSupplySnapshot({
+      maxTokenUnits: config.maxTokens.toString(),
+      currentSupplyBaseUnits: supply?.value?.amount ?? null,
+      stakingBurnBaseUnits: stakePool?.totalBurn?.toString?.() ?? stakePool?.totalBurn ?? null,
       completedBuybackBurnBaseUnits: completedBuybackBurn,
     });
-    if (!totals) throw new Error('Burn accounting contains an invalid base-unit value');
-    const max = BigInt(config.maxTokens.toString()) * 1_000_000_000n;
-    return { max, ...totals };
+    if (!snapshot) throw new Error('Supply accounting contains an invalid maximum');
+    return snapshot;
   })().finally(() => { request = null; });
   const data = await request;
   cache = { at: Date.now(), data };

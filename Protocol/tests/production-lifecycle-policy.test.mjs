@@ -111,10 +111,16 @@ test('buyback singleton fencing is atomic and service-role only', async () => {
     new URL('../../supabase/migrations/20260807131500_keeper_leases.sql', import.meta.url),
     'utf8',
   );
+  const privilegeHardening = await readFile(
+    new URL('../../supabase/migrations/20260808124500_keeper_lease_privileges.sql', import.meta.url),
+    'utf8',
+  );
   assert.match(migration, /on conflict \(lease_name\) do update/);
   assert.match(migration, /mine_keeper_leases\.expires_at <= now\(\)/);
   assert.match(migration, /revoke all on function .* from public/);
   assert.match(migration, /grant execute .* to service_role/);
+  assert.match(privilegeHardening, /from public, anon, authenticated/);
+  assert.match(privilegeHardening, /to service_role/);
 });
 
 test('administrative transaction scripts require an exact RPC genesis acknowledgement', async () => {

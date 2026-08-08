@@ -78,6 +78,12 @@ test('a protocol pause retains one validated APY snapshot', () => {
 
   const paused = { ...snapshot, protocolPaused: true, apyStandardPct: 9, apyBurnPct: 45 };
   assert.deepEqual(selectPausedApySnapshot(paused, snapshot), snapshot);
+  assert.deepEqual(selectPausedApySnapshot({
+    protocolPaused: true,
+    apyStandardPct: null,
+    apyBurnPct: null,
+    aprStatus: 'window',
+  }, snapshot), snapshot);
   assert.equal(selectPausedApySnapshot({ ...paused, protocolPaused: false }, snapshot), null);
   assert.equal(
     selectPausedApySnapshot({ ...paused, aprAsOf: snapshot.aprAsOf + 65 }, snapshot)?.apyStandardPct,

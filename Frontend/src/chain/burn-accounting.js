@@ -43,3 +43,46 @@ export function combineBurnTotals({
     burnedBuyback: buyback,
   };
 }
+
+/**
+ * Build an independently available supply snapshot. A missing buyback index must not hide the
+ * hard cap or the mint's live SPL supply; it only makes the combined burn total incomplete.
+ */
+export function assembleSupplySnapshot({
+  maxTokenUnits,
+  currentSupplyBaseUnits,
+  stakingBurnBaseUnits,
+  completedBuybackBurnBaseUnits,
+}) {
+  const maxTokens = asBaseUnits(maxTokenUnits);
+  if (maxTokens === null) return null;
+  const max = maxTokens * 1_000_000_000n;
+  const current = asBaseUnits(currentSupplyBaseUnits);
+  const burnedStaking = asBaseUnits(stakingBurnBaseUnits);
+  const burnedBuyback = asBaseUnits(completedBuybackBurnBaseUnits);
+  const completeBurn = burnedStaking !== null && burnedBuyback !== null;
+  const burned = completeBurn ? burnedStaking + burnedBuyback : null;
+  return {
+    max,
+    current,
+    supplied: current !== null && burned !== null ? current + burned : null,
+    burned,
+    burnedStaking,
+    burnedBuyback,
+  };
+}
+
+/** Format exact 9-decimal MYNE base units without converting a u64 through Number. */
+export function formatMyneBaseUnits(value, maxFractionDigits = 3) {
+  const amount = asBaseUnits(value);
+  if (amount === null || !Number.isInteger(maxFractionDigits) || maxFractionDigits < 0 || maxFractionDigits > 9) return null;
+  const scale = 1_000_000_000n;
+  const whole = amount / scale;
+  if (maxFractionDigits === 0) return whole.toLocaleString();
+  const fraction = (amount % scale)
+    .toString()
+    .padStart(9, '0')
+    .slice(0, maxFractionDigits)
+    .replace(/0+$/, '');
+  return `${whole.toLocaleString()}${fraction ? `.${fraction}` : ''}`;
+}

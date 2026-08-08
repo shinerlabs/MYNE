@@ -69,6 +69,11 @@ export const selectPausedApySnapshot = (currentMetrics, previousSnapshot) => {
   if (currentMetrics?.protocolPaused !== true) return null;
   const current = stakingApySnapshot(currentMetrics);
   const previous = stakingApySnapshot(previousSnapshot);
+  // Pausing stops new mining rows. If the index can no longer prove a fresh
+  // 30-minute window during maintenance, retain the last value that was
+  // successfully validated for this network/program instead of replacing it
+  // with the misleading "< 30M" pending state.
+  if (!current) return previous;
   return previous?.aprAsOf === current?.aprAsOf ? previous : current;
 };
 

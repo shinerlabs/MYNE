@@ -3,7 +3,9 @@
 -- rounds with an actual deployment while the round ledger itself retains all
 -- resolved zero-bid rows and their winning tiles.
 
-create or replace view public.mine_round_stats as
+create or replace view public.mine_round_stats
+with (security_invoker = true)
+as
 select
   count(*) filter (where resolved and total_wager_wei > 0)::bigint as mined,
   coalesce(sum(total_wager_wei) filter (where resolved), 0)::numeric(78,0) as deployed_wei,
