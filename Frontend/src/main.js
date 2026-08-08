@@ -5186,9 +5186,9 @@ const renderRoundHistory = () => {
   const rows = roundHistory;
 
   roundList.innerHTML = rows.length ? rows.map((r) => {
-    // Rounds with no bets never resolve (the keeper skips them) and rounds still awaiting
-    // the keeper have no outcome yet — neither has a winning tile, winner count or payout,
-    // so show dashes rather than inventing values from an unset winningSquare.
+    // Only genuinely unresolved rows lack an outcome. A settled zero-bid
+    // round takes the normal result path below because its winning tile and
+    // proof remain public even though every reward is zero.
     if (r.status !== 'settled') {
       const empty = r.status === 'no-bets';
       return `
@@ -5204,7 +5204,10 @@ const renderRoundHistory = () => {
     }
 
     const tile = Number(r.winningSquare) + 1;
-    const label = r.mode === 'motherlode' ? 'Motherlode' : r.mode.toUpperCase();
+    const emptyRound = r.totalWager === 0n;
+    const label = r.mode === 'motherlode' ? 'Motherlode'
+      : emptyRound ? 'No bids'
+        : r.mode.toUpperCase();
     // A solo round pays exactly ONE miner (chosen among everyone on the tile, bet-weighted),
     // so its paid-winner count is 1 even when several bet the tile. A split round pays every
     // bettor on the tile. Either is zero if nobody was on the winning square (pot rolls
@@ -5217,7 +5220,8 @@ const renderRoundHistory = () => {
         : r.winners;
     // Split pays every bettor on the tile; a solo round pays exactly one (bet-weighted), even
     // if several bet it; zero winners rolls forward. RESULT mirrors this.
-    const result = winnerCount === 0n ? 'No winners — rolled forward'
+    const result = emptyRound ? `Winning tile #${tile} · no bids · 0 MYNE rewarded`
+      : winnerCount === 0n ? 'No winners — rolled forward'
       : r.singleMinerRound
         ? `Solo winner · ${chain.format.short(r.singleMinerWinner)}${r.winners > 1n ? ` (1 of ${r.winners})` : ''}`
         : `${winnerCount} miner${winnerCount === 1n ? '' : 's'}`;

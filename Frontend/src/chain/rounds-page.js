@@ -13,8 +13,8 @@ import { NETWORK } from '../app-config.js';
  * winner counts + this account's claim status.
  *
  * Round states:
- *   settled     someone bet and the keeper resolved it — a real result
- *   no-bets     nobody wagered; the keeper skips these, pot carries forward
+ *   settled     keeper published the verifiable result, with or without bids
+ *   no-bets     historical/missing round has no published settlement yet
  *   resolving   bets are in but not yet settled — transient, seconds only
  *
  * A short-lived cache of the raw scan means paging/filtering doesn't re-scan the chain on every
@@ -26,16 +26,18 @@ const STALE_MS = 3000;
 let cache = { all: [], fetchedAt: 0, current: -1n, truncated: false };
 
 const decorate = (r) => {
-  const status = r.totalWager === 0n ? 'no-bets' : r.resolved ? 'settled' : 'resolving';
-  // A jackpot hit is the headline; otherwise the 50/50 flip decides solo vs split. Empty/
-  // unsettled rounds have no outcome. Drives both the badge and the filter buttons.
+  const status = r.resolved ? 'settled' : r.totalWager === 0n ? 'no-bets' : 'resolving';
+  // A resolved zero-bid round has a verifiable tile but no payout mode. A
+  // played Motherlode is the headline; otherwise the 50/50 sample decides
+  // solo vs split. Drives both the badge and filter buttons.
   const mode = status !== 'settled' ? status
-    : r.jackpotHit ? 'motherlode' : r.singleMinerRound ? 'solo' : 'split';
+    : r.totalWager === 0n ? 'empty'
+      : r.jackpotHit ? 'motherlode' : r.singleMinerRound ? 'solo' : 'split';
   return { ...r, status, mode, endsAt: roundEnd(r.roundId) };
 };
 
 const matchesFilter = (r, filter) => filter === 'all'
-  || (filter === 'mined' ? r.status === 'settled' : r.mode === filter);
+  || (filter === 'mined' ? r.status === 'settled' && r.totalWager > 0n : r.mode === filter);
 
 /**
  * @returns {{rows, page, pages, total, filteredTotal, truncated, summary}}
@@ -213,9 +215,9 @@ export async function loadRoundHistory({ page = 0, pageSize = ROUND_PAGE_SIZE, a
 export function summarise(rounds) {
   return rounds.reduce((acc, r) => ({
     count: acc.count + 1,
-    mined: acc.mined + (r.status === 'settled' ? 1 : 0),
+    mined: acc.mined + (r.status === 'settled' && r.totalWager > 0n ? 1 : 0),
     deployed: acc.deployed + r.totalWager,
     minted: acc.minted + r.bullionForWinners,
-    jackpots: acc.jackpots + (r.jackpotHit ? 1 : 0),
+    jackpots: acc.jackpots + (r.jackpotHit && r.totalWager > 0n ? 1 : 0),
   }), { count: 0, mined: 0, deployed: 0n, minted: 0n, jackpots: 0 });
 }
