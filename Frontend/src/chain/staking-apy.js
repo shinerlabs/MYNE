@@ -29,11 +29,10 @@ export const apyPercent = (rewardPerMinuteSol, totalWeightMyne, mynePerSol) => {
 // Backwards-compatible name for callers that still import the original one-minute helper.
 export const minuteApyPercent = apyPercent;
 
-/** One formatter for every APY surface. `compact` is reserved for the narrow header pill. */
-export const formatApyPercent = (value, { compact = false } = {}) => {
+/** One full-number formatter for every APY surface, including the header pill. */
+export const formatApyPercent = (value) => {
   if (!Number.isFinite(value) || value < 0) return '—';
   if (value > APY_DISPLAY_CAP_PERCENT) return '100,000%+';
-  if (compact && value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, '')}k%`;
   return value >= 1000
     ? `${Math.round(value).toLocaleString()}%`
     : `${value.toFixed(1)}%`;

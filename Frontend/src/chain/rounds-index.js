@@ -1,10 +1,7 @@
 import { supabase, isSocialConfigured } from '../social/config.js';
 import { ROUND_DURATION } from './config.js';
 import { nowSeconds as chainNowSeconds } from './round.js';
-import {
-  selectLatestCompleteStakingRewardWindow,
-  summariseStakingRewardWindow,
-} from './staking-apy.js';
+import { selectLatestCompleteStakingRewardWindow } from './staking-apy.js';
 import {
   commitmentHexFromAccount, describeRandomnessRound, normalizeProofHex,
 } from './randomness-mode.js';
@@ -328,7 +325,7 @@ export async function loadMyBetRounds(address) {
 
 const STAKING_WINDOW_CACHE_MS = 30_000;
 const ROUND_CADENCE_SECONDS = Number(ROUND_DURATION);
-const PAUSED_STAKING_WINDOW_LOOKBACK_SECONDS = 6 * 60 * 60;
+const STAKING_WINDOW_FALLBACK_LOOKBACK_SECONDS = 6 * 60 * 60;
 let stakingWindowCache = null;
 
 /**
@@ -371,10 +368,7 @@ export async function loadStakingRewardWindow(
     if (latestError || !latestRows?.length) return null;
     const end = Number(latestRows[0].settles_at);
     if (!Number.isSafeInteger(end)) return null;
-    const exactWindowStart = end - Math.round(windowMinutes * 60);
-    const queryStart = allowStale
-      ? end - PAUSED_STAKING_WINDOW_LOOKBACK_SECONDS
-      : exactWindowStart;
+    const queryStart = end - STAKING_WINDOW_FALLBACK_LOOKBACK_SECONDS;
     const { data, error } = await supabase
       .from('mine_rounds')
       .select('round_id,resolved,settles_at,staking_net_lamports::text')
@@ -383,25 +377,20 @@ export async function loadStakingRewardWindow(
       .order('settles_at', { ascending: true })
       .limit(1000);
     if (error) return null;
-    if (allowStale) {
-      return selectLatestCompleteStakingRewardWindow(data ?? [], {
-        windowMinutes,
-        roundCadenceSeconds: ROUND_CADENCE_SECONDS,
-        observedAt,
-        maxRows: 1000,
-      });
-    }
-    return summariseStakingRewardWindow(data ?? [], {
-      start: exactWindowStart,
-      end,
+    const selected = selectLatestCompleteStakingRewardWindow(data ?? [], {
       windowMinutes,
       roundCadenceSeconds: ROUND_CADENCE_SECONDS,
-      maxRows: 1000,
       observedAt,
-      watermarkSettlesAt: end,
-      maxStalenessSeconds: ROUND_CADENCE_SECONDS * 3,
-      maxSettlementGapSeconds: ROUND_CADENCE_SECONDS + 5,
+      maxRows: 1000,
     });
+    if (!selected) return null;
+    // A complete older window is a valid realised rate, but it must remain
+    // distinguishable from a fully current live sample in the presentation.
+    const staleLatestRow = observedAt - end > ROUND_CADENCE_SECONDS * 3;
+    return {
+      ...selected,
+      isFallback: selected.lastSettlesAt !== end || staleLatestRow,
+    };
   })().catch(() => null);
   stakingWindowCache = { key, promise };
   const value = await promise;

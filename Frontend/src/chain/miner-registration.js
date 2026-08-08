@@ -2,6 +2,7 @@ import { PublicKey, SystemProgram } from '@solana/web3.js';
 
 import { connection } from './client.js';
 import { derivePda, protocolPdas } from './anchor-client.js';
+import { resolveReferrerReference } from './referral.js';
 
 export const minerPda = (authority) => derivePda('miner', new PublicKey(authority));
 export const stakePositionPda = (authority) => derivePda('stake_position', new PublicKey(authority));
@@ -15,9 +16,6 @@ const referralReferenceFromLocation = () => {
 export async function registrationReferrer(authority) {
   const reference = referralReferenceFromLocation();
   if (!reference) return PublicKey.default;
-  // Referral indexing is loaded only when a referral is actually present. This keeps the core
-  // mining client usable in Node/CI and in deployments where social features are not configured.
-  const { resolveReferrerReference } = await import('./referral.js');
   const resolved = await resolveReferrerReference(reference);
   if (!resolved) return PublicKey.default;
   const referrer = new PublicKey(resolved);

@@ -518,6 +518,49 @@ assert.equal(
   'Cancelling Auto Mine must close its PDA and return tracked balance plus account rent',
 );
 
+// Mirror the browser's first-wallet path: registration and AutoPlan creation are atomic, so the
+// keeper never observes a funded plan whose required Miner/StakePosition accounts are missing.
+const firstTimeAutoMiner = Keypair.generate();
+const firstTimeAirdrop = await provider.connection.requestAirdrop(
+  firstTimeAutoMiner.publicKey,
+  LAMPORTS_PER_SOL,
+);
+await provider.connection.confirmTransaction(firstTimeAirdrop, 'confirmed');
+const [firstTimeMiner] = PublicKey.findProgramAddressSync(
+  [Buffer.from('miner'), firstTimeAutoMiner.publicKey.toBuffer()], PROGRAM_ID,
+);
+const [firstTimeStakePosition] = PublicKey.findProgramAddressSync(
+  [Buffer.from('stake_position'), firstTimeAutoMiner.publicKey.toBuffer()], PROGRAM_ID,
+);
+const [firstTimeAutoPlan] = PublicKey.findProgramAddressSync(
+  [Buffer.from('auto_plan'), firstTimeAutoMiner.publicKey.toBuffer()], PROGRAM_ID,
+);
+const registerFirstTimeMinerIx = await program.methods
+  .registerMiner(PublicKey.default)
+  .accounts({
+    config, miningPool, stakePool, miner: firstTimeMiner, stakePosition: firstTimeStakePosition,
+    referrerMiner: null, authority: firstTimeAutoMiner.publicKey, systemProgram: SystemProgram.programId,
+  })
+  .instruction();
+const createFirstTimePlanIx = await program.methods
+  .createAutoPlan(amounts, new BN('50000000'), 0)
+  .accounts({
+    config, autoPlan: firstTimeAutoPlan, authority: firstTimeAutoMiner.publicKey,
+    systemProgram: SystemProgram.programId,
+  })
+  .instruction();
+await provider.sendAndConfirm(
+  new Transaction().add(registerFirstTimeMinerIx, createFirstTimePlanIx),
+  [firstTimeAutoMiner],
+);
+assert.ok(await program.account.miner.fetchNullable(firstTimeMiner));
+assert.ok(await program.account.stakePosition.fetchNullable(firstTimeStakePosition));
+assert.ok(await program.account.autoPlan.fetchNullable(firstTimeAutoPlan));
+await program.methods.cancelAutoPlan().accounts({
+  config, autoPlan: firstTimeAutoPlan, authority: firstTimeAutoMiner.publicKey,
+}).signers([firstTimeAutoMiner]).rpc();
+assert.equal(await program.account.autoPlan.fetchNullable(firstTimeAutoPlan), null);
+
 let roundState = await program.account.round.fetch(round);
 assert.equal(roundState.grossDeployedLamports.toString(), '650000000');
 assert.equal(roundState.tileLamports[0].toString(), '600000000');
@@ -1109,6 +1152,6 @@ console.log(JSON.stringify({
     'on-chain receipt processed/closed counters and buyback closure gate',
     'standard staking plus operator and mining-funded SOL rewards',
     '10% MYNE claim fee accounting and capped minting',
-    'balance-capped auto-round execution without a play-count cap',
+    'atomic first-wallet Auto Mine setup, exact execution and rent-reclaiming cancellation',
   ],
 }, null, 2));

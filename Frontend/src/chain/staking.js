@@ -233,6 +233,7 @@ export async function readStakingMetrics() {
     // `aprPct` remains as a compatibility alias for the standard 1× value.
     aprPct: apy.standard, apyStandardPct: apy.standard, apyBurnPct: apy.burn,
     aprStatus, aprWindowDays: windowMinutes / 1440,
+    aprFallback: rewardWindow?.isFallback === true,
     rewardsToStakersEth: rewardPerMinuteSol * 1440,
     aprWindowRounds: rewardWindow?.rounds ?? 0,
     aprAsOf: rewardWindow?.complete ? rewardWindow.lastSettlesAt : null,

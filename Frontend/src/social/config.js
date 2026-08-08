@@ -16,10 +16,12 @@ import { createClient } from '@supabase/supabase-js';
  */
 // These are publishable client values, but production must provide them explicitly. A baked-in
 // project fallback can silently point a Mainnet bundle at the wrong database after a migration.
-export const REMOTE_SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const useProxy = Boolean(import.meta.env.DEV);
-export const SUPABASE_URL = useProxy ? `${window.location.origin}/supabase` : REMOTE_SUPABASE_URL;
-export const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const ENV = import.meta.env ?? {};
+export const REMOTE_SUPABASE_URL = ENV.VITE_SUPABASE_URL || '';
+const browserOrigin = globalThis.window?.location?.origin || '';
+const useProxy = Boolean(ENV.DEV && browserOrigin);
+export const SUPABASE_URL = useProxy ? `${browserOrigin}/supabase` : REMOTE_SUPABASE_URL;
+export const SUPABASE_ANON_KEY = ENV.VITE_SUPABASE_ANON_KEY || '';
 export const FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
 export const isSocialConfigured = Boolean(REMOTE_SUPABASE_URL && SUPABASE_ANON_KEY);

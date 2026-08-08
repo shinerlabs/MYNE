@@ -1945,7 +1945,7 @@ const refreshStakingMetrics = async () => {
     // controls explicitly labelled Stake + Burn, so two unlabeled APY figures never disagree.
     const headerAprText = m.apyStandardPct == null
       ? aprText
-      : formatApyPercent(m.apyStandardPct, { compact: true });
+      : formatApyPercent(m.apyStandardPct);
     setMetric('#metric-apr', aprText);
     setMetric('#header-staking-apr', headerAprText);
     setMetric('#stake-flex-apy', formatApyPercent(m.apyStandardPct));
@@ -1953,6 +1953,8 @@ const refreshStakingMetrics = async () => {
     const apyWindowLabel = document.querySelector('#stake-apy-window-label');
     if (apyWindowLabel) apyWindowLabel.textContent = paused && m.apyStandardPct != null
       ? 'PAUSED SNAPSHOT · LAST VERIFIED 30M'
+      : m.aprFallback && m.apyStandardPct != null
+      ? 'LATEST VERIFIED 30M · HISTORICAL'
       : 'LAST 30 MINUTES · NON-COMPOUNDING EST.';
     setMetric('#metric-staked', m.totalStakedPrincipal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
     const poolText = m.rewardMode === 'eth'
@@ -1974,7 +1976,11 @@ const refreshStakingMetrics = async () => {
     const headerApr = document.querySelector('.header-apr');
     if (headerApr) {
       headerApr.setAttribute('aria-label', `Open staking, estimated standard APY ${headerAprText}`);
-      headerApr.title = headerAprText === '—' ? 'Open staking' : `Estimated standard staking APY ${headerAprText}`;
+      headerApr.title = headerAprText === '—'
+        ? 'Open staking'
+        : m.aprFallback
+        ? `Latest verified standard staking APY ${headerAprText}`
+        : `Estimated standard staking APY ${headerAprText}`;
     }
     if (apr) {
       // Every null case used to show the "pool could not be read" message, including the two cases
@@ -1987,6 +1993,8 @@ const refreshStakingMetrics = async () => {
       };
       apr.title = paused && m.aprPct != null
         ? 'APY snapshot retained from the last verified value before mining paused.'
+        : m.aprFallback && m.aprPct != null
+        ? 'Latest fully verified 30-minute APY window. A newer complete indexed window is not yet available.'
         : m.aprPct == null
         ? (aprReason[m.aprStatus] ?? aprReason.price)
         : `Spot-price run-rate, non-compounding estimate. Annualised from the latest ${Math.max(1, Math.round(m.aprWindowDays * 1440))}-minute indexed net SOL reward window, `
@@ -1998,16 +2006,25 @@ const refreshStakingMetrics = async () => {
   } catch (error) {
     if (requestId !== stakingMetricsRefreshId) return;
     console.warn('staking metrics failed', error);
-    if (chain.state.protocolPaused === true && previousApy) {
-      const snapshot = { ...(stakingMetricsState ?? {}), ...previousApy, aprPct: previousApy.apyStandardPct, aprStatus: 'paused' };
+    if (previousApy) {
+      const paused = chain.state.protocolPaused === true;
+      const snapshot = {
+        ...(stakingMetricsState ?? {}),
+        ...previousApy,
+        aprPct: previousApy.apyStandardPct,
+        aprStatus: paused ? 'paused' : 'fallback',
+        aprFallback: !paused,
+      };
       stakingMetricsState = snapshot;
       const aprText = formatApyPercent(snapshot.apyStandardPct);
       setMetric('#metric-apr', aprText);
-      setMetric('#header-staking-apr', formatApyPercent(snapshot.apyStandardPct, { compact: true }));
+      setMetric('#header-staking-apr', formatApyPercent(snapshot.apyStandardPct));
       setMetric('#stake-flex-apy', formatApyPercent(snapshot.apyStandardPct));
       setMetric('#stake-burn-apy', formatApyPercent(snapshot.apyBurnPct));
       const apyWindowLabel = document.querySelector('#stake-apy-window-label');
-      if (apyWindowLabel) apyWindowLabel.textContent = 'PAUSED SNAPSHOT · LAST VERIFIED 30M';
+      if (apyWindowLabel) apyWindowLabel.textContent = paused
+        ? 'PAUSED SNAPSHOT · LAST VERIFIED 30M'
+        : 'LATEST VERIFIED 30M · HISTORICAL';
       updateStakeFlexCard();
       updateProjection();
       return;

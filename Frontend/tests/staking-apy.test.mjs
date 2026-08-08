@@ -47,9 +47,9 @@ test('annualised staking yield is unit-correct and rejects unsafe inputs', () =>
 test('all APY surfaces share one formatter and explicit tier/position variants', () => {
   assert.equal(formatApyPercent(12.34), '12.3%');
   assert.equal(formatApyPercent(1_234), '1,234%');
-  assert.equal(formatApyPercent(1_234, { compact: true }), '1.2k%');
+  assert.equal(formatApyPercent(1_200), '1,200%');
   assert.equal(formatApyPercent(100_000), '100,000%');
-  assert.equal(formatApyPercent(100_000, { compact: true }), '100k%');
+  assert.equal(formatApyPercent(100_000, { compact: true }), '100,000%');
   assert.equal(formatApyPercent(100_000.01), '100,000%+');
   assert.equal(formatApyPercent(30_000_000, { compact: true }), '100,000%+');
   assert.equal(formatApyPercent(null), '—');
@@ -200,7 +200,7 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(main, /const dailyPool = metrics\?\.aprWindowDays > 0 \? metrics\.rewardsToStakersEth : null/);
   assert.match(main, /positionApyPercent\(metrics\?\.apyStandardPct, principal, weight\)/);
   assert.match(main, /setMetric\('#header-staking-apr', headerAprText\)/);
-  assert.match(main, /formatApyPercent\(m\.apyStandardPct, \{ compact: true \}\)/);
+  assert.doesNotMatch(main, /formatApyPercent\([^\n]+compact: true/);
   assert.match(main, /setMetric\('#stake-burn-apy', formatApyPercent\(m\.apyBurnPct\)\)/);
   assert.match(main, /add\('staking\.apy', staking\.apyStandardPct, formatApyPercent\(staking\.apyStandardPct\)\)/);
   assert.doesNotMatch(main, /m\.aprPct \* 5/);
@@ -209,6 +209,8 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(main, /requestId !== stakingMetricsRefreshId/);
   assert.match(main, /const paused = current\.protocolPaused === true/);
   assert.match(main, /PAUSED SNAPSHOT · LAST VERIFIED 30M/);
+  assert.match(main, /LATEST VERIFIED 30M · HISTORICAL/);
+  assert.match(main, /aprFallback: !paused/);
   assert.match(main, /selectPausedApySnapshot\(current, previousApy\)/);
   assert.match(main, /ctx\.fillText\('POSITION APY'/);
   assert.match(main, /if \(data\.apy == null\) return null/);
@@ -225,8 +227,7 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(rounds, /select\('round_id,resolved,settles_at,staking_net_lamports::text'\)/);
   assert.match(rounds, /nowSeconds = Number\(chainNowSeconds\(\)\)/);
   assert.match(rounds, /\.eq\('resolved', true\)[\s\S]*\.not\('staking_net_lamports', 'is', null\)/);
-  assert.match(rounds, /watermarkSettlesAt: end/);
-  assert.match(rounds, /PAUSED_STAKING_WINDOW_LOOKBACK_SECONDS/);
+  assert.match(rounds, /STAKING_WINDOW_FALLBACK_LOOKBACK_SECONDS/);
   assert.match(rounds, /selectLatestCompleteStakingRewardWindow\(data \?\? \[\],/);
-  assert.match(rounds, /maxStalenessSeconds: ROUND_CADENCE_SECONDS \* 3/);
+  assert.match(rounds, /isFallback: selected\.lastSettlesAt !== end \|\| staleLatestRow/);
 });
