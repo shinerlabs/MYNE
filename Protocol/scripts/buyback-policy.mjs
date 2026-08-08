@@ -85,6 +85,77 @@ export function refreshUnsignedV0TransactionBlockhash(transaction, {
 }
 
 /**
+ * Bind every RPC read used to inspect a refreshed transaction to the slot
+ * that supplied its blockhash. This prevents a load-balanced RPC endpoint
+ * from serving the blockhash from one backend and simulating it on an older
+ * backend that has not observed that slot yet.
+ */
+export function pinLatestBlockhashContext(response, { commitment }) {
+  const minContextSlot = response?.context?.slot;
+  const blockhash = response?.value?.blockhash;
+  const lastValidBlockHeight = response?.value?.lastValidBlockHeight;
+  assert.ok(
+    Number.isSafeInteger(minContextSlot) && minContextSlot >= 0,
+    'Latest blockhash context slot is invalid',
+  );
+  assert.ok(typeof blockhash === 'string' && blockhash.length > 0, 'Latest blockhash is invalid');
+  assert.ok(
+    Number.isSafeInteger(lastValidBlockHeight) && lastValidBlockHeight >= 0,
+    'Latest blockhash last-valid height is invalid',
+  );
+  assert.ok(typeof commitment === 'string' && commitment.length > 0, 'RPC commitment is required');
+  return {
+    latestBlockhash: { blockhash, lastValidBlockHeight },
+    contextConfig: { commitment, minContextSlot },
+  };
+}
+
+/**
+ * Older durable journals predate context pinning. Omit minContextSlot for
+ * those exact saved transactions while validating and preserving it for new
+ * entries, so recovery never needs to rebuild or resign journaled bytes.
+ */
+export function savedTransactionSendOptions(minContextSlot, { commitment }) {
+  assert.ok(typeof commitment === 'string' && commitment.length > 0, 'RPC commitment is required');
+  assert.ok(
+    minContextSlot == null || (Number.isSafeInteger(minContextSlot) && minContextSlot >= 0),
+    'Saved transaction minimum context slot is invalid',
+  );
+  return {
+    maxRetries: 3,
+    skipPreflight: false,
+    preflightCommitment: commitment,
+    ...(minContextSlot == null ? {} : { minContextSlot }),
+  };
+}
+
+/**
+ * web3.js 1.x does not expose getFeeForMessage's RPC minContextSlot even
+ * though the RPC method supports it. Retry only the transient blockhash
+ * propagation failure after a context-pinned simulation; all other errors
+ * remain immediate and fail closed.
+ */
+export async function retryTransientBlockhashRead(read, {
+  attempts = 4,
+  wait = async () => {},
+} = {}) {
+  assert.equal(typeof read, 'function', 'Blockhash read callback is required');
+  assert.ok(Number.isSafeInteger(attempts) && attempts >= 1 && attempts <= 10, 'Retry attempts are invalid');
+  assert.equal(typeof wait, 'function', 'Blockhash retry wait callback is required');
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      if (!/blockhash/i.test(error instanceof Error ? error.message : String(error))) throw error;
+      lastError = error;
+      if (attempt < attempts) await wait(attempt);
+    }
+  }
+  throw lastError;
+}
+
+/**
  * An unsigned/signed recent-blockhash transaction can no longer land once the
  * blockhash has expired. When its signature is absent and the keeper's token
  * balance never increased, abandoning that exact journal entry cannot double

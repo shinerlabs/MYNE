@@ -20,8 +20,11 @@ import {
   isCompleteBuybackExecution,
   meteoraRouteForProgram,
   pendingSwapIsProvablyExpired,
+  pinLatestBlockhashContext,
   purchasedTokenBaseUnits,
   refreshUnsignedV0TransactionBlockhash,
+  retryTransientBlockhashRead,
+  savedTransactionSendOptions,
   selectIndexedBuybackRound,
   validateJupiterPriorityLevel,
   validateJupiterEndpoint,
@@ -279,9 +282,16 @@ async function inspectSwapTransaction(transaction, {
     1,
     'Jupiter transaction requires an unexpected signer',
   );
+  const { latestBlockhash, contextConfig } = pinLatestBlockhashContext(
+    await provider.connection.getLatestBlockhashAndContext({ commitment }),
+    { commitment },
+  );
   const lookupTables = [];
   for (const lookup of transaction.message.addressTableLookups) {
-    const response = await provider.connection.getAddressLookupTable(lookup.accountKey, { commitment });
+    const response = await provider.connection.getAddressLookupTable(
+      lookup.accountKey,
+      contextConfig,
+    );
     assert.ok(response.value, `Jupiter lookup table is unavailable: ${lookup.accountKey.toBase58()}`);
     lookupTables.push(response.value);
   }
@@ -307,15 +317,17 @@ async function inspectSwapTransaction(transaction, {
   // for its original blockhash to expire. Refresh only the validated message
   // blockhash; the exact refreshed message is simulated, signed and then
   // persisted with its deterministic signature in the durable journal.
-  const latestBlockhash = await provider.connection.getLatestBlockhash(commitment);
   refreshUnsignedV0TransactionBlockhash(transaction, {
     expectedPayer: payer.publicKey.toBase58(),
     blockhash: latestBlockhash.blockhash,
   });
 
-  const beforeLamports = BigInt(await provider.connection.getBalance(payer.publicKey, commitment));
+  const beforeLamports = BigInt(await provider.connection.getBalance(
+    payer.publicKey,
+    contextConfig,
+  ));
   const simulation = await provider.connection.simulateTransaction(transaction, {
-    commitment,
+    ...contextConfig,
     sigVerify: false,
     accounts: {
       encoding: 'base64',
@@ -331,7 +343,18 @@ async function inspectSwapTransaction(transaction, {
   assert.ok(postPayer && postMyne, 'Swap simulation did not return payer and MYNE account state');
   const spentLamports = beforeLamports - BigInt(postPayer.lamports);
   assert.ok(spentLamports >= BigInt(inputLamports), 'Swap simulation spends less than the quoted input');
-  const fee = BigInt((await provider.connection.getFeeForMessage(transaction.message, commitment)).value || 0);
+  // @solana/web3.js 1.98 cannot pass minContextSlot to getFeeForMessage.
+  // The preceding pinned simulation proves the message valid at that slot;
+  // retry only a lagging backend's transient blockhash response.
+  const feeResponse = await retryTransientBlockhashRead(
+    () => provider.connection.getFeeForMessage(transaction.message, commitment),
+    { wait: (attempt) => sleep(attempt * 200) },
+  );
+  assert.ok(
+    Number.isSafeInteger(feeResponse.value) && feeResponse.value >= 0,
+    'Swap message fee is unavailable',
+  );
+  const fee = BigInt(feeResponse.value);
   const overhead = BigInt(readInteger(
     process.env.MAX_SWAP_OVERHEAD_LAMPORTS || '5000000',
     'MAX_SWAP_OVERHEAD_LAMPORTS',
@@ -347,7 +370,13 @@ async function inspectSwapTransaction(transaction, {
     postBaseUnits - beforeBaseUnits >= BigInt(minimumOutputBaseUnits),
     'Swap simulation output is below the quote slippage threshold',
   );
-  return { simulation, spentLamports, postBaseUnits, latestBlockhash };
+  return {
+    simulation,
+    spentLamports,
+    postBaseUnits,
+    latestBlockhash,
+    minContextSlot: contextConfig.minContextSlot,
+  };
 }
 
 async function ensureMyneAta(mint) {
@@ -374,31 +403,53 @@ async function buildBurnAmountTransaction(mint, ata, delta) {
   const instruction = createBurnCheckedInstruction(
     ata, mint, payer.publicKey, delta, mintInfo.decimals, [], TOKEN_PROGRAM_ID,
   );
-  const { blockhash } = await provider.connection.getLatestBlockhash('confirmed');
-  const simulationTransaction = new Transaction({
-    feePayer: payer.publicKey, recentBlockhash: blockhash,
-  }).add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), instruction);
-  const simulation = await provider.connection.simulateTransaction(simulationTransaction, [payer]);
+  const { latestBlockhash, contextConfig } = pinLatestBlockhashContext(
+    await provider.connection.getLatestBlockhashAndContext({ commitment }),
+    { commitment },
+  );
+  const simulationTransaction = new VersionedTransaction(
+    new TransactionMessage({
+      payerKey: payer.publicKey,
+      recentBlockhash: latestBlockhash.blockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        instruction,
+      ],
+    }).compileToV0Message(),
+  );
+  simulationTransaction.sign([payer]);
+  const simulation = await provider.connection.simulateTransaction(simulationTransaction, {
+    ...contextConfig,
+    sigVerify: true,
+  });
   assert.equal(simulation.value.err, null, `MYNE burn simulation failed: ${JSON.stringify(simulation.value.err)}`);
   const measured = Math.max(50_000, Number(simulation.value.unitsConsumed || 200_000));
   const priority = Math.min(
     1_000_000,
     readInteger(process.env.KEEPER_PRIORITY_MICROLAMPORTS || '0', 'KEEPER_PRIORITY_MICROLAMPORTS'),
   );
-  const transaction = new Transaction({ feePayer: payer.publicKey, recentBlockhash: blockhash }).add(
-    ComputeBudgetProgram.setComputeUnitLimit({
-      units: Math.min(1_400_000, Math.ceil(measured * 1.1)),
-    }),
-    ...(priority > 0
-      ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority })]
-      : []),
-    instruction,
+  const transaction = new VersionedTransaction(
+    new TransactionMessage({
+      payerKey: payer.publicKey,
+      recentBlockhash: latestBlockhash.blockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({
+          units: Math.min(1_400_000, Math.ceil(measured * 1.1)),
+        }),
+        ...(priority > 0
+          ? [ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priority })]
+          : []),
+        instruction,
+      ],
+    }).compileToV0Message(),
   );
-  transaction.sign(payer);
+  transaction.sign([payer]);
   return {
     delta,
     raw: Buffer.from(transaction.serialize()).toString('base64'),
-    signature: base58Encode(transaction.signature),
+    signature: base58Encode(transaction.signatures[0]),
+    minContextSlot: contextConfig.minContextSlot,
+    lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
   };
 }
 
@@ -426,12 +477,33 @@ async function confirmedSwapOutputBaseUnits(signature, mint) {
   });
 }
 
-async function sendSavedTransaction(rawBase64) {
-  const signature = await provider.connection.sendRawTransaction(Buffer.from(rawBase64, 'base64'), {
-    maxRetries: 3,
-    skipPreflight: false,
-  });
-  const confirmation = await provider.connection.confirmTransaction(signature, 'confirmed');
+async function sendSavedTransaction(rawBase64, {
+  minContextSlot = null,
+  lastValidBlockHeight = null,
+} = {}) {
+  assert.ok(
+    lastValidBlockHeight == null
+      || (Number.isSafeInteger(lastValidBlockHeight) && lastValidBlockHeight >= 0),
+    'Saved transaction last-valid block height is invalid',
+  );
+  const raw = Buffer.from(rawBase64, 'base64');
+  const saved = VersionedTransaction.deserialize(raw);
+  const expectedSignature = base58Encode(saved.signatures[0]);
+  const signature = await provider.connection.sendRawTransaction(
+    raw,
+    savedTransactionSendOptions(minContextSlot, { commitment }),
+  );
+  assert.equal(signature, expectedSignature, 'Submitted saved transaction signature changed');
+  const confirmation = await provider.connection.confirmTransaction(
+    lastValidBlockHeight == null
+      ? signature
+      : {
+        signature,
+        blockhash: saved.message.recentBlockhash,
+        lastValidBlockHeight,
+      },
+    commitment,
+  );
   assert.equal(confirmation.value.err, null, `Saved buyback transaction failed: ${JSON.stringify(confirmation.value.err)}`);
   return signature;
 }
@@ -451,21 +523,47 @@ async function markRoundBuybackComplete(roundAddress, roundState) {
     round: roundAddress,
     buybackAuthority: payer.publicKey,
   }).instruction();
-  const simulationTx = new Transaction().add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-    instruction,
+  const { latestBlockhash, contextConfig } = pinLatestBlockhashContext(
+    await provider.connection.getLatestBlockhashAndContext({ commitment }),
+    { commitment },
   );
-  const latest = await provider.connection.getLatestBlockhash('confirmed');
-  simulationTx.recentBlockhash = latest.blockhash;
-  simulationTx.feePayer = payer.publicKey;
-  const simulation = await provider.connection.simulateTransaction(simulationTx, [payer]);
+  const simulationTx = new VersionedTransaction(
+    new TransactionMessage({
+      payerKey: payer.publicKey,
+      recentBlockhash: latestBlockhash.blockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        instruction,
+      ],
+    }).compileToV0Message(),
+  );
+  simulationTx.sign([payer]);
+  const simulation = await provider.connection.simulateTransaction(simulationTx, {
+    ...contextConfig,
+    sigVerify: true,
+  });
   assert.equal(simulation.value.err, null, `Buyback completion simulation failed: ${JSON.stringify(simulation.value.err)}`);
   const measured = Math.max(50_000, Number(simulation.value.unitsConsumed || 200_000));
-  const transaction = new Transaction().add(
-    ComputeBudgetProgram.setComputeUnitLimit({ units: Math.min(1_400_000, Math.ceil(measured * 1.1)) }),
-    instruction,
+  const transaction = new VersionedTransaction(
+    new TransactionMessage({
+      payerKey: payer.publicKey,
+      recentBlockhash: latestBlockhash.blockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({
+          units: Math.min(1_400_000, Math.ceil(measured * 1.1)),
+        }),
+        instruction,
+      ],
+    }).compileToV0Message(),
   );
-  return sendAndConfirmTransaction(provider.connection, transaction, [payer], { commitment: 'confirmed' });
+  transaction.sign([payer]);
+  return sendSavedTransaction(
+    Buffer.from(transaction.serialize()).toString('base64'),
+    {
+      minContextSlot: contextConfig.minContextSlot,
+      lastValidBlockHeight: latestBlockhash.lastValidBlockHeight,
+    },
+  );
 }
 
 function roundJournal(state, roundId) {
@@ -512,6 +610,8 @@ async function repairIncompleteExecution({ state, roundKey, journal, mint, ata }
     burnBaseUnits: burn.delta.toString(),
     burnRaw: burn.raw,
     burnSignature: burn.signature,
+    burnMinContextSlot: burn.minContextSlot,
+    burnLastValidBlockHeight: burn.lastValidBlockHeight,
   };
   state.rounds[roundKey] = journal;
   await saveState(state);
@@ -527,7 +627,10 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
   if (pending.phase === 'swap-ready') {
     if (current <= before) {
       try {
-        const submitted = await sendSavedTransaction(pending.swapRaw);
+        const submitted = await sendSavedTransaction(pending.swapRaw, {
+          minContextSlot: pending.swapMinContextSlot,
+          lastValidBlockHeight: pending.lastValidBlockHeight,
+        });
         assert.equal(submitted, pending.swapSignature, 'Submitted swap signature changed');
       } catch (error) {
         current = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
@@ -608,13 +711,18 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
     pending.burnBaseUnits = burn.delta.toString();
     pending.burnRaw = burn.raw;
     pending.burnSignature = burn.signature;
+    pending.burnMinContextSlot = burn.minContextSlot;
+    pending.burnLastValidBlockHeight = burn.lastValidBlockHeight;
     pending.phase = 'burn-ready';
     state.rounds[roundKey] = journal;
     await saveState(state);
   }
   if (current > before) {
     try {
-      const submitted = await sendSavedTransaction(pending.burnRaw);
+      const submitted = await sendSavedTransaction(pending.burnRaw, {
+        minContextSlot: pending.burnMinContextSlot,
+        lastValidBlockHeight: pending.burnLastValidBlockHeight,
+      });
       assert.equal(submitted, pending.burnSignature, 'Submitted burn signature changed');
     } catch (error) {
       // A crash can occur after the exact burn landed but before the journal
@@ -845,8 +953,11 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
     swapRaw: Buffer.from(swap.serialize()).toString('base64'),
     swapSignature,
     lastValidBlockHeight: inspected.latestBlockhash.lastValidBlockHeight,
+    swapMinContextSlot: inspected.minContextSlot,
     burnRaw: null,
     burnSignature: null,
+    burnMinContextSlot: null,
+    burnLastValidBlockHeight: null,
   };
   state.rounds[roundKey] = journal;
   await saveState(state);
