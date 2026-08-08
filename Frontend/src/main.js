@@ -31,7 +31,7 @@ import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, inv
 import { randomnessHex } from './chain/randomness-proof.js';
 import { isServerRandomnessProgram } from './chain/randomness-mode.js';
 import {
-  formatApyPercent, positionApyPercent, selectPausedApySnapshot, stakingApySnapshot,
+  formatApyPercent, positionRewardEstimate, selectPausedApySnapshot, stakingApySnapshot,
 } from './chain/staking-apy.js';
 import {
   affordableAutoPlanRounds, maxAutoPlanFundingLamports, requiredDeposit,
@@ -357,6 +357,13 @@ document.querySelector('#app').innerHTML = `
         <div class="eth-lifetime"><span>CLAIMED SOL</span><strong id="stake-lifetime-eth">—</strong><small>History not indexed</small></div>
         <div class="staking-share-group"><div><button id="stake-flex-card" class="stake-flex-trigger" type="button">FLEX</button></div></div>
         <button id="claim-stake-rewards">Connect to claim</button>
+        <aside class="stake-reward-estimate" aria-live="polite">
+          <div class="stake-estimate-values">
+            <div><span>EST. WEEKLY</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-weekly">—</b><small>SOL</small></strong><em id="stake-estimated-weekly-usd">≈ $—</em></div>
+            <div><span>EST. ANNUAL</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-annual">—</b><small>SOL</small></strong><em id="stake-estimated-annual-usd">≈ $—</em></div>
+          </div>
+          <small id="stake-estimate-basis">Connect a wallet to estimate rewards</small>
+        </aside>
       </div>
       <div class="stock-reward-basket" hidden><header><span>LEGACY STOCK REWARDS</span><b></b></header></div>
       <div class="unstake-status" id="unstake-status" hidden></div>
@@ -1103,7 +1110,7 @@ document.body.insertAdjacentHTML('beforeend', `
         <div class="stake-flex-assay" aria-hidden="true"><i class="stake-flex-ring outer"></i><i class="stake-flex-ring inner"></i><div class="stake-flex-mining-grid">${Array.from({ length: 25 }, (_, index) => `<i${[2, 5, 9, 12].includes(index) ? ' class="selected"' : ''}></i>`).join('')}</div></div>
         <header><img src="/myne-wordmark-ui.png" alt="MYNE"/></header>
         <div class="stake-flex-hero"><div><span>SOL REWARDS / DAY</span><strong><img src="/solana-mark.svg" alt=""/><b data-flex-day>—</b></strong><small data-flex-day-usd>≈ $—</small></div><aside><span>POSITION APY</span><strong data-flex-apy>—</strong></aside></div>
-        <div class="stake-flex-stats"><span><small>STAKED MYNE</small><strong><img src="/myne-token-icon.svg" alt=""/><b data-flex-standard>—</b></strong></span><span><small>BURNED MYNE</small><strong><img src="/myne-token-icon.svg" alt=""/><b data-flex-burned>—</b></strong></span><span><small>CLAIMABLE SOL</small><strong><img src="/solana-mark.svg" alt=""/><b data-flex-earned>—</b></strong></span></div>
+        <div class="stake-flex-stats"><span><small>STAKED MYNE</small><strong><img src="/myne-token-icon.svg" alt=""/><b data-flex-standard>—</b></strong></span><span><small>BURNED MYNE</small><strong><img src="/myne-token-icon.svg" alt=""/><b data-flex-burned>—</b></strong></span><span><small>EST. WEEKLY SOL</small><strong><img src="/solana-mark.svg" alt=""/><b data-flex-weekly>—</b></strong></span></div>
         <footer><code data-flex-link>—</code></footer>
       </article>
       <div class="stake-flex-actions"><button type="button" id="stake-flex-download">Download PNG</button><button type="button" id="stake-flex-copy">Copy image</button><a id="stake-flex-x" href="#" target="_blank" rel="noreferrer" aria-label="Share position on X">${icon('x')}</a><a id="stake-flex-tg" href="#" target="_blank" rel="noreferrer" aria-label="Share position on Telegram">${icon('telegram')}</a></div>
@@ -2134,6 +2141,11 @@ const stakeFlexNumber = (value, digits = 3) => value == null ? '—' : Number(va
   minimumFractionDigits: digits,
   maximumFractionDigits: digits,
 });
+const stakeFlexSolNumber = (value) => {
+  if (value == null || !Number.isFinite(value) || value < 0) return '—';
+  const digits = value > 0 && value < .001 ? 6 : value < 1 ? 4 : 3;
+  return value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+};
 const stakeFlexApy = (value) => formatApyPercent(value);
 
 const stakeFlexValues = () => {
@@ -2145,32 +2157,61 @@ const stakeFlexValues = () => {
   const weight = positionAvailable ? statsTokenAmount(state.weight) : null;
   const principal = positionAvailable ? standard + burned : null;
   // readStakingMetrics already annualises the indexed window into a per-day
-  // pool reward rate. Dividing by the window fraction again would multiply a
-  // 30-minute sample by another 48× and materially overstate the share card.
+  // pool reward rate. The shared estimate applies the exact position weight
+  // once, then projects seven days without re-scaling the 30-minute window.
   const dailyPool = metrics?.aprWindowDays > 0 ? metrics.rewardsToStakersEth : null;
-  // Use the position and pool weights directly. `state.share` is deliberately
-  // rounded for display, which can collapse a valid small position to 0.0000%.
-  const daily = positionAvailable && dailyPool != null && metrics?.totalWeight > 0
-    ? dailyPool * (weight / metrics.totalWeight)
-    : null;
+  const estimate = positionAvailable ? positionRewardEstimate({
+    standardApyPct: metrics?.apyStandardPct,
+    principalMyne: principal,
+    weightMyne: weight,
+    totalWeightMyne: metrics?.totalWeight,
+    poolRewardsPerDaySol: dailyPool,
+    mynePerSol: metrics?.mynePerSol ?? getLiveMynePerSol(),
+    days: 7,
+  }) : null;
+  const weekly = estimate?.rewardSol ?? null;
+  const annual = weekly == null ? null : weekly * (365 / 7);
+  const daily = weekly == null ? null : weekly / 7;
   const dailyUsdRaw = daily == null ? null : daily === 0 ? '$0.00' : usdFor(daily);
+  const weeklyUsdRaw = weekly == null ? null : weekly === 0 ? '$0.00' : usdFor(weekly);
+  const annualUsdRaw = annual == null ? null : annual === 0 ? '$0.00' : usdFor(annual);
   return {
     standard,
     burned,
-    // Claim history is not stored in StakePosition. FLEX therefore reports the
-    // exact current claimable balance instead of fabricating a received total.
-    earned: positionAvailable ? chain.format.ethSmart(state.pendingEth) : '—',
-    apy: positionApyPercent(metrics?.apyStandardPct, principal, weight),
+    apy: estimate?.positionApyPct ?? null,
+    poolSharePct: estimate?.poolSharePct ?? null,
+    estimateSource: estimate?.source ?? null,
     daily,
     dailyUsd: dailyUsdRaw?.startsWith('<') ? dailyUsdRaw : dailyUsdRaw ? `≈ ${dailyUsdRaw}` : '≈ $—',
+    weekly,
+    weeklyUsd: weeklyUsdRaw?.startsWith('<') ? weeklyUsdRaw : weeklyUsdRaw ? `≈ ${weeklyUsdRaw}` : '≈ $—',
+    annual,
+    annualUsd: annualUsdRaw?.startsWith('<') ? annualUsdRaw : annualUsdRaw ? `≈ ${annualUsdRaw}` : '≈ $—',
     referral: referralLinkFor(chain.state.account),
     shortReferral: REF_BASE.replace(/^https?:\/\//, '').replace(/\/#mine$/, ''),
   };
 };
 
+const updateStakeRewardEstimate = (data) => {
+  setMetric('#stake-estimated-weekly', stakeFlexSolNumber(data.weekly));
+  setMetric('#stake-estimated-weekly-usd', data.weeklyUsd);
+  setMetric('#stake-estimated-annual', stakeFlexSolNumber(data.annual));
+  setMetric('#stake-estimated-annual-usd', data.annualUsd);
+  const basis = document.querySelector('#stake-estimate-basis');
+  if (!basis) return;
+  basis.textContent = !chain.state.account
+    ? 'Connect a wallet to estimate rewards'
+    : !stakingState || (stakingState.flexStaked <= 0n && stakingState.burnStaked <= 0n)
+      ? 'Stake MYNE to estimate rewards'
+      : data.weekly == null
+        ? 'Waiting for a verified reward window'
+        : `${data.poolSharePct == null ? '' : `${data.poolSharePct.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}% pool share · `}${stakeFlexApy(data.apy)} position APY · ${data.estimateSource === 'apy' ? 'retained APY fallback' : 'latest verified 30m'}`;
+};
+
 const updateStakeFlexCard = () => {
-  if (!stakeFlexDialog) return;
   const data = stakeFlexValues();
+  updateStakeRewardEstimate(data);
+  if (!stakeFlexDialog) return;
   const set = (selector, value) => {
     const element = stakeFlexDialog.querySelector(selector);
     if (element) element.textContent = value;
@@ -2180,9 +2221,9 @@ const updateStakeFlexCard = () => {
   set('[data-flex-day-usd]', data.dailyUsd);
   set('[data-flex-standard]', stakeFlexNumber(data.standard, 2));
   set('[data-flex-burned]', stakeFlexNumber(data.burned, 2));
-  set('[data-flex-earned]', data.earned);
+  set('[data-flex-weekly]', stakeFlexSolNumber(data.weekly));
   set('[data-flex-link]', data.shortReferral);
-  const text = `My MYNE stake has ${data.earned} SOL claimable and an estimated ${stakeFlexApy(data.apy)} position APY based on the latest indexed 30-minute reward window.`;
+  const text = `My MYNE stake is estimated to earn ${stakeFlexSolNumber(data.weekly)} SOL per week at ${stakeFlexApy(data.apy)} position APY, based on the latest verified 30-minute reward window.`;
   stakeFlexDialog.querySelector('#stake-flex-x').href = `https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(data.referral)}`;
   stakeFlexDialog.querySelector('#stake-flex-tg').href = `https://t.me/share/url?url=${encodeURIComponent(data.referral)}&text=${encodeURIComponent(text)}`;
 };
@@ -2274,7 +2315,7 @@ const createStakeFlexCard = async () => {
   const stats = [
     ['STAKED MYNE', stakeFlexNumber(data.standard, 2), gldLogo],
     ['BURNED MYNE', stakeFlexNumber(data.burned, 2), gldLogo],
-    ['CLAIMABLE SOL', data.earned, ethLogo],
+    ['EST. WEEKLY SOL', stakeFlexSolNumber(data.weekly), ethLogo],
   ];
   stats.forEach(([label, value, valueIcon], index) => {
     const x = 62 + index * 360;

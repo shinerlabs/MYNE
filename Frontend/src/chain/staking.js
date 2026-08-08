@@ -235,6 +235,7 @@ export async function readStakingMetrics() {
     aprStatus, aprWindowDays: windowMinutes / 1440,
     aprFallback: rewardWindow?.isFallback === true,
     rewardsToStakersEth: rewardPerMinuteSol * 1440,
+    mynePerSol: mynePerSol > 0 ? mynePerSol : null,
     aprWindowRounds: rewardWindow?.rounds ?? 0,
     aprAsOf: rewardWindow?.complete ? rewardWindow.lastSettlesAt : null,
     protocolPaused,

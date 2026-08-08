@@ -6,6 +6,7 @@ import {
   apyPercent,
   formatApyPercent,
   positionApyPercent,
+  positionRewardEstimate,
   selectLatestCompleteStakingRewardWindow,
   selectPausedApySnapshot,
   stakingApyVariants,
@@ -59,6 +60,47 @@ test('all APY surfaces share one formatter and explicit tier/position variants',
   assert.equal(positionApyPercent(12, 0, 0), null);
 });
 
+test('weekly position estimate uses exact weighted pool share and validated APY', () => {
+  const estimate = positionRewardEstimate({
+    standardApyPct: 12,
+    principalMyne: 10,
+    weightMyne: 30,
+    totalWeightMyne: 300,
+    poolRewardsPerDaySol: 2,
+    days: 7,
+  });
+  assert.equal(estimate.days, 7);
+  assert.ok(Math.abs(estimate.rewardSol - 1.4) < Number.EPSILON * 2);
+  assert.equal(estimate.poolSharePct, 10);
+  assert.equal(estimate.positionApyPct, 36);
+  assert.equal(estimate.source, 'pool');
+  const fallback = positionRewardEstimate({
+    standardApyPct: 12,
+    principalMyne: 10,
+    weightMyne: 30,
+    totalWeightMyne: 300,
+    poolRewardsPerDaySol: null,
+    mynePerSol: 10,
+    days: 7,
+  });
+  assert.ok(Math.abs(fallback.rewardSol - ((1 * .36 * 7) / 365)) < Number.EPSILON);
+  assert.equal(fallback.poolSharePct, 10);
+  assert.equal(fallback.positionApyPct, 36);
+  assert.equal(fallback.source, 'apy');
+  assert.equal(positionRewardEstimate({
+    standardApyPct: null, principalMyne: 10, weightMyne: 10,
+    totalWeightMyne: 100, poolRewardsPerDaySol: 2,
+  }), null);
+  assert.equal(positionRewardEstimate({
+    standardApyPct: 12, principalMyne: 10, weightMyne: 110,
+    totalWeightMyne: 100, poolRewardsPerDaySol: 2,
+  }), null);
+  assert.equal(positionRewardEstimate({
+    standardApyPct: 12, principalMyne: 10, weightMyne: 10,
+    totalWeightMyne: 100, poolRewardsPerDaySol: -1, mynePerSol: null,
+  }), null);
+});
+
 test('a protocol pause retains one validated APY snapshot', () => {
   const snapshot = stakingApySnapshot({
     apyStandardPct: 12.5,
@@ -66,6 +108,9 @@ test('a protocol pause retains one validated APY snapshot', () => {
     aprWindowDays: 30 / 1440,
     aprWindowRounds: 27,
     aprAsOf: 1_700_000_000,
+    totalWeight: 240,
+    rewardsToStakersEth: 1.25,
+    mynePerSol: 12,
   }, 1_700_000_100);
   assert.deepEqual(snapshot, {
     apyStandardPct: 12.5,
@@ -74,6 +119,9 @@ test('a protocol pause retains one validated APY snapshot', () => {
     aprWindowRounds: 27,
     aprAsOf: 1_700_000_000,
     capturedAt: 1_700_000_100,
+    totalWeight: 240,
+    rewardsToStakersEth: 1.25,
+    mynePerSol: 12,
   });
   assert.equal(stakingApySnapshot({ apyStandardPct: null, apyBurnPct: null }), null);
 
@@ -196,9 +244,13 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.doesNotMatch(main, /TOTAL SOL EARNED|TOTAL SOL RECEIVED|Claimed \+ available/);
   assert.match(main, /CLAIMED SOL/);
   assert.match(main, /History not indexed/);
-  assert.match(main, /earned:\s*positionAvailable \? chain\.format\.ethSmart\(state\.pendingEth\) : '—'/);
+  assert.match(main, /EST\. WEEKLY/);
+  assert.match(main, /EST\. ANNUAL/);
+  assert.match(main, /EST\. WEEKLY SOL/);
+  assert.match(main, /positionRewardEstimate\(\{/);
+  assert.match(main, /days:\s*7/);
   assert.match(main, /const dailyPool = metrics\?\.aprWindowDays > 0 \? metrics\.rewardsToStakersEth : null/);
-  assert.match(main, /positionApyPercent\(metrics\?\.apyStandardPct, principal, weight\)/);
+  assert.match(main, /poolSharePct:\s*estimate\?\.poolSharePct/);
   assert.match(main, /setMetric\('#header-staking-apr', headerAprText\)/);
   assert.match(main, /<span>BURN APY<\/span><b id="header-staking-apr">/);
   assert.match(main, /const headerAprText = m\.apyBurnPct == null[\s\S]*formatApyPercent\(m\.apyBurnPct\)/);
@@ -219,7 +271,8 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(main, /ctx\.fillText\('POSITION APY'/);
   assert.match(main, /if \(data\.apy == null\) return null/);
   assert.doesNotMatch(main, /rewardsToStakersEth \/ metrics\.aprWindowDays/);
-  assert.match(main, /dailyPool \* \(weight \/ metrics\.totalWeight\)/);
+  assert.match(main, /const weekly = estimate\?\.rewardSol \?\? null/);
+  assert.match(main, /const annual = weekly == null \? null : weekly \* \(365 \/ 7\)/);
   assert.doesNotMatch(main, /dailyPool \* \(\(state\?\.share/);
   assert.match(main, /const marketMyneUsd = getLiveMynePerSol\(\) != null/);
   assert.doesNotMatch(main, /const marketMyneUsd = poolAvailable \?/);

@@ -53,7 +53,7 @@ export const stakingApySnapshot = (metrics, capturedAt = metrics?.capturedAt ?? 
   if (!metrics || !Number.isFinite(metrics.apyStandardPct) || metrics.apyStandardPct < 0
     || !Number.isFinite(metrics.apyBurnPct) || metrics.apyBurnPct < 0
     || !Number.isSafeInteger(capturedAt) || capturedAt <= 0) return null;
-  return {
+  const snapshot = {
     apyStandardPct: metrics.apyStandardPct,
     apyBurnPct: metrics.apyBurnPct,
     aprWindowDays: Number.isFinite(metrics.aprWindowDays) ? metrics.aprWindowDays : 0,
@@ -61,6 +61,15 @@ export const stakingApySnapshot = (metrics, capturedAt = metrics?.capturedAt ?? 
     aprAsOf: Number.isSafeInteger(metrics.aprAsOf) ? metrics.aprAsOf : null,
     capturedAt,
   };
+  // Retain the exact valuation/run-rate inputs that produced the visible APY.
+  // They let position estimates remain consistent through a protocol pause or
+  // a temporary index outage instead of substituting a made-up return.
+  if (finitePositive(metrics.totalWeight)) snapshot.totalWeight = metrics.totalWeight;
+  if (Number.isFinite(metrics.rewardsToStakersEth) && metrics.rewardsToStakersEth >= 0) {
+    snapshot.rewardsToStakersEth = metrics.rewardsToStakersEth;
+  }
+  if (finitePositive(metrics.mynePerSol)) snapshot.mynePerSol = metrics.mynePerSol;
+  return snapshot;
 };
 
 /** Keep the last displayed APY only for the same final reward window. */
@@ -82,6 +91,42 @@ export const positionApyPercent = (standardApyPct, principalMyne, weightMyne) =>
     || !finitePositive(principalMyne) || !finitePositive(weightMyne)) return null;
   const value = standardApyPct * (weightMyne / principalMyne);
   return Number.isFinite(value) && value >= 0 ? value : null;
+};
+
+/**
+ * Estimate a position's SOL rewards from the same verified pool run-rate used
+ * by the APY display. Burn stake is represented by its on-chain weight, so the
+ * calculation naturally respects the 5x tier without applying it twice.
+ */
+export const positionRewardEstimate = ({
+  standardApyPct,
+  principalMyne,
+  weightMyne,
+  totalWeightMyne,
+  poolRewardsPerDaySol,
+  mynePerSol,
+  days = 7,
+}) => {
+  const positionApyPct = positionApyPercent(standardApyPct, principalMyne, weightMyne);
+  if (positionApyPct == null
+    || !Number.isSafeInteger(days) || days < 1 || days > 365) return null;
+  const hasPoolShare = finitePositive(totalWeightMyne) && weightMyne <= totalWeightMyne;
+  const poolShare = hasPoolShare ? weightMyne / totalWeightMyne : null;
+  const hasPoolRunRate = finitePositive(poolShare)
+    && Number.isFinite(poolRewardsPerDaySol) && poolRewardsPerDaySol >= 0;
+  const rewardSol = hasPoolRunRate
+    ? poolRewardsPerDaySol * poolShare * days
+    : finitePositive(mynePerSol)
+      ? (principalMyne / mynePerSol) * (positionApyPct / 100) * (days / 365)
+      : null;
+  if (!Number.isFinite(rewardSol) || rewardSol < 0) return null;
+  return {
+    days,
+    rewardSol,
+    poolSharePct: poolShare == null ? null : poolShare * 100,
+    positionApyPct,
+    source: hasPoolRunRate ? 'pool' : 'apy',
+  };
 };
 
 const incompleteWindow = (windowMinutes, rows = 0) => ({

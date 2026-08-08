@@ -3278,6 +3278,168 @@ body[data-route="mine"] .round-summary.motherlode-inline > .time-stat.paused > s
   }
 }
 
+/* One shared, compact reward estimate sits immediately below Claim at every size. The value is
+   derived from the verified staking snapshot in JS; this block only keeps its hierarchy stable. */
+body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-template-rows: auto 44px auto !important;
+  align-content: center !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .eth-lifetime {
+  grid-column: 1 !important;
+  grid-row: 1 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > .staking-share-group {
+  grid-column: 2 !important;
+  grid-row: 1 !important;
+}
+
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
+  grid-column: 1 / -1 !important;
+  grid-row: 2 !important;
+  min-height: 44px !important;
+  height: 44px !important;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-reward-estimate {
+  grid-column: 1 / -1 !important;
+  grid-row: 3 !important;
+  display: block !important;
+  min-width: 0;
+  margin: 2px 0 0 !important;
+  padding: 8px 2px 0 !important;
+  border-top: 1px solid var(--surface-rule) !important;
+  font-style: normal;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-reward-estimate > small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--surface-text-tertiary) !important;
+  font: 700 8px/1.25 var(--font-sans) !important;
+  letter-spacing: .1em !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-estimate-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-estimate-values > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 7px;
+  min-width: 0;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-estimate-values > div + div {
+  padding-left: 10px;
+  border-left: 1px solid var(--surface-rule);
+}
+
+body[data-route="stake"] .staking-dashboard .stake-estimate-values span {
+  color: var(--surface-text-tertiary) !important;
+  font: 700 8px/1.2 var(--font-sans) !important;
+  letter-spacing: .1em;
+  white-space: nowrap;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-estimate-values strong {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin: 0 !important;
+  color: var(--surface-text-primary) !important;
+  font: 750 13px/1 var(--font-number) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-estimate-values strong img {
+  width: 14px;
+  height: 14px;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-estimate-values strong small {
+  color: var(--surface-text-tertiary) !important;
+  font: 700 8px/1 var(--font-sans) !important;
+  letter-spacing: .08em;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-estimate-values em {
+  grid-column: 1 / -1;
+  color: var(--surface-text-secondary) !important;
+  font: 650 9px/1.2 var(--font-number) !important;
+  font-style: normal;
+  text-align: right;
+  white-space: nowrap;
+}
+
+body[data-route="stake"] .staking-dashboard .stake-reward-estimate > small {
+  margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+  body[data-route="stake"] .staking-overview > .stake-rewards {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: 72px minmax(0, 1fr) !important;
+    align-items: start !important;
+    gap: 6px !important;
+    padding: 10px 14px !important;
+  }
+
+  body[data-route="stake"] .staking-overview > .stake-rewards > .eth-claim-main {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    width: 100% !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: 44px 44px auto !important;
+    gap: 5px 8px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > .eth-lifetime {
+    display: none !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > .staking-share-group {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    justify-content: flex-end !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-reward-estimate {
+    grid-column: 1 !important;
+    grid-row: 3 !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .stake-reward-estimate {
+    padding-top: 6px !important;
+  }
+
+  body[data-route="stake"] .staking-dashboard .stake-reward-estimate > small {
+    font-size: 7.5px !important;
+    letter-spacing: .04em !important;
+  }
+}
+
 /* Desktop History stat rails must stay inside their grid tracks. The generic metric-card
    minimum height used to overflow the compact supply row and visually collide with the ledger. */
 @media (min-width: 901px) {
