@@ -146,10 +146,11 @@ const serverRoundPriorityMicrolamports = boundedInteger(
   1_000_000,
   'SERVER_ROUND_PRIORITY_MICROLAMPORTS',
 );
-// Fifteen Mainnet canary rounds consumed exactly 11,139 CU for entropy lock
-// and at most 38,723 CU for settlement. These fixed limits retain substantial
-// headroom while removing a redundant simulation/blockhash round trip from
-// the five-second result path. sendTransaction still confirms the exact bytes.
+// Mainnet observations consumed at most 31,260 CU for atomic preparation,
+// exactly 11,139 CU for entropy lock, and at most 38,723 CU for settlement.
+// These fixed limits retain substantial headroom while removing a redundant
+// simulation/blockhash round trip from the schedule-critical paths.
+const SERVER_ROUND_PREPARATION_COMPUTE_LIMIT = 60_000;
 const SERVER_ENTROPY_LOCK_COMPUTE_LIMIT = 30_000;
 const SERVER_SETTLEMENT_COMPUTE_LIMIT = 80_000;
 const settlementLateSeconds = Number(process.env.ROUND_KEEPER_SETTLEMENT_LATE_SECONDS ?? 5);
@@ -581,6 +582,11 @@ if (!roundState) {
   bindSignature = (await sendKeeperInstructions(
     [openIx, bindIx],
     'Atomic round preparation',
+    {
+      fixedComputeLimit: SERVER_ROUND_PREPARATION_COMPUTE_LIMIT,
+      priorityMicrolamports: serverRoundPriorityMicrolamports,
+      skipPreflight: true,
+    },
   )).signature;
   roundState = await fetchRoundWithRetry(
     (state) => Buffer.from(state.randomnessAccount.toBytes()).equals(roundCommitment),
