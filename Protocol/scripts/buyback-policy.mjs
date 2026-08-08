@@ -6,6 +6,16 @@ export const METEORA_DAMM_V2_LABEL = 'Meteora DAMM v2';
 export const METEORA_DLMM_PROGRAM_TEXT = 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo';
 export const METEORA_DAMM_V2_PROGRAM_TEXT = 'cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG';
 export const OFFICIAL_JUPITER_HOSTS = Object.freeze(['lite-api.jup.ag', 'api.jup.ag']);
+export const JUPITER_PRIORITY_LEVELS = Object.freeze(['medium', 'high', 'veryHigh']);
+
+export function validateJupiterPriorityLevel(value = 'medium') {
+  const priorityLevel = String(value || 'medium');
+  assert.ok(
+    JUPITER_PRIORITY_LEVELS.includes(priorityLevel),
+    `JUPITER_PRIORITY_LEVEL must be one of ${JUPITER_PRIORITY_LEVELS.join(', ')}`,
+  );
+  return priorityLevel;
+}
 
 export function validateJupiterEndpoint(value, { expectedPath, allowCustom = false } = {}) {
   const endpoint = new URL(value);

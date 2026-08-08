@@ -52,6 +52,7 @@ test('live supervisor defines every required worker with separated wallets', () 
   assert.deepEqual(specs.map((spec) => spec.name), WORKER_NAMES);
   assert.equal(specs.find((spec) => spec.name === 'buyback-keeper').walletPath, '/tmp/buyback.json');
   assert.equal(specs.find((spec) => spec.name === 'buyback-keeper').env.DRY_RUN, '0');
+  assert.equal(specs.find((spec) => spec.name === 'buyback-keeper').env.FAIL_FAST, '0');
   assert.equal(specs.find((spec) => spec.name === 'buyback-keeper').env.BUYBACK_STATE_PATH, '/data/buyback-state.json');
   assert.equal(specs.find((spec) => spec.name === 'round-indexer').env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE, '1');
   const roundKeeper = specs.find((spec) => spec.name === 'round-keeper');

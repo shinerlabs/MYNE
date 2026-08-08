@@ -11,6 +11,7 @@ import {
   meteoraRouteForProgram,
   selectIndexedBuybackRound,
   validateJupiterEndpoint,
+  validateJupiterPriorityLevel,
   validateDirectMeteoraQuote,
 } from '../scripts/buyback-policy.mjs';
 
@@ -29,6 +30,19 @@ test('buyback spend is capped and preserves the keeper reserve', () => {
     maxSpendLamports: 500_000_000,
     minimumLamports: 10_000_000,
   }).skipped, true);
+  assert.deepEqual(calculateSpend({
+    balanceLamports: 5_500_000,
+    reserveLamports: 5_000_000,
+    maxSpendLamports: 500_000,
+    minimumLamports: 100_000,
+  }), { spendLamports: 500_000, skipped: false, reason: null });
+});
+
+test('buyback uses only Jupiter-supported priority levels', () => {
+  assert.equal(validateJupiterPriorityLevel(), 'medium');
+  assert.equal(validateJupiterPriorityLevel('high'), 'high');
+  assert.equal(validateJupiterPriorityLevel('veryHigh'), 'veryHigh');
+  assert.throws(() => validateJupiterPriorityLevel('veryLow'), /must be one of/);
 });
 
 test('buyback accepts only exact HTTPS Jupiter endpoints unless explicitly overridden', () => {

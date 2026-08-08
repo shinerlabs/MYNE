@@ -17,7 +17,8 @@ pool-specific swap accounts, price movement, and slippage must be handled by the
    durable cursor that is not yet marked buyback-complete. Empty numeric rounds are skipped because
    they never had a PDA. Fetch that exact Round PDA and use its on-chain `buybackCompleted` flag as
    the final no-double-spend authority before quoting or signing.
-4. Preserve a SOL reserve and cap each buyback amount.
+4. Preserve only a small SOL transaction-fee/rent buffer and cap each buyback amount. Round
+   allocations are protocol funds and are never held behind a large keeper reserve.
 5. Select `Meteora DAMM v2` or `Meteora DLMM` from the exact pool program stored in the on-chain
    gate, then request a direct Jupiter quote restricted to that one venue.
 6. Reject the quote unless it uses exactly the registered pool address, native SOL as input,
@@ -50,9 +51,10 @@ Recommended production controls:
 ```text
 MYNE_PROGRAM_ID=D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e
 MYNE_MINT_ADDRESS=<mainnet MYNE mint>
-KEEPER_RESERVE_SOL=0.25
+BUYBACK_FEE_RESERVE_SOL=0.005
 MAX_BUYBACK_SOL=0.25
 MIN_BUYBACK_SOL=0.0001
+JUPITER_PRIORITY_LEVEL=medium
 BUYBACK_SLIPPAGE_BPS=100
 MAX_PRIORITY_LAMPORTS=500000
 MAX_SWAP_OVERHEAD_LAMPORTS=5000000
@@ -65,6 +67,12 @@ The buyback signer must be the distinct controlled wallet configured as `buyback
 reuse the admin or randomness role. Keep its keypair outside the repository, preferably in a secret
 manager or hardware-backed signer. Start with `--once` and `DRY_RUN=1`, inspect the quoted pool,
 price impact, and amount, then enable live mode only after a devnet smoke test.
+
+`JUPITER_PRIORITY_LEVEL` accepts only Jupiter's supported `medium`, `high`, or `veryHigh` values.
+The retired `KEEPER_RESERVE_SOL=0.25` setting stranded small round allocations and is intentionally
+ignored; `BUYBACK_FEE_RESERVE_SOL` is the fee-only replacement. In the production supervisor,
+quote/API failures remain in-process and retry on the next 60-second tick so the new process is not
+blocked by its predecessor's lease.
 
 The default Jupiter endpoints are restricted to exact HTTPS paths on official Jupiter hosts.
 Changing either host requires the explicit `ALLOW_CUSTOM_JUPITER_ENDPOINT=<program-id>` gate and a

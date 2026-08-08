@@ -109,7 +109,10 @@ export function liveWorkerSpecs({
       walletPath: buybackWalletPath,
       env: {
         ...serverProviderAcknowledgement,
-        FAIL_FAST: '1',
+        // Quote/API errors are retried by the same lease holder on the next
+        // one-minute tick. Restarting here creates a fresh holder and fences
+        // the worker behind its own still-live lease.
+        FAIL_FAST: '0',
         DRY_RUN: '0',
         BUYBACK_KEEPER_LIVE: programId,
         BUYBACK_STATE_PATH: `${dataDir}/buyback-state.json`,

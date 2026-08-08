@@ -4300,3 +4300,9 @@ body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-calculat
     grid-template-rows: 52px 14px 54px 44px 44px !important;
   }
 }
+
+/* An active Auto-mine or Auto-burn plan owns this workflow. Its card contains every valid action,
+   so the ordinary Mine button must not reappear through an older route-specific display rule. */
+html body[data-route="mine"] .deploy-panel > #deploy[hidden] {
+  display: none !important;
+}

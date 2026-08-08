@@ -61,6 +61,7 @@ test('an existing auto plan replaces the primary Mine action', async () => {
   assert.match(main, /const planOwnsAction = Boolean\(existingPlan\)/);
   assert.match(main, /deploy\.disabled = !protocolReady \|\| protocolPaused \|\| planOwnsAction/);
   assert.match(main, /deploy\.hidden = planOwnsAction/);
+  assert.match(styles, /\.deploy-panel > #deploy\[hidden\] \{[\s\S]*display:\s*none !important/);
   assert.match(main, /id="auto-plan-topup-amount"[\s\S]*id="topup-plan">Top up<[\s\S]*id="cancel-plan">Cancel &amp; withdraw/);
   assert.match(main, /chain\.topUpPlan\(input\?\.value \?\? ''\)/);
   assert.match(minePage, /export async function topUpPlan\(amountSol\)[\s\S]*value = parseEther\(amountSol\)/);

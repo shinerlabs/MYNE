@@ -19,6 +19,7 @@ import {
   calculateSpend,
   meteoraRouteForProgram,
   selectIndexedBuybackRound,
+  validateJupiterPriorityLevel,
   validateJupiterEndpoint,
   validateDirectMeteoraQuote,
 } from './buyback-policy.mjs';
@@ -241,7 +242,9 @@ async function buildSwapTransaction(quote) {
       dynamicComputeUnitLimit: true,
       prioritizationFeeLamports: {
         priorityLevelWithMaxLamports: {
-          priorityLevel: process.env.JUPITER_PRIORITY_LEVEL || 'veryLow',
+          priorityLevel: validateJupiterPriorityLevel(
+            process.env.JUPITER_PRIORITY_LEVEL || 'medium',
+          ),
           maxLamports: readInteger(process.env.MAX_PRIORITY_LAMPORTS || '500000', 'MAX_PRIORITY_LAMPORTS'),
         },
       },
@@ -663,7 +666,10 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   }
   assert.ok(remainingAllocation <= BigInt(Number.MAX_SAFE_INTEGER), 'Round buyback exceeds safe keeper amount');
   const poolAddress = gateState.pool;
-  const reserve = lamports(process.env.KEEPER_RESERVE_SOL || '0.25');
+  // Preserve only a transaction-fee/rent buffer. The 1% round allocations in
+  // this wallet are protocol funds and must not be stranded behind a large
+  // operational reserve.
+  const reserve = lamports(process.env.BUYBACK_FEE_RESERVE_SOL || '0.005');
   const maxSpend = Math.min(lamports(process.env.MAX_BUYBACK_SOL || '0.25'), Number(remainingAllocation));
   const balance = await provider.connection.getBalance(payer.publicKey, 'confirmed');
   // The protocol minimum round produces a 0.0005 SOL buyback allocation, so a
