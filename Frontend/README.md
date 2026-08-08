@@ -27,6 +27,12 @@ Run `pnpm run sync:solana` after every Anchor build that changes the IDL. Featur
 derived fail-closed from the generated instruction list. Protocol configuration is intentionally
 not exposed as a badge on the public UI.
 
+`VITE_AUTO_REINVEST_SOL` is an explicit post-upgrade release gate. Leave it
+`false` while publishing client code or upgrading workers; set it to `true`
+only after the new program instruction and database migration are live and a
+worker canary has passed. Fixed/Max Auto-round funding and ordinary Auto Mine
+do not depend on this flag.
+
 Only public browser values may use the `VITE_` prefix. Never place a private key, Supabase
 service-role key or other server secret in this directory.
 

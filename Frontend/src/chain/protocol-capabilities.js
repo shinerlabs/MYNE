@@ -4,6 +4,9 @@ export const FEATURE_REQUIREMENTS = Object.freeze({
   staking: ['stake_standard', 'burn_stake', 'burn_unclaimed_myne', 'request_unstake', 'withdraw_unstaked', 'claim_staking_rewards', 'fund_staking_rewards'],
   referrals: ['register_miner', 'claim_myne'],
   autoRound: ['create_auto_plan', 'configure_auto_plan', 'fund_auto_plan', 'cancel_auto_plan', 'execute_auto_plan', 'claim_auto_burn_receipt'],
+  // Kept separate from autoRound so publishing the new client cannot disable
+  // ordinary prepaid Auto Mine while Mainnet is still on the prior program.
+  autoReinvest: ['reinvest_auto_plan_rewards'],
   // Trading is deliberately external to MYNE. This remains unavailable until a concrete Meteora
   // pool address is configured; wallet-to-wallet transfers must never inherit the pool fee.
   swaps: ['__meteora_pool_configured__'],

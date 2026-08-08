@@ -2,10 +2,11 @@ import { PublicKey, SystemProgram } from '@solana/web3.js';
 
 import { connection, getAccount } from './client.js';
 import { GRID } from './config.js';
+import { FEATURES } from '../app-config.js';
 import { parseEther } from './units.js';
 import {
   asBn, derivePda, fetchProtocolAccount, getProtocolConfig, getWritableProgram, protocolPdas,
-  sendInstructions,
+  protocolCapabilities, sendInstructions,
 } from './anchor-client.js';
 import { minerPda, minerRegistrationInstruction } from './miner-registration.js';
 
@@ -147,6 +148,9 @@ export async function configurePlan({
   const configState = await getProtocolConfig();
   if (configState.paused) {
     throw new Error('Mining is temporarily paused while maintenance is completed. Auto-round cannot be started right now.');
+  }
+  if (autoClaim && (!FEATURES.autoReinvestSol || !protocolCapabilities.autoReinvest?.ready)) {
+    throw new Error('SOL reinvestment is not active on this deployment yet');
   }
   const authority = new PublicKey(account);
   const amounts = Array(GRID).fill(0n);

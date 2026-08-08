@@ -8,9 +8,9 @@ import './wide-dashboards.css';
 import './about-stats.css';
 import './surface-system.css';
 import './viewport-fit.css';
-import { LINKS, NETWORK, PRODUCT, PROGRAMS } from './app-config.js';
+import { FEATURES, LINKS, NETWORK, PRODUCT, PROGRAMS } from './app-config.js';
 import {
-  fetchProtocolAccount, getProtocolConfig, protocolPdas, protocolProgramId,
+  fetchProtocolAccount, getProtocolConfig, protocolCapabilities, protocolPdas, protocolProgramId,
 } from './chain/anchor-client.js';
 import { stakePositionPda } from './chain/miner-registration.js';
 import { subscribeAccountActivity } from './chain/protocol-realtime.js';
@@ -659,6 +659,8 @@ let autoFundingMode = (() => {
   try { return window.localStorage.getItem('myne-auto-funding-mode') === 'fixed' ? 'fixed' : 'max'; }
   catch { return 'max'; }
 })();
+const autoReinvestAvailable = FEATURES.autoReinvestSol
+  && protocolCapabilities.autoReinvest?.ready === true;
 // Reinvest is an on-chain plan preference. The worker moves all claimable SOL from the wallet's
 // canonical reward ledger into the plan before its next execution; no wallet pop-up is required.
 let autoClaimEnabled = false;
@@ -3396,6 +3398,7 @@ syncAutoRewardMode();
  * it moves all claimable SOL into this same balance before the worker's next execution.
  */
 const syncAutoControls = () => {
+  if (!autoReinvestAvailable) autoClaimEnabled = false;
   autoToggle.setAttribute('aria-checked', String(autoRound));
   autoToggle.classList.toggle('active', autoRound);
   autoToggle.querySelector('b').textContent = autoRound ? 'On' : 'Off';
@@ -3415,7 +3418,7 @@ const syncAutoControls = () => {
     button.setAttribute('aria-pressed', String(active));
   });
   document.querySelector('.auto-funding-input').hidden = !autoRound || autoFundingMode !== 'fixed';
-  document.querySelector('.auto-claim-row').hidden = !autoRound;
+  document.querySelector('.auto-claim-row').hidden = !autoRound || !autoReinvestAvailable;
   document.querySelector('.auto-reward-row').hidden = !autoRound;
   autoClaimToggle.setAttribute('aria-checked', String(autoClaimEnabled));
   autoClaimToggle.classList.toggle('active', autoClaimEnabled);
@@ -3439,6 +3442,7 @@ autoFundingOptions.forEach((button) => button.addEventListener('click', () => {
 autoFundingInput.addEventListener('input', updateMine);
 autoClaimToggle.addEventListener('click', () => {
   if (!autoRound) return;
+  if (!autoReinvestAvailable) return notify('SOL reinvestment is not active on this deployment yet');
   autoClaimEnabled = !autoClaimEnabled;
   syncAutoControls();
   notify(autoClaimEnabled

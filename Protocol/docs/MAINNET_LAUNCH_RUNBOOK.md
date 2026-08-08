@@ -217,6 +217,7 @@ supabase/migrations/20260808130000_round_realtime.sql
 supabase/migrations/20260808133000_worker_schema_capabilities.sql
 supabase/migrations/20260808134500_round_projection_completeness.sql
 supabase/migrations/20260808135000_wallet_round_history.sql
+supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql
 ```
 
 The receipt-accrual and later migrations are part of the same release as the upgraded program

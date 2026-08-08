@@ -54,6 +54,12 @@ for the signed wallet. The matching `wallet-round-history` Edge Function takes
 the wallet only from the verified session; browser callers cannot enumerate a
 different wallet or use this display projection as claim authority.
 
+Migration `20260808140000_auto_plan_sol_reinvestment.sql` widens only the
+AutoPlan projection's composite reward mode from `0..1` to `0..3`. Bit 0 keeps
+the existing MYNE accumulate/burn policy and bit 1 records owner consent to
+reinvest all claimable SOL. Bet receipt reward modes remain strictly `0..1`.
+Apply it before starting a worker that discovers reinvest-enabled plans.
+
 ## Wallet-only chat
 
 Migration `20260807140000_wallet_chat_hardening.sql` is the wallet-only chat

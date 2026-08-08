@@ -1269,22 +1269,18 @@ pub mod myne_protocol {
             CURRENT_VERSION,
             MyneError::ProtocolUpgradeRequired
         );
+        assert_auto_plan_reward_mode(ctx.accounts.auto_plan.reward_mode)?;
         require!(ctx.accounts.auto_plan.active, MyneError::AutoPlanInactive);
         require!(
             auto_plan_reinvests_sol(ctx.accounts.auto_plan.reward_mode),
             MyneError::InvalidRewardMode
         );
 
-        checkpoint_stake(
-            &mut ctx.accounts.stake_position,
-            &ctx.accounts.stake_pool,
-        )?;
+        checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
         let amount = ctx.accounts.stake_position.pending_sol;
         if amount > 0 {
-            let next_balance =
-                checked_add(ctx.accounts.auto_plan.balance_lamports, amount)?;
-            let next_claimed =
-                checked_add(ctx.accounts.stake_pool.total_claimed_lamports, amount)?;
+            let next_balance = checked_add(ctx.accounts.auto_plan.balance_lamports, amount)?;
+            let next_claimed = checked_add(ctx.accounts.stake_pool.total_claimed_lamports, amount)?;
             move_lamports(
                 &ctx.accounts.stake_pool.to_account_info(),
                 &ctx.accounts.auto_plan.to_account_info(),
@@ -3016,30 +3012,30 @@ fn assert_canonical_token_account(
 #[cfg(test)]
 mod motherlode_tests {
     use super::{
-        assert_auto_plan_reward_mode, auto_plan_receipt_reward_mode,
-        auto_plan_reinvests_sol,
-        assert_operational_roles_distinct, assert_randomness_program_allowed_for_build,
-        checked_bps, distribute_mining_rewards, is_supported_meteora_program,
-        liquidity_gate_required, max_supply_base_units, mining_basis_after_credit,
-        mining_share_value, mining_shares_for_credit, motherlode_hit, motherlode_pays_round,
-        mul_div, mul_div_u64_u128, parse_meteora_damm_v2_pool, parse_meteora_lb_pair,
-        proportional_interval_share, round_can_open_after_emission, round_emissions,
-        select_slot_hash_at_or_after, server_randomness_commitment, server_randomness_output,
-        stake_reward_increment_and_remainder, switchboard_randomness_is_uncommitted,
-        AUTO_PLAN_REINVEST_SOL, AUTO_REWARD_ACCUMULATE, AUTO_REWARD_BURN,
-        BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER, METEORA_DAMM_ACTIVATION_POINT_OFFSET,
-        METEORA_DAMM_ACTIVATION_TYPE_OFFSET, METEORA_DAMM_POOL_STATUS_OFFSET,
-        METEORA_DAMM_POOL_TYPE_OFFSET, METEORA_DAMM_TOKEN_A_MINT_OFFSET,
-        METEORA_DAMM_TOKEN_A_VAULT_OFFSET, METEORA_DAMM_TOKEN_B_MINT_OFFSET,
-        METEORA_DAMM_TOKEN_B_VAULT_OFFSET, METEORA_DAMM_V2_POOL_DISCRIMINATOR,
-        METEORA_DAMM_V2_POOL_SIZE, METEORA_DAMM_V2_PROGRAM, METEORA_DLMM_PROGRAM,
-        METEORA_LB_PAIR_ACTIVATION_POINT_OFFSET, METEORA_LB_PAIR_ACTIVATION_TYPE_OFFSET,
-        METEORA_LB_PAIR_DISCRIMINATOR, METEORA_LB_PAIR_RESERVE_X_OFFSET,
-        METEORA_LB_PAIR_RESERVE_Y_OFFSET, METEORA_LB_PAIR_SIZE, METEORA_LB_PAIR_STATUS_OFFSET,
-        METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET, METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET,
-        MINING_PROTOCOL_FEE_BPS, MINING_SHARE_SCALE, MOTHERLODE_ODDS, REWARD_SCALE,
-        SERVER_ENTROPY_DELAY_SLOTS, SERVER_RANDOMNESS_PENDING, SERVER_RANDOMNESS_PROGRAM,
-        SERVER_RANDOMNESS_SLOT_MASK, SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
+        assert_auto_plan_reward_mode, assert_operational_roles_distinct,
+        assert_randomness_program_allowed_for_build, auto_plan_receipt_reward_mode,
+        auto_plan_reinvests_sol, checked_bps, distribute_mining_rewards,
+        is_supported_meteora_program, liquidity_gate_required, max_supply_base_units,
+        mining_basis_after_credit, mining_share_value, mining_shares_for_credit, motherlode_hit,
+        motherlode_pays_round, mul_div, mul_div_u64_u128, parse_meteora_damm_v2_pool,
+        parse_meteora_lb_pair, proportional_interval_share, round_can_open_after_emission,
+        round_emissions, select_slot_hash_at_or_after, server_randomness_commitment,
+        server_randomness_output, stake_reward_increment_and_remainder,
+        switchboard_randomness_is_uncommitted, AUTO_PLAN_REINVEST_SOL, AUTO_REWARD_ACCUMULATE,
+        AUTO_REWARD_BURN, BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER,
+        METEORA_DAMM_ACTIVATION_POINT_OFFSET, METEORA_DAMM_ACTIVATION_TYPE_OFFSET,
+        METEORA_DAMM_POOL_STATUS_OFFSET, METEORA_DAMM_POOL_TYPE_OFFSET,
+        METEORA_DAMM_TOKEN_A_MINT_OFFSET, METEORA_DAMM_TOKEN_A_VAULT_OFFSET,
+        METEORA_DAMM_TOKEN_B_MINT_OFFSET, METEORA_DAMM_TOKEN_B_VAULT_OFFSET,
+        METEORA_DAMM_V2_POOL_DISCRIMINATOR, METEORA_DAMM_V2_POOL_SIZE, METEORA_DAMM_V2_PROGRAM,
+        METEORA_DLMM_PROGRAM, METEORA_LB_PAIR_ACTIVATION_POINT_OFFSET,
+        METEORA_LB_PAIR_ACTIVATION_TYPE_OFFSET, METEORA_LB_PAIR_DISCRIMINATOR,
+        METEORA_LB_PAIR_RESERVE_X_OFFSET, METEORA_LB_PAIR_RESERVE_Y_OFFSET, METEORA_LB_PAIR_SIZE,
+        METEORA_LB_PAIR_STATUS_OFFSET, METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET,
+        METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET, MINING_PROTOCOL_FEE_BPS, MINING_SHARE_SCALE,
+        MOTHERLODE_ODDS, REWARD_SCALE, SERVER_ENTROPY_DELAY_SLOTS, SERVER_RANDOMNESS_PENDING,
+        SERVER_RANDOMNESS_PROGRAM, SERVER_RANDOMNESS_SLOT_MASK, SWITCHBOARD_DEVNET_PROGRAM,
+        SWITCHBOARD_MAINNET_PROGRAM,
     };
     use super::{
         decode_server_randomness_slot, encode_server_randomness_slot, is_fresh_switchboard_commit,

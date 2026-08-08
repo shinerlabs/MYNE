@@ -493,14 +493,43 @@ const [autoPlan] = PublicKey.findProgramAddressSync(
   [Buffer.from('auto_plan'), payer.publicKey.toBuffer()],
   PROGRAM_ID,
 );
+const stakePoolBeforeReinvest = await program.account.stakePool.fetch(stakePool);
 await program.methods
-  .createAutoPlan(amounts, new BN('100000000'), 1)
+  .createAutoPlan(amounts, new BN(0), 3)
   .accounts({ config, autoPlan, authority: payer.publicKey, systemProgram: SystemProgram.programId })
   .rpc();
-await program.methods
+const reinvestIx = await program.methods
+  .reinvestAutoPlanRewards()
+  .accounts({ config, autoPlan, stakePool, stakePosition, executor: payer.publicKey })
+  .instruction();
+const executeReinvestedPlanIx = await program.methods
   .executeAutoPlan(roundId, new BN(0))
   .accounts({ config, autoPlan, miner, round, receipt: receiptFor(payer.publicKey, new BN(0)), randomnessAccount: null, executor: payer.publicKey, systemProgram: SystemProgram.programId })
-  .rpc();
+  .instruction();
+await provider.sendAndConfirm(new Transaction().add(reinvestIx, executeReinvestedPlanIx), []);
+const [reinvestedPlan, positionAfterReinvest, stakePoolAfterReinvest, reinvestedReceipt] = await Promise.all([
+  program.account.autoPlan.fetch(autoPlan),
+  program.account.stakePosition.fetch(stakePosition),
+  program.account.stakePool.fetch(stakePool),
+  program.account.betReceipt.fetch(receiptFor(payer.publicKey, new BN(0))),
+]);
+const reinvestedLamports = BigInt(stakePoolAfterReinvest.totalClaimedLamports.toString())
+  - BigInt(stakePoolBeforeReinvest.totalClaimedLamports.toString());
+const receiptRent = BigInt(await provider.connection.getBalance(
+  receiptFor(payer.publicKey, new BN(0)), 'confirmed',
+));
+assert.ok(reinvestedLamports > 50_000_000n + receiptRent);
+assert.equal(positionAfterReinvest.pendingSol.toString(), '0');
+assert.equal(
+  BigInt(reinvestedPlan.balanceLamports.toString()),
+  reinvestedLamports - 50_000_000n - receiptRent,
+  'Atomic reinvest + execute consumes only the exact wager and receipt rent',
+);
+assert.equal(
+  Number(reinvestedReceipt.rewardMode),
+  1,
+  'AutoPlan SOL-consent bit must never leak into BetReceipt.reward_mode',
+);
 await assert.rejects(
   program.methods
     .executeAutoPlan(roundId, new BN(1))
@@ -556,6 +585,14 @@ await provider.sendAndConfirm(
 assert.ok(await program.account.miner.fetchNullable(firstTimeMiner));
 assert.ok(await program.account.stakePosition.fetchNullable(firstTimeStakePosition));
 assert.ok(await program.account.autoPlan.fetchNullable(firstTimeAutoPlan));
+await assert.rejects(
+  program.methods.reinvestAutoPlanRewards().accounts({
+    config, autoPlan: firstTimeAutoPlan, stakePool, stakePosition: firstTimeStakePosition,
+    executor: payer.publicKey,
+  }).rpc(),
+  /InvalidRewardMode|reward mode|custom program error/i,
+  'A keeper cannot reinvest SOL without owner-signed on-chain consent',
+);
 await program.methods.cancelAutoPlan().accounts({
   config, autoPlan: firstTimeAutoPlan, authority: firstTimeAutoMiner.publicKey,
 }).signers([firstTimeAutoMiner]).rpc();

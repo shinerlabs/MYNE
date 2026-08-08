@@ -13,7 +13,22 @@ test('generated IDL exposes the implemented feature bundles and keeps swaps exte
   assert.equal(capabilities.staking.ready, true);
   assert.equal(capabilities.referrals.ready, true);
   assert.equal(capabilities.autoRound.ready, true);
+  assert.equal(capabilities.autoReinvest.ready, true);
   assert.equal(capabilities.swaps.ready, false);
+});
+
+test('SOL reinvest is independently gated without disabling ordinary Auto-round', () => {
+  const capabilities = capabilitiesFromIdl({ instructions: [
+    { name: 'create_auto_plan' },
+    { name: 'configure_auto_plan' },
+    { name: 'fund_auto_plan' },
+    { name: 'cancel_auto_plan' },
+    { name: 'execute_auto_plan' },
+    { name: 'claim_auto_burn_receipt' },
+  ] });
+  assert.equal(capabilities.autoRound.ready, true);
+  assert.equal(capabilities.autoReinvest.ready, false);
+  assert.deepEqual(capabilities.autoReinvest.missing, ['reinvest_auto_plan_rewards']);
 });
 
 test('feature detection fails closed when an instruction is absent', () => {

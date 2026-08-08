@@ -3086,6 +3086,140 @@
       ]
     },
     {
+      "name": "reinvest_auto_plan_rewards",
+      "docs": [
+        "Permissionlessly reinvests this plan owner's claimable SOL into their",
+        "canonical AutoPlan. Consent is stored in AutoPlan.reward_mode and can",
+        "only be changed by the owner-signed create/configure instructions.",
+        "",
+        "Keepers place this immediately before execute_auto_plan in one atomic",
+        "transaction. If execution later fails, Solana rolls this transfer back;",
+        "if an owner claim races it, account locking ensures only one path can",
+        "consume the pending balance."
+      ],
+      "discriminator": [
+        53,
+        239,
+        53,
+        150,
+        19,
+        106,
+        222,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "auto_plan",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  117,
+                  116,
+                  111,
+                  95,
+                  112,
+                  108,
+                  97,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "auto_plan.authority",
+                "account": "AutoPlan"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "stake_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  116,
+                  97,
+                  107,
+                  101,
+                  95,
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "auto_plan.authority",
+                "account": "AutoPlan"
+              }
+            ]
+          }
+        },
+        {
+          "name": "executor",
+          "docs": [
+            "Any signer may relay the owner-authorized reinvestment. No funds can be",
+            "directed to this account."
+          ],
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "request_unstake",
       "discriminator": [
         44,
@@ -4583,6 +4717,19 @@
       ]
     },
     {
+      "name": "AutoPlanRewardsReinvested",
+      "discriminator": [
+        216,
+        160,
+        214,
+        165,
+        165,
+        159,
+        110,
+        32
+      ]
+    },
+    {
       "name": "BuybackAllocation",
       "discriminator": [
         37,
@@ -5507,6 +5654,30 @@
         "fields": [
           {
             "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "lamports",
+            "type": "u64"
+          },
+          {
+            "name": "balance_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AutoPlanRewardsReinvested",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "executor",
             "type": "pubkey"
           },
           {

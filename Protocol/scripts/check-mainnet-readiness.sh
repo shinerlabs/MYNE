@@ -101,6 +101,7 @@ grep -q '"name": "rotate_operational_wallets"' target/idl/myne_protocol.json
 grep -q '"name": "migrate_prelaunch_mint"' target/idl/myne_protocol.json
 grep -q '"name": "set_randomness_program"' target/idl/myne_protocol.json
 grep -q '"name": "claim_auto_burn_receipt"' target/idl/myne_protocol.json
+grep -q '"name": "reinvest_auto_plan_rewards"' target/idl/myne_protocol.json
 grep -q '"name": "settle_receipt"' target/idl/myne_protocol.json
 grep -q '"name": "close_receipt"' target/idl/myne_protocol.json
 grep -q '"name": "close_round"' target/idl/myne_protocol.json
@@ -257,6 +258,9 @@ grep -q 'cardinality(p_round_ids) > 50' ../supabase/migrations/20260808135000_wa
 grep -q 'rounds.projection_complete = true' ../supabase/migrations/20260808135000_wallet_round_history.sql
 grep -Fq 'revoke all on function public.mine_wallet_round_history_v1(text, bigint[]) from public, anon, authenticated' ../supabase/migrations/20260808135000_wallet_round_history.sql
 grep -Fq 'grant execute on function public.mine_wallet_round_history_v1(text, bigint[]) to service_role' ../supabase/migrations/20260808135000_wallet_round_history.sql
+test -f ../supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql
+grep -q 'mine_auto_plans_reward_mode_check' ../supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql
+grep -q 'reward_mode between 0 and 3' ../supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql
 test -f ../supabase/functions/wallet-round-history/index.ts
 grep -q 'requireSession(req)' ../supabase/functions/wallet-round-history/index.ts
 grep -q 'p_wallet: session.walletAddress' ../supabase/functions/wallet-round-history/index.ts
@@ -279,6 +283,7 @@ migrations = [
     '20260808133000_worker_schema_capabilities.sql',
     '20260808134500_round_projection_completeness.sql',
     '20260808135000_wallet_round_history.sql',
+    '20260808140000_auto_plan_sol_reinvestment.sql',
 ]
 positions = [runbook.index(name) for name in migrations]
 assert positions == sorted(positions), 'Projection/wallet-history migrations are out of order'

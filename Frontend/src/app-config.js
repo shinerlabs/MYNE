@@ -34,6 +34,14 @@ export const SERVICES = Object.freeze({
   indexerUrl: ENV.VITE_SUPABASE_URL || '',
 });
 
+// Release-gated capabilities whose client code may land before the matching
+// Mainnet program upgrade. Keep these off by default: a synchronized IDL proves
+// the client can encode the instruction, while this explicit flag proves the
+// operator has completed the on-chain/worker cutover.
+export const FEATURES = Object.freeze({
+  autoReinvestSol: ENV.VITE_AUTO_REINVEST_SOL === 'true',
+});
+
 export const LINKS = Object.freeze({
   telegram: ENV.VITE_TELEGRAM_URL || '',
   x: ENV.VITE_X_URL || 'https://x.com/myne_solana',

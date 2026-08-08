@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -72,6 +73,29 @@ test('only explicit composite-mode consent makes claimable SOL executable plan f
     pendingSol: 0n,
     requiredLamports: 1n,
   }), /reward mode is invalid/);
+});
+
+test('every keeper atomically reinvests before execution and preserves receipt mode', async () => {
+  const [server, switchboard, local, program, indexer, migration] = await Promise.all([
+    readFile(new URL('../scripts/server-round-keeper.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/switchboard-round-keeper.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/local-keeper.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../programs/myne_protocol/src/lib.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../../supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql', import.meta.url), 'utf8'),
+  ]);
+  for (const [name, source] of Object.entries({ server, switchboard, local })) {
+    const reinvest = source.indexOf('.reinvestAutoPlanRewards()');
+    const execute = source.indexOf('.executeAutoPlan(');
+    assert.ok(reinvest >= 0, `${name} keeper does not build SOL reinvestment`);
+    assert.ok(execute > reinvest, `${name} keeper must place reinvestment before execution`);
+    assert.match(source, /stake_position|stakePosition/);
+  }
+  assert.match(program, /receipt\.reward_mode\s*=\s*auto_plan_receipt_reward_mode/);
+  assert.match(program, /move_lamports\([\s\S]*stake_pool\.to_account_info\(\)[\s\S]*auto_plan\.to_account_info\(\)/);
+  assert.match(indexer, /case 'AutoPlanRewardsReinvested'/);
+  assert.match(migration, /mine_auto_plans_reward_mode_check[\s\S]*between 0 and 3/);
+  assert.doesNotMatch(migration, /mine_round_bets[\s\S]*(?:drop|alter).*reward_mode/is);
 });
 
 test('one stale plan is bisected away without skipping valid neighbours', async () => {
