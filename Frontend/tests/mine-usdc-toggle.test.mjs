@@ -29,6 +29,11 @@ test('Mine presents USDC as a quote with one fixed input mark and a text-only sw
 });
 
 test('Mine summary currency rows render one centered icon and value group', () => {
+  assert.match(source, /class="deployed-usd-value" aria-hidden="true"><span>—<\/span><\/strong>/);
+  assert.match(source, /deployedHeading\.dataset\.usdLabel = '≈—'/);
+  assert.match(source, /deployedUsdcNumber\.textContent = deployedUsdText === '—' \? '—' : `\$\$\{deployedUsdText\}`/);
+  assert.match(source, /deployedHeading\.dataset\.usdLabel = deployedUsdText === '—' \? '≈—' : `≈\$\$\{deployedUsdText\}`/);
+  assert.doesNotMatch(source, /deployedHeading\.dataset\.usdLabel = `≈\$\{deployedUsdText\} USDC`/);
   assert.match(surfaces, /\.deployed-token-value::after[\s\S]*content: none !important/);
   assert.match(surfaces, /\.deployed-usd-value > span[\s\S]*font-size: inherit !important/);
   assert.match(surfaces, /\.motherlode-eth-usd > \.motherlode-usdc-value[\s\S]*font-size: inherit !important/);
