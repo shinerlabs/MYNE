@@ -85,6 +85,26 @@ export const selectPausedApySnapshot = (currentMetrics, previousSnapshot) => {
   return previous?.aprAsOf === current?.aprAsOf ? previous : current;
 };
 
+/**
+ * Resolve the one APY value every public surface may display. During a pause,
+ * the last verified snapshot for the same reward window wins; while live, the
+ * current read passes through unchanged.
+ */
+export const resolveStakingApyDisplay = (currentMetrics, previousSnapshot) => {
+  const snapshot = selectPausedApySnapshot(currentMetrics, previousSnapshot);
+  return {
+    snapshot,
+    metrics: snapshot
+      ? {
+        ...currentMetrics,
+        ...snapshot,
+        aprPct: snapshot.apyStandardPct,
+        aprStatus: 'paused',
+      }
+      : currentMetrics,
+  };
+};
+
 /** A personal position has no meaningful APY until it has positive principal and weight. */
 export const positionApyPercent = (standardApyPct, principalMyne, weightMyne) => {
   if (!Number.isFinite(standardApyPct) || standardApyPct < 0

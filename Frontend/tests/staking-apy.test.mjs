@@ -7,6 +7,7 @@ import {
   formatApyPercent,
   positionApyPercent,
   positionRewardEstimate,
+  resolveStakingApyDisplay,
   selectLatestCompleteStakingRewardWindow,
   selectLatestVerifiedStakingRewardWindow,
   selectPausedApySnapshot,
@@ -139,6 +140,37 @@ test('a protocol pause retains one validated APY snapshot', () => {
     selectPausedApySnapshot({ ...paused, aprAsOf: snapshot.aprAsOf + 65 }, snapshot)?.apyStandardPct,
     9,
   );
+});
+
+test('paused Stake/header and About Stats resolve the same standard APY', async () => {
+  const snapshot = stakingApySnapshot({
+    apyStandardPct: 5_246,
+    apyBurnPct: 26_230,
+    aprWindowDays: 30 / 1440,
+    aprWindowRounds: 27,
+    aprAsOf: 1_700_000_000,
+  }, 1_700_000_100);
+  const pausedRead = {
+    protocolPaused: true,
+    apyStandardPct: 3_376,
+    apyBurnPct: 16_880,
+    aprWindowDays: 30 / 1440,
+    aprWindowRounds: 27,
+    aprAsOf: 1_700_000_000,
+  };
+
+  const stakeSurface = resolveStakingApyDisplay(pausedRead, snapshot).metrics;
+  const aboutSurface = resolveStakingApyDisplay(pausedRead, snapshot).metrics;
+  assert.equal(stakeSurface.apyStandardPct, 5_246);
+  assert.equal(aboutSurface.apyStandardPct, stakeSurface.apyStandardPct);
+  assert.equal(aboutSurface.apyBurnPct, stakeSurface.apyBurnPct);
+
+  const liveRead = { ...pausedRead, protocolPaused: false };
+  assert.strictEqual(resolveStakingApyDisplay(liveRead, snapshot).metrics, liveRead);
+
+  const main = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+  assert.match(main, /const \{ metrics: staking \} = resolveStakingApyDisplay\(currentStaking, previousApy\)/);
+  assert.match(main, /const \{ snapshot: captured, metrics: m \} = resolveStakingApyDisplay\(current, previousApy\)/);
 });
 
 test('staking reward window sums exact indexed lamports only when coverage is complete', () => {
@@ -335,7 +367,7 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(main, /PAUSED SNAPSHOT · \$\{observed\}/);
   assert.match(main, /\$\{observed\} · NON-COMPOUNDING EST\./);
   assert.match(main, /aprFallback: !paused/);
-  assert.match(main, /selectPausedApySnapshot\(current, previousApy\)/);
+  assert.match(main, /resolveStakingApyDisplay\(current, previousApy\)/);
   assert.match(main, /ctx\.fillText\('POSITION APY'/);
   assert.match(main, /if \(data\.apy == null\) return null/);
   assert.doesNotMatch(main, /rewardsToStakersEth \/ metrics\.aprWindowDays/);

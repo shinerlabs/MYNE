@@ -35,7 +35,7 @@ import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, inv
 import { randomnessHex } from './chain/randomness-proof.js';
 import { isServerRandomnessProgram } from './chain/randomness-mode.js';
 import {
-  formatApyPercent, positionRewardEstimate, selectPausedApySnapshot, stakingApySnapshot,
+  formatApyPercent, positionRewardEstimate, resolveStakingApyDisplay, stakingApySnapshot,
 } from './chain/staking-apy.js';
 import {
   affordableAutoPlanRounds, maxAutoPlanFundingLamports, requiredDeposit,
@@ -1572,7 +1572,9 @@ const refreshProtocolStats = async (force = false) => {
       add('mining.motherlodes', summary.jackpots, statsNumber(summary.jackpots, 0), cumulativeRecent(summary.jackpots, recent, (row) => row.jackpotHit ? 1 : 0));
     }
 
-    const staking = stakingResult.status === 'fulfilled' ? stakingResult.value : null;
+    const currentStaking = stakingResult.status === 'fulfilled' ? stakingResult.value : null;
+    const previousApy = stakingApySnapshot(stakingMetricsState) ?? loadStakingApySnapshot();
+    const { metrics: staking } = resolveStakingApyDisplay(currentStaking, previousApy);
     if (staking) {
       if (staking.apyStandardPct != null) {
         add('staking.apy', staking.apyStandardPct, formatApyPercent(staking.apyStandardPct));
@@ -1953,10 +1955,7 @@ const refreshStakingMetrics = async () => {
     // A stored snapshot is valid for this pause only when it describes the
     // same final indexed reward window. Otherwise compute one from the final
     // verified window now instead of reviving an older maintenance value.
-    const captured = selectPausedApySnapshot(current, previousApy);
-    const m = captured
-      ? { ...current, ...captured, aprPct: captured.apyStandardPct, aprStatus: 'paused' }
-      : current;
+    const { snapshot: captured, metrics: m } = resolveStakingApyDisplay(current, previousApy);
     stakingMetricsState = m;
     if (paused) {
       if (captured) {
