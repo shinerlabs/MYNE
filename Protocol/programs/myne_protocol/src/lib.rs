@@ -3128,6 +3128,37 @@ mod motherlode_tests {
     }
 
     #[test]
+    fn claim_fee_only_increases_remaining_unclaimed_shares() {
+        // The claimant's 100 shares and 100 assets have already been removed.
+        // Only the other miner remains eligible when the claimant's 9 MYNE
+        // passive fee is applied.
+        let mut pool = MiningPool {
+            bump: 1,
+            total_unclaimed: 100,
+            reward_per_unclaimed: 100 * MINING_SHARE_SCALE,
+            undistributed_base_units: 0,
+        };
+        let remaining_shares = pool.reward_per_unclaimed;
+        distribute_mining_rewards(&mut pool, 9).unwrap();
+        assert_eq!(pool.reward_per_unclaimed, remaining_shares);
+        assert_eq!(pool.total_unclaimed, 109);
+        assert_eq!(
+            mining_share_value(
+                pool.total_unclaimed,
+                pool.reward_per_unclaimed,
+                remaining_shares,
+            )
+            .unwrap(),
+            109,
+        );
+        assert_eq!(
+            mining_share_value(pool.total_unclaimed, pool.reward_per_unclaimed, 0,).unwrap(),
+            0,
+            "the wallet that already claimed owns no shares in its own fee",
+        );
+    }
+
+    #[test]
     fn later_reward_credit_preserves_the_holders_passive_component() {
         // One holder has a 100 MYNE reward basis and owns every share. Another
         // miner's claim adds 9 passive MYNE, taking its share value to 109.
