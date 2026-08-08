@@ -153,8 +153,14 @@ test('server randomness provider cutover is paused, drained, simulated, and expl
   assert.match(source, /configState\.randomnessAuthority\.equals\(randomnessAuthority\)/);
   assert.match(source, /CONFIRM_MAINNET_FIRST_SERVER_ROUND_ID/);
   assert.match(source, /firstOpenedAt > chainTime/);
+  assert.match(source, /MINIMUM_FIRST_ROUND_PREPARATION_LEAD_SECONDS = 300/);
+  assert.match(source, /firstPreparationStartsAt >= chainTime \+ MINIMUM_FIRST_ROUND_PREPARATION_LEAD_SECONDS/);
   assert.match(source, /CONFIRM_SERVER_RANDOMNESS_REVIEW/);
   assert.match(source, /setRandomnessProgram\(PROGRAM_ID\)/);
+  assert.match(source, /program\.account\.liquidityGate\.fetch\(liquidityGate, 'finalized'\)/);
+  assert.match(source, /liquidityGateState\.verified, true/);
+  assert.match(source, /liquidityPoolInfo\.owner\.equals\(liquidityGateState\.poolProgram\)/);
+  assert.match(source, /accounts\(\{ config, liquidityGate, liquidityPool, admin: payer\.publicKey \}\)/);
   assert.match(source, /simulateTransaction/);
   assert.match(source, /SUBMIT_MAINNET_SERVER_RANDOMNESS/);
   assert.match(source, /sendRawTransaction/);

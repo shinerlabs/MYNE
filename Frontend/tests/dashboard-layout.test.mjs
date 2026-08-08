@@ -45,9 +45,10 @@ test('stake shell uses scrollbar-safe gutters and clears retired reward-card off
   assert.match(styles, /@media \(max-width: 560px\)[\s\S]*width:\s*calc\(100% - 20px\) !important/);
 });
 
-test('stake reward actions collapse to one aligned column on mobile', () => {
-  assert.match(styles, /@media \(max-width: 560px\)[\s\S]*\.staking-dashboard \.eth-claim-actions \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) !important/);
-  assert.match(styles, /\.staking-dashboard \.staking-share-group \{[\s\S]*justify-content:\s*center/);
+test('stake reward actions share one compact row on mobile', () => {
+  assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-dashboard \.eth-claim-actions \{[\s\S]*grid-template-columns:\s*auto minmax\(0, 1fr\) !important;[\s\S]*grid-template-rows:\s*44px !important/);
+  assert.match(fitStyles, /\.eth-claim-actions > \.staking-share-group \{[\s\S]*grid-column:\s*1 !important;[\s\S]*justify-content:\s*flex-start !important/);
+  assert.match(fitStyles, /\.eth-claim-actions > #claim-stake-rewards \{[\s\S]*grid-column:\s*2 !important;[\s\S]*grid-row:\s*1 !important/);
 });
 
 test('compact Stake keeps rewards bounded and APY metadata readable', () => {

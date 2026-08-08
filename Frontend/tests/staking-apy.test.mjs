@@ -247,6 +247,9 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(main, /EST\. WEEKLY/);
   assert.match(main, /EST\. ANNUAL/);
   assert.match(main, /EST\. WEEKLY SOL/);
+  assert.match(main, /class="stake-estimate-card" tabindex="0" aria-describedby="stake-estimated-weekly-usd"/);
+  assert.match(main, /class="stake-estimate-usd" id="stake-estimated-weekly-usd" role="tooltip"/);
+  assert.doesNotMatch(main, /<em id="stake-estimated-weekly-usd">≈ \$—<\/em>/);
   assert.match(main, /positionRewardEstimate\(\{/);
   assert.match(main, /days:\s*7/);
   assert.match(main, /const dailyPool = metrics\?\.aprWindowDays > 0 \? metrics\.rewardsToStakersEth : null/);

@@ -360,8 +360,8 @@ document.querySelector('#app').innerHTML = `
       </div>
       <aside class="stake-reward-estimate" aria-live="polite">
         <div class="stake-estimate-values">
-          <div><span>EST. WEEKLY</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-weekly">—</b><small>SOL</small></strong><em id="stake-estimated-weekly-usd">≈ $—</em></div>
-          <div><span>EST. ANNUAL</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-annual">—</b><small>SOL</small></strong><em id="stake-estimated-annual-usd">≈ $—</em></div>
+          <div class="stake-estimate-card" tabindex="0" aria-describedby="stake-estimated-weekly-usd"><span>EST. WEEKLY</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-weekly">—</b><small>SOL</small></strong><em class="stake-estimate-usd" id="stake-estimated-weekly-usd" role="tooltip">USD value unavailable</em></div>
+          <div class="stake-estimate-card" tabindex="0" aria-describedby="stake-estimated-annual-usd"><span>EST. ANNUAL</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-annual">—</b><small>SOL</small></strong><em class="stake-estimate-usd" id="stake-estimated-annual-usd" role="tooltip">USD value unavailable</em></div>
         </div>
         <small id="stake-estimate-basis">Connect a wallet to estimate rewards</small>
       </aside>
