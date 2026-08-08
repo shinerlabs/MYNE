@@ -382,7 +382,7 @@ document.querySelector('#app').innerHTML = `
         </section>
         <div class="staking-calculator-overlay" hidden>
         <section class="staking-calculator panel" id="stake-calculator" role="dialog" aria-modal="true" aria-labelledby="stake-calculator-title">
-      <header class="calculator-head"><div><span class="eyebrow">REWARD CALCULATOR</span><h2 id="stake-calculator-title">Plan your MYNE stake.</h2><p>Compare flexible staking with permanent Stake + Burn.</p></div><div class="calculator-head-actions"><div class="projection-period" role="group" aria-label="Projection period"><button class="active" data-projection-days="30">30D</button><button data-projection-days="90">90D</button><button data-projection-days="180">180D</button><button data-projection-days="365">1Y</button></div><button class="calculator-close" type="button" data-calculator-close aria-label="Close staking calculator">×</button></div></header>
+      <header class="calculator-head"><div><span class="eyebrow">REWARD CALCULATOR</span><h2 id="stake-calculator-title">Plan your MYNE stake.</h2><p>Compare flexible staking with permanent Stake + Burn.</p></div><div class="calculator-head-actions"><div class="projection-period" role="group" aria-label="Projection period"><button class="active" type="button" data-projection-days="30">30D</button><button type="button" data-projection-days="90">90D</button><button type="button" data-projection-days="180">180D</button><button type="button" data-projection-days="365">1Y</button></div><button class="calculator-close" type="button" data-calculator-close aria-label="Close staking calculator">×</button></div></header>
       <div class="calculator-layout">
         <div class="projection-controls"><div class="calculator-tier" role="group" aria-label="Staking type"><button class="active" type="button" data-calculator-tier="standard" aria-pressed="true"><b>Standard Stake</b><small>1× weight · flexible</small></button><button type="button" data-calculator-tier="burn" aria-pressed="false"><b>Stake + Burn</b><small>5× weight · permanent</small></button></div><label for="calculator-amount"><span>MYNE AMOUNT</span><small>Wallet connection not required</small></label><div class="calculator-input"><img src="/myne-token-icon.svg" alt=""/><input id="calculator-amount" value="150" inputmode="decimal" aria-label="MYNE staking projection amount"/><span>MYNE</span></div><div class="projection-results"><article><span>EST. PERIOD REWARD</span><strong>${solIcon()} <b id="projected-eth">—</b></strong><small class="projection-usd" id="projected-eth-usd" aria-label="Estimated reward value in US dollars">—</small></article><article><span>EST. DAILY</span><strong>${solIcon()} <b id="projected-daily">—</b></strong><small>SOL / DAY</small></article><article><span>POOL WEIGHT</span><strong><b id="projected-weight">—</b></strong><small>MYNE WEIGHT</small></article><article><span>PROJECTED SHARE</span><strong><b id="projected-share">—</b></strong><small>OF STAKING POOL</small></article></div><p class="projection-note" id="projection-note">Waiting for the latest verified staking reward window.</p></div>
         <article class="projection-card" id="projection-card" aria-label="Shareable staking projection"><header><div><img src="/myne-token-icon.svg" alt=""/><b>MYNE</b></div><span>STAKING PROJECTION</span></header><div class="projection-card-principal"><small id="card-tier">STANDARD STAKE · 1× WEIGHT</small><strong><b id="card-principal">150</b> MYNE</strong><span id="card-period">30 DAYS</span></div><div class="projection-card-rewards"><span><small>EST. SOL</small><strong>${solIcon()} <b id="card-eth">—</b></strong></span><span><small>EST. APY</small><strong><b id="card-apy">—</b></strong></span></div><footer><span>Current-rate estimate · not guaranteed</span><code id="card-link">myne.supply</code></footer></article>
@@ -3422,11 +3422,13 @@ document.querySelector('#stake-max').addEventListener('click', () => {
   updateProjection();
 });
 calculatorAmount.addEventListener('input', updateProjection);
-document.querySelectorAll('[data-projection-days]').forEach((button) => button.addEventListener('click', () => {
+stakingCalculator?.querySelector('.projection-period')?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-projection-days]');
+  if (!button) return;
   projectionDays = Number(button.dataset.projectionDays);
   document.querySelectorAll('[data-projection-days]').forEach((item) => item.classList.toggle('active', item === button));
   updateProjection();
-}));
+});
 document.querySelectorAll('[data-calculator-tier]').forEach((button) => button.addEventListener('click', () => {
   projectionTier = button.dataset.calculatorTier === 'burn' ? 'burn' : 'standard';
   updateProjection();
@@ -5240,14 +5242,12 @@ let claimableUnknown = 0;
  * restore it.
  */
 const expandedRounds = new Set();
-// First / ‹ / page / › / Last — paged history like the reference ORE UIs. Footer under the list.
+// Exactly 50 rows per page, with explicit batch navigation beneath the ledger.
 roundList.insertAdjacentHTML('afterend',
   '<div class="round-pagination" id="round-pagination" hidden>'
-  + '<button data-round-page="first">First</button>'
-  + '<button data-round-page="prev" aria-label="Previous page">‹</button>'
-  + '<span class="round-page-label" id="round-page-label">1 / 1</span>'
-  + '<button data-round-page="next" aria-label="Next page">›</button>'
-  + '<button data-round-page="last">Last</button>'
+  + '<button data-round-page="prev" aria-label="Previous 50 rounds">Previous 50</button>'
+  + '<span class="round-page-label" id="round-page-label">Page 1 / 1</span>'
+  + '<button data-round-page="next" aria-label="Next 50 rounds">Next 50</button>'
   + '</div>');
 
 const relTime = (ts) => {
@@ -5512,13 +5512,11 @@ const renderPagination = () => {
   const label = document.querySelector('#round-page-label');
   if (!bar || !label) return;
   bar.hidden = roundPages <= 1;
-  label.textContent = `${roundPage + 1} / ${roundPages}`;
+  label.textContent = `Page ${roundPage + 1} / ${roundPages}`;
   const atFirst = roundPage <= 0;
   const atLast = roundPage >= roundPages - 1;
-  bar.querySelector('[data-round-page="first"]').disabled = atFirst;
   bar.querySelector('[data-round-page="prev"]').disabled = atFirst;
   bar.querySelector('[data-round-page="next"]').disabled = atLast;
-  bar.querySelector('[data-round-page="last"]').disabled = atLast;
 };
 
 const renderRoundHistory = () => {
@@ -5531,13 +5529,21 @@ const renderRoundHistory = () => {
     // proof remain public even though every reward is zero.
     if (r.status !== 'settled') {
       const empty = r.status === 'no-bets';
+      const live = r.status === 'live';
+      const label = live ? 'LIVE' : empty ? 'unsettled' : 'resolving';
+      const time = r.isLive
+        ? `${chain.format.formatClock(r.secondsLeft)} ${r.phase === 'betting' ? 'left' : 'result'}`
+        : relTime(r.endsAt);
+      const result = live
+        ? 'Bidding is open · totals update from the live Round account'
+        : empty ? 'No published result — round was not settled' : 'Awaiting keeper resolution';
       return `
     <div class="round-entry ${r.status}" data-round-mode="${r.mode}" data-round-id="${r.roundId}">
       <button class="round-record" aria-expanded="false">
-        <span class="round-number">#${roundNo(r.roundId)}</span><span class="winning-tile muted">—</span><span class="round-mode ${r.mode}">${empty ? 'unsettled' : 'resolving'}</span><span>${solIcon()} 0</span><span class="muted">—</span><time>${relTime(r.endsAt)}</time><i>${icon('chevron')}</i>
+        <span class="round-number">#${roundNo(r.roundId)}</span><span class="winning-tile muted">—</span><span class="round-mode ${r.mode}">${label}</span><span>${solIcon()} ${chain.format.ethSmart(r.totalWager)}</span><span class="muted">—</span><time>${time}</time><i>${icon('chevron')}</i>
       </button>
       <div class="round-detail" hidden>
-        <div><span>RESULT</span><strong>${empty ? 'No published result — round was not settled' : 'Awaiting keeper resolution'}</strong></div>
+        <div><span>RESULT</span><strong>${result}</strong></div>
         <a class="round-explorer" href="${explorerContract}" target="_blank" rel="noreferrer">View contract ↗</a>
       </div>
     </div>`;
@@ -5640,7 +5646,13 @@ const refreshRoundHistory = async ({ force = false } = {}) => {
   const requestId = ++roundHistoryRefreshId;
   const requestedAccount = chain.state.account;
   try {
-    const res = await loadRoundHistory({ page: roundPage, filter: roundFilter, account: requestedAccount, force });
+    const res = await loadRoundHistory({
+      page: roundPage,
+      filter: roundFilter,
+      account: requestedAccount,
+      force,
+      includeLive: document.body.dataset.route === 'rounds',
+    });
     if (requestId !== roundHistoryRefreshId || requestedAccount !== chain.state.account) return;
     roundHistory = res.rows;
     roundPage = res.page; // clamped if the page count shrank
@@ -5671,13 +5683,11 @@ const refreshRoundStats = async () => {
   void renderSupply();
 };
 
-// Jump to a page and reload. `first`/`prev`/`next`/`last` or an absolute index.
+// Jump backward/forward one 50-round batch, or to an absolute page index.
 const goToRoundPage = (target) => {
-  const next = target === 'first' ? 0
-    : target === 'last' ? roundPages - 1
-      : target === 'prev' ? roundPage - 1
-        : target === 'next' ? roundPage + 1
-          : Number(target);
+  const next = target === 'prev' ? roundPage - 1
+    : target === 'next' ? roundPage + 1
+      : Number(target);
   roundPage = Math.min(Math.max(0, next), roundPages - 1);
   resetResponsiveSurfaceScroll(roundList);
   refreshRoundHistory();

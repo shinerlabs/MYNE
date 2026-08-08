@@ -2289,6 +2289,8 @@ body[data-route="mine"] .deployed-stat:focus-visible .deployed-usd-value {
    so the eye skips them while the round numbering stays continuous. */
 .round-mode.no-bets { color: #a3a3a3; background: #252527; }
 .round-mode.resolving { color: #bfbfbf; background: rgba(224, 224, 224, 0.072); }
+.round-mode.live { color: #09090b; background: var(--gld-spectrum); }
+.round-entry.live { box-shadow: inset 2px 0 0 #53e6d5; }
 .round-entry.no-bets .round-record { opacity: .5; }
 .round-entry.resolving .round-record { opacity: .72; }
 .round-record .muted { color: #868686; }

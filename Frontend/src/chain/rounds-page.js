@@ -56,7 +56,7 @@ export function currentRoundHistoryEntry({ roundId, round, phase, secondsLeft })
   return { ...row, status, mode: status, isLive: true, phase, secondsLeft };
 }
 
-const indexedWindow = (page, pageSize, hasLive) => ({
+export const roundHistoryPageWindow = (page, pageSize, hasLive) => ({
   offset: hasLive && page > 0 ? page * pageSize - 1 : page * pageSize,
   pageSize: hasLive && page === 0 ? pageSize - 1 : pageSize,
 });
@@ -136,7 +136,7 @@ async function buildClaimable(settled, mine, account) {
 async function loadFromIndex({ page, pageSize, account, filter, current, liveRound }) {
   const hasLive = filter === 'all' && Boolean(liveRound);
   const loadPage = async (targetPage) => {
-    const window = indexedWindow(targetPage, pageSize, hasLive);
+    const window = roundHistoryPageWindow(targetPage, pageSize, hasLive);
     return loadIndexedRounds({
       page: targetPage,
       pageSize: window.pageSize,
@@ -158,13 +158,13 @@ async function loadFromIndex({ page, pageSize, account, filter, current, liveRou
   // The query already ran at the requested page; if that page no longer exists (filter changed,
   // history shrank) re-run at the clamped one rather than rendering an empty table.
   const finalIndexed = safePage === page ? indexed : await loadPage(safePage);
+  if (!finalIndexed) return null;
   const rowsRaw = finalIndexed?.rows ?? [];
-  const slice = hasLive && safePage === 0 ? [liveRound, ...rowsRaw] : rowsRaw.map(decorate);
-  if (hasLive && safePage === 0) {
-    for (let index = 1; index < slice.length; index += 1) slice[index] = decorate(slice[index]);
-  }
+  const slice = hasLive && safePage === 0
+    ? [liveRound, ...rowsRaw.map(decorate)]
+    : rowsRaw.map(decorate);
 
-  const total = hasLive ? filteredTotal : finalIndexed.filteredTotal;
+  const total = hasLive ? filteredTotal : finalIndexed.total;
   const summary = hasLive
     ? { ...finalIndexed.summary, count: Math.max(finalIndexed.summary.count, total) }
     : finalIndexed.summary;
