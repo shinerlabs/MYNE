@@ -19,6 +19,7 @@ import {
   SOLANA_MAINNET_GENESIS_HASH,
   SWITCHBOARD_MAINNET_PROGRAM,
 } from './production-network-policy.mjs';
+import { PROVIDER_PREPARATION_LEAD_SECONDS } from './round-schedule-policy.mjs';
 
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const SWITCHBOARD_PROGRAM_ID = new PublicKey(SWITCHBOARD_MAINNET_PROGRAM);
@@ -46,6 +47,11 @@ const readKeypair = async (path) => {
 
 const rpcUrl = requiredEnv('MAINNET_RPC_URL');
 const payer = await readKeypair(requiredEnv('ANCHOR_WALLET'));
+const randomnessAuthority = new PublicKey(requiredEnv('MAINNET_RANDOMNESS_AUTHORITY'));
+const firstServerRoundText = requiredEnv('MAINNET_FIRST_SERVER_ROUND_ID');
+assert.match(firstServerRoundText, /^\d+$/, 'MAINNET_FIRST_SERVER_ROUND_ID must be an unsigned integer');
+const firstServerRoundId = Number(firstServerRoundText);
+assert.ok(Number.isSafeInteger(firstServerRoundId), 'MAINNET_FIRST_SERVER_ROUND_ID is too large');
 const supabaseUrl = requiredEnv('SUPABASE_URL').replace(/\/$/, '');
 const serviceRole = requiredEnv('SUPABASE_SERVICE_ROLE_KEY');
 assert.match(rpcUrl, /^https:\/\//, 'MAINNET_RPC_URL must use HTTPS');
@@ -55,6 +61,8 @@ const [config] = PublicKey.findProgramAddressSync([Buffer.from('config')], PROGR
 requireConfirmation('CONFIRM_SOLANA_GENESIS_HASH', SOLANA_MAINNET_GENESIS_HASH);
 requireConfirmation('CONFIRM_MAINNET_CONFIG', config.toBase58());
 requireConfirmation('CONFIRM_SERVER_RANDOMNESS_PROGRAM', PROGRAM_ID.toBase58());
+requireConfirmation('CONFIRM_MAINNET_RANDOMNESS_AUTHORITY', randomnessAuthority.toBase58());
+requireConfirmation('CONFIRM_MAINNET_FIRST_SERVER_ROUND_ID', firstServerRoundText);
 requireConfirmation('CONFIRM_SWITCHBOARD_ROUNDS_DRAINED', 'VERIFIED_NO_UNRESOLVED_ROUNDS');
 requireConfirmation('CONFIRM_SERVER_RANDOMNESS_REVIEW', 'APPROVED_EXACT_RELEASE');
 
@@ -72,6 +80,10 @@ const configState = await program.account.protocolConfig.fetch(config, 'finalize
 assert.equal(Number(configState.version), 6, 'Protocol is not fee schedule v6');
 assert.equal(configState.paused, true, 'Protocol must remain paused during the provider switch');
 assert.ok(configState.admin.equals(payer.publicKey), 'Signer is not the protocol admin');
+assert.ok(
+  configState.randomnessAuthority.equals(randomnessAuthority),
+  'Configured randomness authority differs from the reviewed server keeper',
+);
 assert.ok(
   configState.randomnessProgram.equals(SWITCHBOARD_PROGRAM_ID)
     || configState.randomnessProgram.equals(PROGRAM_ID),
@@ -95,8 +107,11 @@ const chainTime = await connection.getBlockTime(finalizedSlot);
 assert.ok(Number.isInteger(chainTime), 'Finalized chain time is unavailable');
 const initializedAt = Number(configState.initializedAt.toString());
 const roundDurationSeconds = Number(configState.roundDurationSeconds.toString());
-const currentRound = Math.max(0, Math.floor((chainTime - initializedAt) / roundDurationSeconds));
-const suggestedFirstServerRoundId = currentRound + 1;
+const firstPreparationStartsAt = initializedAt
+  + firstServerRoundId * roundDurationSeconds
+  - PROVIDER_PREPARATION_LEAD_SECONDS;
+const firstOpenedAt = initializedAt + firstServerRoundId * roundDurationSeconds;
+assert.ok(firstOpenedAt > chainTime, 'First server round must still be in the future');
 
 if (configState.randomnessProgram.equals(PROGRAM_ID)) {
   console.log(JSON.stringify({
@@ -105,7 +120,10 @@ if (configState.randomnessProgram.equals(PROGRAM_ID)) {
     alreadyServerRandomness: true,
     config: config.toBase58(),
     randomnessProgram: PROGRAM_ID.toBase58(),
-    suggestedFirstServerRoundId,
+    randomnessAuthority: randomnessAuthority.toBase58(),
+    firstServerRoundId,
+    firstPreparationStartsAt,
+    firstOpenedAt,
   }, null, 2));
   process.exit(0);
 }
@@ -143,6 +161,9 @@ console.log(JSON.stringify({
   config: config.toBase58(),
   previousRandomnessProgram: configState.randomnessProgram.toBase58(),
   randomnessProgram: PROGRAM_ID.toBase58(),
-  suggestedFirstServerRoundId,
+  randomnessAuthority: randomnessAuthority.toBase58(),
+  firstServerRoundId,
+  firstPreparationStartsAt,
+  firstOpenedAt,
   unitsConsumed: simulation.value.unitsConsumed ?? null,
 }, null, 2));

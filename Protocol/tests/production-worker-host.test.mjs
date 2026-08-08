@@ -6,6 +6,7 @@ import {
   DEFAULT_PROGRAM_ID,
   WORKER_NAMES,
   childEnvironment,
+  firstManagedRoundId,
   keypairFromBase64,
   liveWorkerSpecs,
   workerMode,
@@ -83,6 +84,16 @@ test('server mode selects the durable commit-reveal keeper without removing Swit
   }), /switchboard or server/);
 });
 
+test('server cutover refuses to manage intentionally skipped earlier round ids', () => {
+  assert.equal(firstManagedRoundId({}, 'switchboard'), 0);
+  assert.equal(firstManagedRoundId({ MYNE_FIRST_SERVER_ROUND_ID: '342' }, 'server'), 342);
+  assert.throws(() => firstManagedRoundId({}, 'server'), /MYNE_FIRST_SERVER_ROUND_ID is required/);
+  assert.throws(
+    () => firstManagedRoundId({ MYNE_FIRST_SERVER_ROUND_ID: '-1' }, 'server'),
+    /unsigned integer/,
+  );
+});
+
 test('round workers overlap by explicit id instead of waiting for the prior reveal process', async () => {
   const source = await readFile(
     new URL('../scripts/production-worker-host.mjs', import.meta.url),
@@ -91,7 +102,10 @@ test('round workers overlap by explicit id instead of waiting for the prior reve
   assert.match(source, /roundIdsToPrepare\(\{/);
   assert.match(source, /MYNE_ROUND_ID: id/);
   assert.match(source, /const instance = roundInstance\(id\)/);
-  assert.match(source, /schedule\(scheduleRoundWorkers, 500\)/);
+  assert.match(source, /schedule\(\(\) => void scheduleRoundWorkers\(\), 500\)/);
+  assert.match(source, /if \(roundId >= minimumManagedRoundId\) startRoundWorker\(roundId\)/);
+  assert.match(source, /code === ROUND_KEEPER_DEFERRED_EXIT_CODE[\s\S]*launchedRounds\.delete\(id\)/);
+  assert.match(source, /code === ROUND_KEEPER_MISSED_EXIT_CODE[\s\S]*state\.ready = false/);
   assert.doesNotMatch(source, /spec\.oneShot && code === 0[\s\S]*5_000/);
 });
 

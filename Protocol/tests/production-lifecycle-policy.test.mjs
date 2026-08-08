@@ -71,6 +71,27 @@ test('administrative transaction scripts require an exact RPC genesis acknowledg
   }
 });
 
+test('server randomness provider cutover preview is paused, drained, and simulation-only', async () => {
+  const source = await readFile(
+    new URL('../scripts/preview-mainnet-server-randomness-switch.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /configState\.paused, true/);
+  assert.match(source, /configState\.admin\.equals\(payer\.publicKey\)/);
+  assert.match(source, /CONFIRM_SWITCHBOARD_ROUNDS_DRAINED/);
+  assert.match(source, /resolved=eq\.false/);
+  assert.match(source, /CONFIRM_SERVER_RANDOMNESS_PROGRAM/);
+  assert.match(source, /CONFIRM_MAINNET_RANDOMNESS_AUTHORITY/);
+  assert.match(source, /configState\.randomnessAuthority\.equals\(randomnessAuthority\)/);
+  assert.match(source, /CONFIRM_MAINNET_FIRST_SERVER_ROUND_ID/);
+  assert.match(source, /firstOpenedAt > chainTime/);
+  assert.match(source, /CONFIRM_SERVER_RANDOMNESS_REVIEW/);
+  assert.match(source, /setRandomnessProgram\(PROGRAM_ID\)/);
+  assert.match(source, /simulateTransaction/);
+  assert.match(source, /submissionSupported: false/);
+  assert.doesNotMatch(source, /sendRawTransaction|sendTransaction/);
+});
+
 test('MYNE metadata creation is fixed, hosted, simulated, and explicitly submitted', async () => {
   const source = await readFile(
     new URL('../scripts/create-mainnet-token-metadata.mjs', import.meta.url),

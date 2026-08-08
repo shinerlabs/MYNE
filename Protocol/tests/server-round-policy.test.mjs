@@ -73,6 +73,8 @@ test('server keeper binds before start, preserves the future-slot mix, and settl
   assert.ok(lock < futureSlot && futureSlot < settle, 'Reveal must mix a future SlotHashes entry');
   assert.match(source, /slotHashes: SYSVAR_SLOT_HASHES_PUBKEY/);
   assert.match(source, /replaceRecentBlockhash:\s*true/);
+  assert.match(source, /reason: 'protocol-paused'[\s\S]*ROUND_KEEPER_DEFERRED_EXIT_CODE/);
+  assert.match(source, /scheduledOpenedAt[\s\S]*ROUND_KEEPER_MISSED_EXIT_CODE/);
   assert.doesNotMatch(source, /roundState\.(?:totalReceipts|grossDeployedLamports)\s*[!<>=]/);
   assert.doesNotMatch(source, /@switchboard-xyz/);
 });
