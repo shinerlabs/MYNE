@@ -63,11 +63,16 @@ const [configState, gate] = await Promise.all([
 assert.equal(configState.version, 6, 'Protocol is not fee schedule v6');
 assert.ok(configState.admin.equals(payer.publicKey), 'Signer is not the protocol admin');
 assert.ok(configState.mint.equals(mint), 'Configured MYNE mint differs');
-assert.equal(
-  configState.randomnessProgram.toBase58(),
-  SWITCHBOARD_MAINNET_PROGRAM,
-  'Protocol is not configured for Switchboard Mainnet',
+const configuredRandomnessProgram = configState.randomnessProgram.toBase58();
+assert.ok(
+  configuredRandomnessProgram === SWITCHBOARD_MAINNET_PROGRAM
+    || configuredRandomnessProgram === PROGRAM_ID.toBase58(),
+  'Protocol randomness provider is not an approved Mainnet provider',
 );
+requireConfirmation('CONFIRM_MAINNET_RANDOMNESS_PROGRAM', configuredRandomnessProgram);
+if (configuredRandomnessProgram === PROGRAM_ID.toBase58()) {
+  requireConfirmation('CONFIRM_SERVER_RANDOMNESS_REVIEW', 'APPROVED_EXACT_RELEASE');
+}
 assert.equal(gate.verified, true, 'Liquidity gate is not verified');
 assert.ok(gate.pool.equals(reviewedPool), 'Registered pool differs from the reviewed pool');
 const poolState = await inspectMeteoraPool(connection, reviewedPool, mint);
@@ -84,6 +89,7 @@ if (!configState.paused) {
     config: config.toBase58(),
     liquidityGate: liquidityGate.toBase58(),
     pool: reviewedPool.toBase58(),
+    randomnessProgram: configuredRandomnessProgram,
   }, null, 2));
   process.exit(0);
 }
@@ -124,6 +130,7 @@ const preview = {
   config: config.toBase58(),
   liquidityGate: liquidityGate.toBase58(),
   pool: reviewedPool.toBase58(),
+  randomnessProgram: configuredRandomnessProgram,
   myneVault: poolState.myneVault.toBase58(),
   solVault: poolState.solVault.toBase58(),
   myneAmount: poolState.myneAmount.toString(),

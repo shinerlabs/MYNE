@@ -76,6 +76,9 @@ assert.equal(Number(lifecycleConfig.version), 6, 'Lifecycle keeper requires prot
 requireMatchingSolanaNetwork({
   genesisHash: await provider.connection.getGenesisHash(),
   randomnessProgram: lifecycleConfig.randomnessProgram.toBase58(),
+  serverRandomnessProgram: process.env.MYNE_SERVER_RANDOMNESS_ACK === PROGRAM_ID.toBase58()
+    ? PROGRAM_ID.toBase58()
+    : null,
 });
 const roundPda = (roundId) => pda('round', u64Seed(roundId));
 const minerPda = (authority) => pda('miner', new PublicKey(authority).toBuffer());

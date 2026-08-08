@@ -107,6 +107,9 @@ assert.equal(Number(indexedConfig.version), 6, 'Round indexer requires protocol 
 const indexedNetwork = requireMatchingSolanaNetwork({
   genesisHash: await provider.connection.getGenesisHash(),
   randomnessProgram: indexedConfig.randomnessProgram.toBase58(),
+  serverRandomnessProgram: process.env.MYNE_SERVER_RANDOMNESS_ACK === PROGRAM_ID.toBase58()
+    ? PROGRAM_ID.toBase58()
+    : null,
 });
 if (indexedNetwork === 'mainnet-beta') {
   assert.equal(

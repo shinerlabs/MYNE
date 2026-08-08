@@ -60,6 +60,9 @@ test('live supervisor defines every required worker with separated wallets', () 
   for (const spec of specs.filter((entry) => entry.name !== 'buyback-keeper')) {
     assert.equal(spec.walletPath, '/tmp/randomness.json');
   }
+  for (const spec of specs) {
+    assert.equal(spec.env.MYNE_SERVER_RANDOMNESS_ACK, undefined);
+  }
 });
 
 test('server mode selects the durable commit-reveal keeper without removing Switchboard support', () => {
@@ -75,6 +78,12 @@ test('server mode selects the durable commit-reveal keeper without removing Swit
   assert.equal(keeper.env.SERVER_RANDOMNESS_KEEPER_LIVE, DEFAULT_PROGRAM_ID);
   assert.equal(keeper.env.SERVER_RANDOMNESS_STATE_DIR, '/data/server-randomness');
   assert.equal(keeper.perRound, true);
+  for (const name of ['round-indexer', 'round-lifecycle', 'buyback-keeper']) {
+    assert.equal(
+      specs.find((spec) => spec.name === name).env.MYNE_SERVER_RANDOMNESS_ACK,
+      DEFAULT_PROGRAM_ID,
+    );
+  }
   assert.throws(() => liveWorkerSpecs({
     programId: DEFAULT_PROGRAM_ID,
     randomnessWalletPath: '/tmp/randomness.json',

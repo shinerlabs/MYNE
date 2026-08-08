@@ -247,6 +247,9 @@ test('Mainnet liquidity registration decodes Meteora and is simulation-first', a
   assert.match(register, /confirmTransaction[\s\S]*'finalized'/);
   assert.match(activate, /CONFIRM_PRODUCTION_SERVICES_READY/);
   assert.match(activate, /CONFIRM_INDEPENDENT_SECURITY_REVIEW/);
+  assert.match(activate, /CONFIRM_MAINNET_RANDOMNESS_PROGRAM/);
+  assert.match(activate, /CONFIRM_SERVER_RANDOMNESS_REVIEW/);
+  assert.match(activate, /configuredRandomnessProgram === PROGRAM_ID\.toBase58\(\)/);
   assert.match(activate, /simulateTransaction/);
   assert.match(activate, /SUBMIT_MAINNET_ACTIVATE/);
   assert.match(activate, /baseVault: poolState\.myneVault/);

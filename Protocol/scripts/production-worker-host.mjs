@@ -83,12 +83,16 @@ export function liveWorkerSpecs({
     randomnessMode === 'switchboard' || randomnessMode === 'server',
     'randomnessMode must be switchboard or server',
   );
+  const serverProviderAcknowledgement = randomnessMode === 'server'
+    ? { MYNE_SERVER_RANDOMNESS_ACK: programId }
+    : {};
   return [
     {
       name: 'round-indexer',
       script: 'round-indexer.mjs',
       walletPath: randomnessWalletPath,
       env: {
+        ...serverProviderAcknowledgement,
         FAIL_FAST: '1',
         ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE: '1',
       },
@@ -97,13 +101,14 @@ export function liveWorkerSpecs({
       name: 'round-lifecycle',
       script: 'round-lifecycle-keeper.mjs',
       walletPath: randomnessWalletPath,
-      env: { FAIL_FAST: '1' },
+      env: { ...serverProviderAcknowledgement, FAIL_FAST: '1' },
     },
     {
       name: 'buyback-keeper',
       script: 'buyback-keeper.mjs',
       walletPath: buybackWalletPath,
       env: {
+        ...serverProviderAcknowledgement,
         FAIL_FAST: '1',
         DRY_RUN: '0',
         BUYBACK_KEEPER_LIVE: programId,

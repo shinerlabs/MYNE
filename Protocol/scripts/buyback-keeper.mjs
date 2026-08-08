@@ -539,6 +539,9 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const network = requireMatchingSolanaNetwork({
     genesisHash: await provider.connection.getGenesisHash(),
     randomnessProgram: configState.randomnessProgram.toBase58(),
+    serverRandomnessProgram: process.env.MYNE_SERVER_RANDOMNESS_ACK === PROGRAM_ID_TEXT
+      ? PROGRAM_ID_TEXT
+      : null,
   });
   // Devnet intentionally runs without Meteora liquidity. The protocol still
   // accounts for the 1% allocation on-chain, but there is no swap to execute
