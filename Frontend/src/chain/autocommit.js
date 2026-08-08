@@ -13,6 +13,8 @@ import { minerPda, minerRegistrationInstruction } from './miner-registration.js'
 // round until its prepaid balance can no longer cover the configured deployment.
 export const UNLIMITED_PLAYS = 4294967295;
 export const MAX_PLAYS_PER_EXECUTION = 1n;
+export const AUTO_REWARD_BURN_FLAG = 0x01;
+export const AUTO_RECYCLE_SOL_FLAG = 0x02;
 const planPda = (account) => derivePda('auto_plan', new PublicKey(account));
 const toBig = (value) => BigInt(value?.toString?.() ?? value ?? 0);
 export const AUTO_PLAN_FUNDING_BPS = 9_000n;
@@ -26,21 +28,34 @@ export function evenAllocation(count) {
   return values;
 }
 
+export function encodeAutoPlanRewardMode({ rewardMode = 'accumulate', autoClaim = false } = {}) {
+  return (rewardMode === 'burn' ? AUTO_REWARD_BURN_FLAG : 0)
+    | (autoClaim ? AUTO_RECYCLE_SOL_FLAG : 0);
+}
+
+export function decodeAutoPlanRewardMode(value) {
+  const code = Number(value?.toString?.() ?? value ?? 0);
+  return {
+    autoClaim: (code & AUTO_RECYCLE_SOL_FLAG) !== 0,
+    rewardMode: (code & AUTO_REWARD_BURN_FLAG) !== 0 ? 'burn' : 'accumulate',
+  };
+}
+
 export async function readPlan(account = getAccount()) {
   if (!account) return null;
   const plan = await fetchProtocolAccount('AutoPlan', planPda(account));
   if (!plan) return null;
   const amounts = plan.amounts.map(toBig);
+  const mode = decodeAutoPlanRewardMode(plan.rewardMode);
   return {
-    canClaim: false,
     enabled: plan.active,
     nextRoundId: toBig(plan.lastRound) === 2n ** 64n - 1n ? 0n : toBig(plan.lastRound) + 1n,
     playsRemaining: UNLIMITED_PLAYS,
     unlimited: true,
     amountPerPlay: amounts.reduce((sum, amount) => sum + amount, 0n),
     balance: toBig(plan.balanceLamports),
-    autoClaim: false,
-    rewardMode: Number(plan.rewardMode ?? 0) === 1 ? 'burn' : 'accumulate',
+    autoClaim: mode.autoClaim,
+    rewardMode: mode.rewardMode,
     tiles: amounts.flatMap((amount, index) => amount > 0n ? [index + 1] : []),
     amounts,
   };
@@ -124,7 +139,9 @@ async function assertFundingWithinWalletBudget(value, authority, setupReserve = 
   }
 }
 
-export async function configurePlan({ tiles, ethPerTile, deposit, rewardMode = 'accumulate' }) {
+export async function configurePlan({
+  tiles, ethPerTile, deposit, rewardMode = 'accumulate', autoClaim = false,
+}) {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
   const configState = await getProtocolConfig();
@@ -147,7 +164,7 @@ export async function configurePlan({ tiles, ethPerTile, deposit, rewardMode = '
     const registration = await minerRegistrationInstruction({ program, authority });
     if (registration.instruction) instructions.push(registration.instruction);
   }
-  const rewardModeCode = rewardMode === 'burn' ? 1 : 0;
+  const rewardModeCode = encodeAutoPlanRewardMode({ rewardMode, autoClaim });
   if (!exists) {
     instructions.push(await program.methods.createAutoPlan(amounts.map(asBn), asBn(deposit), rewardModeCode).accounts({
       config: protocolPdas.config, autoPlan, authority, systemProgram: SystemProgram.programId,
@@ -186,5 +203,3 @@ export async function cancelPlan() {
   }).instruction()]);
 }
 export const withdrawFromPlan = cancelPlan;
-export async function isClaimDelegate() { return false; }
-export async function approveClaimDelegate() { throw new Error('Auto-claim is not enabled on Solana; receipt claims remain user-signed'); }

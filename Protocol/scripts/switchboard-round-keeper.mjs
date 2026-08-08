@@ -27,7 +27,10 @@ import {
   ROUND_KEEPER_DEFERRED_EXIT_CODE,
   ROUND_KEEPER_MISSED_EXIT_CODE,
 } from './round-schedule-policy.mjs';
-import { executeAutoPlansDuringWindow } from './auto-plan-executor.mjs';
+import {
+  autoPlanExecutionFunding,
+  executeAutoPlansDuringWindow,
+} from './auto-plan-executor.mjs';
 
 const { AnchorProvider, Program, Wallet } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
@@ -376,21 +379,41 @@ if ((await chainTimeSeconds()) < bettingEndsAt && asBigInt(roundState.randomness
       const plan = await myne.account.autoPlan.fetchNullable(autoPlan);
       if (!plan || !plan.authority.equals(authority)) return null;
       const perRound = plan.amounts.reduce((sum, amount) => sum + BigInt(amount.toString()), 0n);
-      if (!plan.active || BigInt(plan.balanceLamports.toString()) < perRound + receiptRent
+      const rewardMode = Number(plan.rewardMode ?? 0);
+      const reinvestSol = (rewardMode & 2) !== 0;
+      const stakePosition = pda('stake_position', authority.toBuffer());
+      const position = reinvestSol
+        ? await myne.account.stakePosition.fetchNullable(stakePosition)
+        : null;
+      if (reinvestSol && (!position || !position.authority.equals(authority))) return null;
+      const funding = autoPlanExecutionFunding({
+        rewardMode,
+        balanceLamports: plan.balanceLamports,
+        pendingSol: position?.pendingSol ?? 0,
+        requiredLamports: perRound + receiptRent,
+      });
+      if (!plan.active
+          || !funding.executable
           || BigInt(plan.lastRound.toString()) === ROUND_ID) return null;
       const nonce = BigInt(plan.nextNonce.toString());
       const nonceSeed = Buffer.alloc(8);
       nonceSeed.writeBigUInt64LE(nonce);
       const miner = pda('miner', authority.toBuffer());
       const receipt = pda('bet', roundSeed, authority.toBuffer(), nonceSeed);
-      const ix = await myne.methods.executeAutoPlan(ROUND_ID_BN, new anchor.BN(nonce.toString())).accounts({
+      const ixs = [];
+      if (reinvestSol && funding.pendingSol > 0n) {
+        ixs.push(await myne.methods.reinvestAutoPlanRewards().accounts({
+          config, autoPlan, stakePool, stakePosition, executor: keypair.publicKey,
+        }).instruction());
+      }
+      ixs.push(await myne.methods.executeAutoPlan(ROUND_ID_BN, new anchor.BN(nonce.toString())).accounts({
         config, autoPlan, miner, round, receipt, executor: keypair.publicKey,
         randomnessAccount: randomnessPubkey,
         systemProgram: SystemProgram.programId,
-      }).instruction();
-      return { authority: authority.toBase58(), ix };
+      }).instruction());
+      return { authority: authority.toBase58(), ixs };
     },
-    sendBatch: (batch) => sendKeeperInstructions(batch.map(({ ix }) => ix)),
+    sendBatch: (batch) => sendKeeperInstructions(batch.flatMap(({ ixs }) => ixs)),
     onEvent: (event) => console[event.error ? 'error' : 'log'](JSON.stringify({
       ...event, round: ROUND_ID.toString(),
     })),

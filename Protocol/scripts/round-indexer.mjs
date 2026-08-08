@@ -537,6 +537,15 @@ async function processEvent(event, signature, slot, { canonicalReplay = false } 
       }, 'authority');
       break;
     }
+    case 'AutoPlanRewardsReinvested': {
+      await upsert('mine_auto_plans', {
+        authority: new PublicKey(data.authority).toBase58(),
+        balance_lamports: asString(data.balanceLamports),
+        updated_slot: slot,
+        updated_at: new Date().toISOString(),
+      }, 'authority');
+      break;
+    }
     case 'AutoPlanCancelled': {
       await upsert('mine_auto_plans', {
         authority: new PublicKey(data.authority).toBase58(),

@@ -2,8 +2,8 @@ import { formatEther, parseEther } from './units.js';
 import { PublicKey } from '@solana/web3.js';
 
 import {
-  UNLIMITED_PLAYS, approveClaimDelegate, cancelPlan, configurePlan, depositToPlan,
-  autoPlanSetupReserve, isClaimDelegate, maxAutoPlanFundingLamports, readFeeParams, readPlan, requiredDeposit,
+  UNLIMITED_PLAYS, cancelPlan, configurePlan, depositToPlan,
+  autoPlanSetupReserve, maxAutoPlanFundingLamports, readFeeParams, readPlan, requiredDeposit,
 } from './autocommit.js';
 
 export { UNLIMITED_PLAYS };
@@ -756,7 +756,7 @@ export const effectiveEthPerTile = (entered, tileCount = 1) => {
 
 export async function mine({
   tiles, ethPerTile, auto = false, plays = 1, fundRounds = 1, autoClaim = false,
-  rewardMode = 'accumulate',
+  rewardMode = 'accumulate', fundingMode = 'max', fixedFundingSol = '',
 }) {
   if (!state.clockReady) return notify('Synchronizing with Solana — please try again in a moment');
   if (!getAccount()) return connectWallet();
@@ -776,7 +776,9 @@ export async function mine({
     if ((state.plan?.balance ?? 0n) > 0n) {
       return notify('Withdraw the previous Auto-round balance before starting another plan');
     }
-    return configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoClaim, rewardMode });
+    return configureAutoPlan({
+      tiles, ethPerTile, plays, fundRounds, autoClaim, rewardMode, fundingMode, fixedFundingSol,
+    });
   }
 
   // The lottery rejects future round ids and rejects the current id after betting closes. A
@@ -786,7 +788,8 @@ export async function mine({
       return notify('Withdraw or finish the existing Auto-round plan before queuing another bid');
     }
     return configureAutoPlan({
-      tiles, ethPerTile, plays: 1, fundRounds: 1, autoClaim: false, queueOnly: true,
+      tiles, ethPerTile, plays: 1, fundRounds: 1, autoClaim: false,
+      fundingMode: 'rounds', queueOnly: true,
     });
   }
 
@@ -817,21 +820,35 @@ export async function mine({
 }
 
 /**
- * Set up an auto-round plan. `autoClaim` forces unlimited plays in the contract, so callers
- * must reconcile that beforehand rather than promising "N rounds with auto-claim".
+ * Set up an unlimited prepaid auto-round plan. Maximum funding derives an exact round count;
+ * fixed funding preserves the user's exact SOL budget and may leave a withdrawable remainder.
  */
-async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoClaim, rewardMode = 'accumulate', queueOnly = false }) {
-  const unlimited = autoClaim || plays === UNLIMITED_PLAYS;
-  const effectivePlays = unlimited ? UNLIMITED_PLAYS : plays;
-
+async function configureAutoPlan({
+  tiles, ethPerTile, plays, fundRounds, autoClaim, rewardMode = 'accumulate',
+  fundingMode = 'max', fixedFundingSol = '', queueOnly = false,
+}) {
   const feeParams = await readFeeParams();
   const { accountDeposit, maxFee } = feeParams;
   const amountPerPlay = parseEther(String(ethPerTile)) * BigInt(tiles.length);
-  // Funding is independent of play count: an unlimited plan runs until its balance drains,
-  // so the user chooses how many rounds to prepay and can top up at any time.
-  const deposit = requiredDeposit({
-    amountPerPlay, fundRounds, maxFee, accountDeposit, needsAccount: !state.hasAccount,
-  });
+  const perRoundCost = amountPerPlay + maxFee;
+  let deposit;
+  if (fundingMode === 'fixed') {
+    try { deposit = parseEther(String(fixedFundingSol)); }
+    catch (error) { return notify(error.message); }
+    if (deposit <= 0n) return notify('Enter the SOL amount you want to fund');
+    if (deposit < perRoundCost) {
+      return notify(`Fixed funding must cover at least one round (${formatEther(perRoundCost)} SOL incl. receipt rent)`);
+    }
+  } else {
+    // Funding is independent of play count: an unlimited plan runs until its balance drains,
+    // so Max and one-round queues prepay an exact number of full executions.
+    deposit = requiredDeposit({
+      amountPerPlay, fundRounds, maxFee, accountDeposit, needsAccount: !state.hasAccount,
+    });
+  }
+  if (deposit < perRoundCost) {
+    return notify(`This wallet cannot safely fund one Auto-round (${formatEther(perRoundCost)} SOL incl. receipt rent)`);
+  }
 
   if (deposit > state.balance) {
     return notify(`Need ${formatEther(deposit)} SOL to fund this plan (incl. executor fees)`);
@@ -844,21 +861,13 @@ async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoCla
     return notify(`Auto-round can use at most ${formatEther(maximumFunding)} SOL (90% of your wallet balance)`);
   }
 
-  // Auto-claim needs AutoCommit approved as a lottery delegate, otherwise the executor's
-  // claims silently no-op. One-time, so only prompt when it isn't already granted.
-  if (unlimited && autoClaim && !(await isClaimDelegate())) {
-    const approved = await runTx(
-      'Approving auto-claim (one-time)…',
-      approveClaimDelegate,
-    );
-    if (approved === false) return; // user rejected — don't configure a plan that can't claim
-  }
-
   await runTx(
     queueOnly
       ? 'Queuing bid for the next round…'
-      : unlimited ? 'Setting up auto-round…' : `Setting up ${plays} auto rounds…`,
-    () => configurePlan({ tiles, ethPerTile, plays: effectivePlays, autoClaim, deposit, rewardMode }),
+      : fundingMode === 'fixed'
+        ? `Funding Auto-round with ${formatEther(deposit)} SOL…`
+        : plays === UNLIMITED_PLAYS ? 'Setting up auto-round…' : `Setting up ${plays} auto rounds…`,
+    () => configurePlan({ tiles, ethPerTile, autoClaim, deposit, rewardMode }),
     async () => { await Promise.all([refreshPlan(), refreshMiner()]); },
   );
 }
@@ -886,12 +895,6 @@ export async function topUpPlan(amountSol) {
   await runTx(`Adding ${formatEther(value)} SOL to Auto-round…`, () => depositToPlan(value), async () => {
     await Promise.all([refreshPlan(), refreshMiner()]);
   });
-}
-
-/** Grant the delegate approval an existing auto-claim plan is missing. */
-export async function approveAutoClaim() {
-  if (!getAccount()) return connectWallet();
-  await runTx('Approving auto-claim…', approveClaimDelegate, refreshPlan);
 }
 
 export async function cancelAutoPlan() {

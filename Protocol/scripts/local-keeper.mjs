@@ -8,6 +8,7 @@ import web3 from '@solana/web3.js';
 import * as splToken from '@solana/spl-token';
 
 import { demoCoverageBids } from './demo-miner-bids.mjs';
+import { autoPlanExecutionFunding } from './auto-plan-executor.mjs';
 
 const { AnchorProvider, BN, Program, setProvider } = anchor;
 const { Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } = web3;
@@ -408,22 +409,39 @@ async function executeAutoPlans(roundId) {
   ));
   for (const { publicKey: autoPlan, account: plan } of plans) {
     const total = plan.amounts.reduce((sum, amount) => sum + BigInt(amount.toString()), 0n);
+    const rewardMode = Number(plan.rewardMode ?? 0);
+    const reinvestSol = (rewardMode & 2) !== 0;
+    const stakePosition = stakePositionPda(plan.authority);
+    const position = reinvestSol
+      ? await program.account.stakePosition.fetchNullable(stakePosition)
+      : null;
+    const funding = autoPlanExecutionFunding({
+      rewardMode,
+      balanceLamports: plan.balanceLamports,
+      pendingSol: position?.pendingSol ?? 0,
+      requiredLamports: total + receiptRent,
+    });
     if (!plan.active
-        || BigInt(plan.balanceLamports.toString()) < total + receiptRent
+        || !funding.executable
         || BigInt(plan.lastRound.toString()) === roundId) continue;
     const nonce = BigInt(plan.nextNonce.toString());
     const receipt = receiptPda(roundId, plan.authority, nonce);
     if (await provider.connection.getAccountInfo(receipt, 'confirmed')) continue;
-    await program.methods.executeAutoPlan(new BN(roundId.toString()), new BN(nonce.toString())).accounts({
-      config,
-      autoPlan,
-      miner: minerPda(plan.authority),
-      round,
-      receipt,
-      randomnessAccount: null,
-      executor: payer.publicKey,
+    const instructions = [];
+    if (reinvestSol && funding.pendingSol > 0n) {
+      instructions.push(await program.methods.reinvestAutoPlanRewards().accounts({
+        config, autoPlan, stakePool, stakePosition, executor: payer.publicKey,
+      }).instruction());
+    }
+    instructions.push(await program.methods.executeAutoPlan(
+      new BN(roundId.toString()), new BN(nonce.toString()),
+    ).accounts({
+      config, autoPlan, miner: minerPda(plan.authority), round, receipt,
+      randomnessAccount: null, executor: payer.publicKey,
       systemProgram: SystemProgram.programId,
-    }).rpc();
+    }).instruction());
+    const transaction = new Transaction().add(...instructions);
+    await provider.sendAndConfirm(transaction, []);
     log('auto-plan-executed', { roundId: roundId.toString(), authority: plan.authority.toBase58(), lamports: total.toString() });
   }
 }

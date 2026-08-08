@@ -4379,3 +4379,119 @@ body[data-route="rounds"] .feature-shell[data-page="rounds"] .round-list {
     height: auto !important;
   }
 }
+
+/* Auto-round funding + SOL reinvest ----------------------------------------------------------
+   Both rows are explicit financial choices. Keep the exact SOL input and the all-rewards
+   disclosure full-width, below the reward policy, on every composer breakpoint. */
+body[data-route="mine"] .auto-funding-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-column: 1 / -1 !important;
+  align-items: center !important;
+  gap: 9px 12px !important;
+  min-height: 0 !important;
+  padding: 12px !important;
+  border: 1px solid rgba(255,255,255,.09) !important;
+  border-radius: 12px !important;
+  background: #101012 !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.025) !important;
+}
+
+body[data-route="mine"] .auto-funding-row[hidden],
+body[data-route="mine"] .auto-claim-row[hidden] {
+  display: none !important;
+}
+
+body[data-route="mine"] .auto-funding-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(58px, 1fr));
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 10px;
+  background: #18181a;
+}
+
+body[data-route="mine"] .auto-funding-options button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #8f9299;
+  font: 800 9px/1 var(--font-sans);
+  letter-spacing: .055em;
+}
+
+body[data-route="mine"] .auto-funding-options button:is(:hover, :focus-visible) {
+  background: #222225;
+  color: #e3e4e6;
+}
+
+body[data-route="mine"] .auto-funding-options button.active {
+  background: #f4f4f5;
+  color: #09090b;
+}
+
+body[data-route="mine"] .auto-funding-input {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 9px;
+  background: #18181a;
+}
+
+body[data-route="mine"] .auto-funding-input[hidden] { display: none !important; }
+
+body[data-route="mine"] .auto-funding-input input {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f7f7f8;
+  font: 650 16px/1 var(--font-number);
+}
+
+body[data-route="mine"] .auto-funding-input span {
+  color: #8f9299;
+  font: 800 9px/1 var(--font-sans);
+  letter-spacing: .08em;
+}
+
+body[data-route="mine"] .auto-claim-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-column: 1 / -1 !important;
+  align-items: center !important;
+  gap: 12px !important;
+  min-height: 58px !important;
+  padding: 11px 12px !important;
+  border: 1px solid rgba(255,255,255,.09) !important;
+  border-radius: 12px !important;
+  background: #101012 !important;
+  box-shadow: inset 0 1px rgba(255,255,255,.025) !important;
+}
+
+body[data-route="mine"] .auto-claim-row small {
+  max-width: 460px;
+  color: #8f9299 !important;
+  font: 600 9px/1.35 var(--font-sans) !important;
+}
+
+@media (min-width: 421px) {
+  body[data-route="mine"] .auto-funding-row { grid-row: 7 !important; }
+  body[data-route="mine"] .auto-claim-row { grid-row: 8 !important; }
+  body[data-route="mine"]:has(#auto-round.active) .deploy-panel > .auto-plan { grid-row: 9 !important; }
+  body[data-route="mine"]:has(#auto-round.active) .deploy-panel > .deploy { grid-row: 10 !important; }
+}
+
+@media (max-width: 420px) {
+  body[data-route="mine"] .auto-funding-row { grid-row: 9 !important; }
+  body[data-route="mine"] .auto-claim-row { grid-row: 10 !important; }
+  body[data-route="mine"]:has(#auto-round.active) .deploy-panel > .auto-plan { grid-row: 11 !important; }
+  body[data-route="mine"]:has(#auto-round.active) .deploy-panel > .deploy { grid-row: 12 !important; }
+}

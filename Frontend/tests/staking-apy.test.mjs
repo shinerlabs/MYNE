@@ -53,8 +53,8 @@ test('all APY surfaces share one formatter and explicit tier/position variants',
   assert.equal(formatApyPercent(1_200), '1,200%');
   assert.equal(formatApyPercent(100_000), '100,000%');
   assert.equal(formatApyPercent(100_000, { compact: true }), '100,000%');
-  assert.equal(formatApyPercent(100_000.01), '100,000%+');
-  assert.equal(formatApyPercent(30_000_000, { compact: true }), '100,000%+');
+  assert.equal(formatApyPercent(100_000.01), '100,000%');
+  assert.equal(formatApyPercent(30_000_000, { compact: true }), '30,000,000%');
   assert.equal(formatApyPercent(null), '—');
   assert.deepEqual(stakingApyVariants(12), { standard: 12, burn: 60 });
   assert.deepEqual(stakingApyVariants(null), { standard: null, burn: null });
@@ -359,6 +359,7 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.doesNotMatch(main, /formatApyPercent\([^\n]+compact: true/);
   assert.match(main, /setMetric\('#stake-burn-apy', formatApyPercent\(m\.apyBurnPct\)\)/);
   assert.match(main, /add\('staking\.apy', staking\.apyStandardPct, formatApyPercent\(staking\.apyStandardPct\)\)/);
+  assert.doesNotMatch(staking, /100,000%\+/);
   assert.doesNotMatch(main, /m\.aprPct \* 5/);
   assert.doesNotMatch(main, /const projectionRates/);
   assert.match(main, /stakingMetricsState = null;[\s\S]*#header-staking-apr[\s\S]*updateStakeFlexCard\(\)/);

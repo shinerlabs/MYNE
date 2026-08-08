@@ -3,11 +3,24 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
+  AUTO_RECYCLE_SOL_FLAG,
   affordableAutoPlanRounds,
   autoPlanSetupReserve,
+  decodeAutoPlanRewardMode,
+  encodeAutoPlanRewardMode,
   maxAutoPlanFundingLamports,
   requiredDeposit,
 } from '../src/chain/autocommit.js';
+
+test('Auto-round reward mode keeps burn in bit zero and SOL reinvest in bit one', () => {
+  assert.equal(AUTO_RECYCLE_SOL_FLAG, 0x02);
+  assert.equal(encodeAutoPlanRewardMode(), 0);
+  assert.equal(encodeAutoPlanRewardMode({ rewardMode: 'burn' }), 1);
+  assert.equal(encodeAutoPlanRewardMode({ autoClaim: true }), 2);
+  assert.equal(encodeAutoPlanRewardMode({ rewardMode: 'burn', autoClaim: true }), 3);
+  assert.deepEqual(decodeAutoPlanRewardMode(2), { autoClaim: true, rewardMode: 'accumulate' });
+  assert.deepEqual(decodeAutoPlanRewardMode(3), { autoClaim: true, rewardMode: 'burn' });
+});
 
 test('Auto-round keeps exactly 10% of wallet SOL outside plan funding', () => {
   assert.equal(maxAutoPlanFundingLamports(1_000n), 900n);
@@ -50,6 +63,35 @@ test('both initial funding and top-ups enforce the 90% boundary before submissio
   assert.match(autoCommit, /minerRegistrationInstruction/);
   assert.match(main, /plan\.rewardMode === 'burn'/);
   assert.doesNotMatch(main, /AUTO_FEE_WEI|AUTO_FEE_PER_ROUND|GAS_RESERVE_ETH/);
+});
+
+test('Auto-round offers an exact fixed SOL deposit without weakening the live 90% guard', async () => {
+  const [autoCommit, minePage, main] = await Promise.all([
+    readFile(new URL('../src/chain/autocommit.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/chain/mine-page.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(main, /data-auto-funding="max"[\s\S]*data-auto-funding="fixed"/);
+  assert.match(main, /id="auto-funding-amount"[\s\S]*Fixed SOL funding for Auto-round/);
+  assert.match(main, /fundingMode: autoFundingMode/);
+  assert.match(minePage, /fundingMode === 'fixed'[\s\S]*parseEther\(String\(fixedFundingSol\)\)/);
+  assert.match(minePage, /deposit < perRoundCost/);
+  assert.match(minePage, /deposit > maximumFunding/);
+  assert.match(autoCommit, /await assertFundingWithinWalletBudget\(deposit, authority, setupReserve\)/);
+});
+
+test('SOL reinvest is an on-chain plan flag and never falls back to wallet delegation', async () => {
+  const [autoCommit, minePage, main] = await Promise.all([
+    readFile(new URL('../src/chain/autocommit.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/chain/mine-page.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(autoCommit, /encodeAutoPlanRewardMode\(\{ rewardMode, autoClaim \}\)/);
+  assert.match(autoCommit, /autoClaim: mode\.autoClaim/);
+  assert.doesNotMatch(autoCommit, /ClaimDelegate|delegate/i);
+  assert.doesNotMatch(minePage, /ClaimDelegate|approveAutoClaim/);
+  assert.match(main, /all claimable SOL \(mining \+ staking\)/i);
+  assert.doesNotMatch(main, /approve-delegate|needs delegate approval/i);
 });
 
 test('an existing auto plan replaces the primary Mine action', async () => {

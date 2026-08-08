@@ -6,6 +6,33 @@ const boundedInteger = (value, fallback, minimum, maximum) => {
 };
 
 export const OPERATION_TIMEOUT_CODE = 'MYNE_OPERATION_TIMEOUT';
+export const AUTO_PLAN_REINVEST_SOL_FLAG = 2;
+
+const asBigInt = (value, name) => {
+  const parsed = typeof value === 'bigint' ? value : BigInt(value?.toString?.() ?? value ?? 0);
+  assert.ok(parsed >= 0n, `${name} must be non-negative`);
+  return parsed;
+};
+
+/**
+ * Classify the exact funds an AutoPlan may use for its next atomic execution.
+ * Claimable SOL counts only after explicit on-chain reinvest consent; the
+ * frontend wallet budget must continue to exclude it until confirmation.
+ */
+export function autoPlanExecutionFunding({ rewardMode, balanceLamports, pendingSol, requiredLamports }) {
+  const mode = Number(rewardMode);
+  assert.ok(Number.isInteger(mode) && mode >= 0 && mode <= 3, 'Auto-plan reward mode is invalid');
+  const reinvestSol = (mode & AUTO_PLAN_REINVEST_SOL_FLAG) !== 0;
+  const balance = asBigInt(balanceLamports, 'Auto-plan balance');
+  const pending = reinvestSol ? asBigInt(pendingSol, 'Claimable SOL') : 0n;
+  const required = asBigInt(requiredLamports, 'Auto-plan round cost');
+  return {
+    reinvestSol,
+    pendingSol: pending,
+    availableLamports: balance + pending,
+    executable: balance + pending >= required,
+  };
+}
 
 /**
  * Put a hard wall-clock boundary around an external operation. The caller may
@@ -61,7 +88,7 @@ export async function fetchActiveAutoPlanAuthorities({
     const offset = page * size;
     const rows = await withOperationTimeout(
       () => indexedRows(
-        `mine_auto_plans?active=eq.true&balance_lamports=gt.0&select=authority&order=authority.asc&limit=${size}&offset=${offset}`,
+        `mine_auto_plans?active=eq.true&or=(balance_lamports.gt.0,reward_mode.gte.2)&select=authority&order=authority.asc&limit=${size}&offset=${offset}`,
       ),
       { timeoutMs: timeout, label: `Auto-plan index page ${page + 1}` },
     );

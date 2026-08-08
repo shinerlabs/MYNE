@@ -321,7 +321,7 @@ document.querySelector('#app').innerHTML = `
   <main class="workspace page-view" data-page="mine">
     ${socialPanel}
     <section class="board-panel panel" aria-label="Mining tiles"><div class="slot-grid">${slots.map(([id, value]) => `<button class="slot" data-slot="${id}" aria-label="Tile ${id}, ${value} SOL deployed" aria-pressed="false"><span>#${id}</span><strong>${value}</strong></button>`).join('')}</div><div class="board-footer"><div class="round-reward" tabindex="0" aria-describedby="round-reward-tip"><span class="round-reward-label"><img src="/myne-token-icon.svg" alt=""/><b>+${isPremine ? '0.3' : '1'}</b><small>/ ROUND</small></span><aside class="round-reward-tip" id="round-reward-tip" role="tooltip"><strong>Mine ${isPremine ? '0.3' : '1'} MYNE</strong><p>${isPremine ? 'Premine emission is reduced until launch, and mined MYNE stays locked until liquidity opens.' : 'Mine MYNE every round for a chance to receive the Motherlode and staking bonus.'}</p></aside></div><button class="switchboard-proof-trigger" id="switchboard-proof-trigger" type="button" aria-haspopup="dialog" aria-label="Verify the on-chain round randomness proof"><span>Verifiably random · on-chain</span><b aria-hidden="true">↗</b></button></div></section>
-    <aside class="control-column"><section class="round-summary panel"><div class="summary-stat"><span>DEPLOYED</span><strong>${solIcon('summary-eth')} 0.00</strong><small>≈— USDC</small></div><div class="summary-stat"><span>MOTHERLODE</span><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong><small>MYNE</small></div><div class="summary-stat"><span>TIME</span><strong>—</strong><small>Round #—</small></div></section><section class="deploy-panel panel"><div class="deploy-head"><div><span class="eyebrow">MINT MYNE</span><h2>Configure mine</h2></div><div class="refine-chip" id="mined-chip"><span>${isPremine ? 'MINED · LOCKED' : 'UNCLAIMED'}</span><b><img src="/myne-token-icon.svg" alt=""/> <em id="mined-chip-value">0.000</em></b></div></div><button class="last-round" data-route="rounds"><span>Last round</span><aside>${icon('grid')} #— <b>—</b> ${icon('chevron')}</aside></button><div class="amount-label-bar"><label class="amount-label" for="amount"><span>SOL per tile</span><small>Balance — SOL</small></label><button class="mine-currency-toggle" id="mine-currency-toggle" type="button" aria-pressed="false" aria-label="Show mining values in USDC"><span>SOL</span><i></i><b><span>USDC</span></b></button></div><div class="amount-display"><i class="extraction-field" aria-hidden="true"></i>${solIcon('amount-eth mine-sol-mark')}${usdcIcon('amount-usd-mark mine-usdc-mark')}<input id="amount" value="" placeholder="0.00" inputmode="decimal" aria-label="SOL per tile" autocomplete="off" autocorrect="off" spellcheck="false"/><span>SOL</span></div><div class="quick-amounts"><button data-add="0.0001">+0.0001</button><button data-add="0.001">+0.001</button><button data-add="0.01">+0.01</button><button data-add="0.1">+0.1</button></div><small class="amount-min" hidden></small><div class="configuration"><div class="config-row"><div><b>Tiles</b><small id="tile-helper">No tiles selected</small></div><div class="stepper"><button id="all">ALL</button><button id="tiles-minus" aria-label="Remove tile">${icon('minus')}</button><strong id="tile-count">0</strong><button id="tiles-plus" aria-label="Add tile">${icon('plus')}</button></div></div><div class="config-row auto-row"><div><b>Auto-round</b><small id="auto-helper">Manually enter each round</small></div><button class="auto-toggle" id="auto-round" role="switch" aria-checked="false"><span></span><b>Off</b></button></div><div class="config-row rounds-config"><div><b>Rounds</b><small id="round-helper">Repeat deployment</small></div><div class="stepper compact"><button id="rounds-minus" aria-label="Remove round">${icon('minus')}</button><strong id="round-count">1</strong><button id="rounds-plus" aria-label="Add round">${icon('plus')}</button></div><button class="until-balance-toggle" id="until-balance" role="switch" aria-checked="false" title="Fund as many rounds as your wallet balance allows"><span></span><b>Max</b></button></div><div class="config-row auto-claim-row" hidden><div><b>Auto-claim</b><small>Settle and reclaim after each round</small></div><button class="auto-toggle" id="auto-claim" role="switch" aria-checked="true"><span></span><b>On</b></button></div></div><div class="total-row per-round-row" id="per-round-row" hidden><div><span>Total per round</span></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('per-round-eth mine-sol-mark')}${usdcIcon('per-round-usdc mine-usdc-mark')}</span><em id="per-round-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="total-row"><div><span>Total deployment</span><small id="total-detail">0 tiles × 0.00 SOL × 1 round</small></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('total-eth mine-sol-mark')}${usdcIcon('total-usdc mine-usdc-mark')}</span><em id="total-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="auto-plan" id="auto-plan" hidden></div><button class="deploy" id="deploy"><i class="mine-button-mark"><img src="/myne-token-icon.svg" alt=""/></i><span>MINE</span><b aria-hidden="true">→</b></button><div class="security-note">${icon('shield')} Transactions settle on Solana</div></section><section class="miners round-results panel" hidden aria-live="polite"><div class="miners-head"><div><span class="eyebrow">CONFIRMED ROUND · #—</span><h2>Miners</h2></div><button data-route="rounds">History</button></div><div class="settlement-result"><span><small>WINNING TILE</small><strong>#—</strong></span><span><small>OUTCOME · 50/50</small><strong>${solIcon()} 0.00</strong></span><span><small>REWARD</small><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong></span></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="next-round"><span>NEXT ROUND</span><b>—</b></div></section></aside>
+    <aside class="control-column"><section class="round-summary panel"><div class="summary-stat"><span>DEPLOYED</span><strong>${solIcon('summary-eth')} 0.00</strong><small>≈— USDC</small></div><div class="summary-stat"><span>MOTHERLODE</span><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong><small>MYNE</small></div><div class="summary-stat"><span>TIME</span><strong>—</strong><small>Round #—</small></div></section><section class="deploy-panel panel"><div class="deploy-head"><div><span class="eyebrow">MINT MYNE</span><h2>Configure mine</h2></div><div class="refine-chip" id="mined-chip"><span>${isPremine ? 'MINED · LOCKED' : 'UNCLAIMED'}</span><b><img src="/myne-token-icon.svg" alt=""/> <em id="mined-chip-value">0.000</em></b></div></div><button class="last-round" data-route="rounds"><span>Last round</span><aside>${icon('grid')} #— <b>—</b> ${icon('chevron')}</aside></button><div class="amount-label-bar"><label class="amount-label" for="amount"><span>SOL per tile</span><small>Balance — SOL</small></label><button class="mine-currency-toggle" id="mine-currency-toggle" type="button" aria-pressed="false" aria-label="Show mining values in USDC"><span>SOL</span><i></i><b><span>USDC</span></b></button></div><div class="amount-display"><i class="extraction-field" aria-hidden="true"></i>${solIcon('amount-eth mine-sol-mark')}${usdcIcon('amount-usd-mark mine-usdc-mark')}<input id="amount" value="" placeholder="0.00" inputmode="decimal" aria-label="SOL per tile" autocomplete="off" autocorrect="off" spellcheck="false"/><span>SOL</span></div><div class="quick-amounts"><button data-add="0.0001">+0.0001</button><button data-add="0.001">+0.001</button><button data-add="0.01">+0.01</button><button data-add="0.1">+0.1</button></div><small class="amount-min" hidden></small><div class="configuration"><div class="config-row"><div><b>Tiles</b><small id="tile-helper">No tiles selected</small></div><div class="stepper"><button id="all">ALL</button><button id="tiles-minus" aria-label="Remove tile">${icon('minus')}</button><strong id="tile-count">0</strong><button id="tiles-plus" aria-label="Add tile">${icon('plus')}</button></div></div><div class="config-row auto-row"><div><b>Auto-round</b><small id="auto-helper">Mine this round only</small></div><button class="auto-toggle" id="auto-round" role="switch" aria-checked="false"><span></span><b>Off</b></button></div><div class="config-row auto-funding-row" hidden><div><b>Plan funding</b><small id="round-helper">Choose a funding limit</small></div><div class="auto-funding-options" role="group" aria-label="Auto-round funding"><button type="button" data-auto-funding="max" aria-pressed="true">Max</button><button type="button" data-auto-funding="fixed" aria-pressed="false">Fixed</button></div><label class="auto-funding-input" for="auto-funding-amount" hidden><input id="auto-funding-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" aria-label="Fixed SOL funding for Auto-round"/><span>SOL</span></label></div><div class="config-row auto-claim-row" hidden><div><b>Reinvest SOL</b><small>Move all claimable SOL (mining + staking) into this Auto-round balance</small></div><button class="auto-toggle" id="auto-claim" role="switch" aria-checked="false"><span></span><b>Off</b></button></div></div><div class="total-row per-round-row" id="per-round-row" hidden><div><span>Total per round</span></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('per-round-eth mine-sol-mark')}${usdcIcon('per-round-usdc mine-usdc-mark')}</span><em id="per-round-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="total-row"><div><span>Total deployment</span><small id="total-detail">0 tiles × 0.00 SOL × 1 round</small></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('total-eth mine-sol-mark')}${usdcIcon('total-usdc mine-usdc-mark')}</span><em id="total-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="auto-plan" id="auto-plan" hidden></div><button class="deploy" id="deploy"><i class="mine-button-mark"><img src="/myne-token-icon.svg" alt=""/></i><span>MINE</span><b aria-hidden="true">→</b></button><div class="security-note">${icon('shield')} Transactions settle on Solana</div></section><section class="miners round-results panel" hidden aria-live="polite"><div class="miners-head"><div><span class="eyebrow">CONFIRMED ROUND · #—</span><h2>Miners</h2></div><button data-route="rounds">History</button></div><div class="settlement-result"><span><small>WINNING TILE</small><strong>#—</strong></span><span><small>OUTCOME · 50/50</small><strong>${solIcon()} 0.00</strong></span><span><small>REWARD</small><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong></span></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="next-round"><span>NEXT ROUND</span><b>—</b></div></section></aside>
   </main>
 
   <main class="feature-shell page-view" data-page="rounds"><header class="feature-hero route-header"><div><span class="eyebrow">ROUNDS</span><h1>History.</h1></div></header><section class="feature-metrics"><article><span>ROUNDS</span><strong>—</strong><small></small></article><article><span>DEPLOYED</span><strong>${solIcon()} 0.00</strong></article><article><span>AVG DEPLOYED</span><strong>${solIcon()} 0.00</strong><small>per mined round</small></article><article><span>MOTHERLODES</span><strong>0</strong></article></section><section class="ledger-panel" aria-label="Round history"><div class="ledger-head"><div class="round-filters" role="tablist" aria-label="Filter round history"><button class="active" role="tab" aria-selected="true" data-round-filter="all">All</button><button role="tab" aria-selected="false" data-round-filter="split">Split</button><button role="tab" aria-selected="false" data-round-filter="solo">Solo</button><button role="tab" aria-selected="false" data-round-filter="motherlode">Motherlode</button></div></div><div class="round-table-head"><span>ROUND</span><span>TILE</span><span>MODE</span><span>SOL DEPLOYED</span><span>WINNERS</span><span>TIME</span><span></span></div><div class="round-list">${roundRows}</div></section></main>
@@ -655,12 +655,12 @@ let repeatRounds = 1;
 // by updateMine() to switch between an immediate deployment and a next-round queue.
 let bettingOpen = true;
 let autoRound = false;
-// "Max": size the plan deposit from the wallet balance instead of a manual round count.
-// The plan is still prepaid — this just computes how many rounds the balance can fund.
-let fundMaxRounds = false;
-// Auto-claim settles winnings back into the plan balance each round. NOTE: the contract
-// forces playsRemaining = UNLIMITED when this is on, so it can't combine with a finite
-// round count — the UI mirrors that by switching Rounds to ∞ (see syncAutoControls).
+let autoFundingMode = (() => {
+  try { return window.localStorage.getItem('myne-auto-funding-mode') === 'fixed' ? 'fixed' : 'max'; }
+  catch { return 'max'; }
+})();
+// Reinvest is an on-chain plan preference. The worker moves all claimable SOL from the wallet's
+// canonical reward ledger into the plan before its next execution; no wallet pop-up is required.
 let autoClaimEnabled = false;
 let randomMode = false;
 const amount = document.querySelector('#amount');
@@ -2758,7 +2758,7 @@ const paintMineBalance = () => {
     chain.state.autoPlanFundingReserve ?? 0n,
   )) / 1e9;
   label.textContent = chain.state.account
-    ? `Balance ${mineCostLabel(balance)}${autoRound ? ` · Auto available ${mineCostLabel(autoMaximum)} (90%)` : ''} · Min ${minimum}`
+    ? `Balance ${mineCostLabel(balance)}${autoRound ? ` · Auto limit ${mineCostLabel(autoMaximum)} (90%)` : ''} · Min ${minimum}`
     : '';
 };
 
@@ -2781,12 +2781,10 @@ const updateMine = () => {
   } catch {
     perRoundLamports = 0n;
   }
-  // An auto plan is PREPAID: the stepper is simply how many rounds you're funding.
-  //
-  // With "Max" on, derive that count from the wallet balance instead. Each execution needs the
-  // exact stored wager plus the live rent for its BetReceipt. Auto-round
-  // may transfer at most floor(walletBalance × 90%); the remaining 10% stays available for rent
-  // and transaction fees. All budgeting remains integer lamports until presentation.
+  // An auto plan is PREPAID. Max derives the deposit from the wallet's safe funding ceiling;
+  // Fixed uses the exact SOL budget entered by the user. Each execution still needs the exact
+  // stored wager plus live BetReceipt rent, so a fixed budget can leave a withdrawable remainder.
+  // All budgeting remains integer lamports until presentation.
   const receiptRent = typeof chain.state.autoPlanMaxFee === 'bigint'
     ? chain.state.autoPlanMaxFee
     : null;
@@ -2803,14 +2801,37 @@ const updateMine = () => {
   const maxRounds = maxRoundsBig > BigInt(Number.MAX_SAFE_INTEGER)
     ? Number.MAX_SAFE_INTEGER
     : Number(maxRoundsBig);
-  if (autoRound && fundMaxRounds) repeatRounds = Math.max(1, maxRounds);
-  const fundedRounds = autoRound ? repeatRounds : 1;
+  const fundedPerRoundLamports = receiptRent == null || perRoundLamports <= 0n
+    ? null
+    : perRoundLamports + receiptRent;
+  const fixedFundingInput = document.querySelector('#auto-funding-amount');
+  const fixedFundingText = fixedFundingInput?.value.trim() ?? '';
+  let fixedFundingLamports = null;
+  if (autoRound && autoFundingMode === 'fixed' && fixedFundingText) {
+    try {
+      const parsed = toWei(fixedFundingText);
+      if (parsed > 0n) fixedFundingLamports = parsed;
+    } catch { /* invalid input is explained below and cannot enable START AUTO */ }
+  }
+  if (autoRound) {
+    repeatRounds = autoFundingMode === 'max'
+      ? maxRounds
+      : fundedPerRoundLamports && fixedFundingLamports
+        ? Number(fixedFundingLamports / fundedPerRoundLamports)
+        : 0;
+  }
   // A direct first bet can also carry the configured one-time account deposit. Solana Auto-round
   // deposits use their own exact `requiredDeposit` formula (wager + receipt rent per execution).
   const needsDeposit = !chain.state.hasAccount;
   const queuesNextRound = !autoRound && !bettingOpen;
   const automatedDepositLamports = perRoundLamports > 0n && receiptRent != null
-    ? requiredDeposit({ amountPerPlay: perRoundLamports, fundRounds: fundedRounds, maxFee: receiptRent })
+    ? autoRound && autoFundingMode === 'fixed'
+      ? fixedFundingLamports
+      : requiredDeposit({
+        amountPerPlay: perRoundLamports,
+        fundRounds: autoRound ? maxRounds : 1,
+        maxFee: receiptRent,
+      })
     : null;
   const total = perRound > 0
     ? autoRound || queuesNextRound
@@ -2818,24 +2839,34 @@ const updateMine = () => {
       : perRound + (needsDeposit ? ACCOUNT_DEPOSIT_ETH : 0)
     : 0;
   const autoFundingReady = !autoRound || (automatedDepositLamports != null
+    && fundedPerRoundLamports != null
+    && automatedDepositLamports >= fundedPerRoundLamports
     && automatedDepositLamports <= maxFundingLamports);
   document.querySelector('#tile-count').textContent = selected.size;
-  document.querySelector('#round-count').textContent = autoRound ? repeatRounds : 1;
   syncAllButton();
   document.querySelector('#tile-helper').textContent = selected.size
     ? randomMode ? `${selected.size} random selected` : `${selected.size} of 25 selected`
     : 'No tiles selected';
-  document.querySelector('#round-helper').textContent = !autoRound
-    ? 'Turn on Auto-round to bet over multiple rounds'
-    : fundMaxRounds
-      ? (receiptRent == null
-        ? 'Loading live receipt rent…'
-        : maxRounds > 0
-          ? `${maxRounds} round${maxRounds === 1 ? '' : 's'} · 90% max, 10% stays in wallet`
-          : '90% spendable balance cannot fund one round')
-      : `Funds ${repeatRounds} round${repeatRounds === 1 ? '' : 's'} · top up anytime`;
+  const fixedRemainder = fundedPerRoundLamports && fixedFundingLamports
+    ? fixedFundingLamports % fundedPerRoundLamports
+    : 0n;
+  document.querySelector('#round-helper').textContent = receiptRent == null
+    ? 'Loading live receipt rent…'
+    : autoFundingMode === 'max'
+      ? maxRounds > 0
+        ? `${maxRounds} full round${maxRounds === 1 ? '' : 's'} · 10% stays in wallet`
+        : 'Safe wallet limit cannot fund one round'
+      : !fixedFundingText
+        ? 'Enter the total SOL to place in this plan'
+        : fixedFundingLamports == null
+          ? 'Enter a valid SOL amount'
+          : repeatRounds < 1
+            ? `Needs at least ${chain.format.ethSmart(fundedPerRoundLamports)} SOL for one round`
+            : `${repeatRounds} full round${repeatRounds === 1 ? '' : 's'}${fixedRemainder > 0n ? ' · remainder stays withdrawable' : ''}`;
   document.querySelector('#total-detail').textContent = autoRound
-    ? `${selected.size} tile${selected.size === 1 ? '' : 's'} × ${mineCostLabel(perTile)} × ${repeatRounds} round${repeatRounds === 1 ? '' : 's'}`
+    ? autoFundingMode === 'fixed'
+      ? `Fixed plan budget · ${repeatRounds} full round${repeatRounds === 1 ? '' : 's'} at current cost`
+      : `${selected.size} tile${selected.size === 1 ? '' : 's'} × ${mineCostLabel(perTile)} × ${repeatRounds} round${repeatRounds === 1 ? '' : 's'}`
     : `${selected.size} tile${selected.size === 1 ? '' : 's'} × ${mineCostLabel(perTile)} · ${queuesNextRound ? 'next round queue' : 'this round'}`;
   paintMineTotal(document.querySelector('.total-row:not(.per-round-row)'), total);
   document.querySelector('.total-row:not(.per-round-row) span').textContent = queuesNextRound
@@ -3316,9 +3347,10 @@ document.querySelector('#random-tiles').addEventListener('click', () => {
 });
 document.querySelector('#tiles-minus').addEventListener('click', () => { const last = [...selected].pop(); if (last) { selected.delete(last); const tile = document.querySelector(`[data-slot="${last}"]`); tile.classList.remove('selected'); tile.setAttribute('aria-pressed', 'false'); } if (randomMode && selected.size) randomizeSelectedTiles(); else { if (!selected.size) setRandomMode(false); updateMine(); } });
 document.querySelector('#tiles-plus').addEventListener('click', () => { const next = slots.find(([id]) => !selected.has(String(id)) && !tileLocked(id)); if (next) { selected.add(String(next[0])); const tile = document.querySelector(`[data-slot="${next[0]}"]`); tile.classList.add('selected'); tile.setAttribute('aria-pressed', 'true'); } if (randomMode) randomizeSelectedTiles(); else updateMine(); });
-document.querySelector('#rounds-minus').addEventListener('click', () => { repeatRounds = Math.max(1, repeatRounds - 1); updateMine(); });
-document.querySelector('#rounds-plus').addEventListener('click', () => { repeatRounds += 1; updateMine(); });
 const autoClaimToggle = document.querySelector('#auto-claim');
+const autoFundingRow = document.querySelector('.auto-funding-row');
+const autoFundingInput = document.querySelector('#auto-funding-amount');
+const autoFundingOptions = [...document.querySelectorAll('[data-auto-funding]')];
 // Auto-mine reward policy is a wallet preference. Standard mode leaves MYNE unclaimed in the
 // protocol accumulator; Auto-burn is an explicit burn-stake preference for the user's claim flow.
 let autoRewardMode = (() => {
@@ -3359,30 +3391,11 @@ autoRewardOptions.forEach((button) => button.addEventListener('click', () => {
 }));
 syncAutoRewardMode();
 /**
- * Auto-round has one funding rule: use the maximum affordable number of rounds.
- *
- * A plan is ALWAYS configured with unlimited plays. A finite play count was redundant —
- * funding N rounds already stops after N rounds, since the contract can't bet without money.
- * The only difference was that a finite plan ended permanently while an unlimited one pauses
- * and can be resumed by topping up, which is strictly better. Dropping it also removes the
- * "until balance" toggle and the auto-claim conflict (auto-claim forces unlimited anyway).
+ * Auto-round always has unlimited plays; its prepaid balance is the limit. Max uses the safe
+ * wallet ceiling, while Fixed preserves an exact user-entered SOL deposit. Reinvest is separate:
+ * it moves all claimable SOL into this same balance before the worker's next execution.
  */
-const untilBalanceToggle = document.querySelector('#until-balance');
 const syncAutoControls = () => {
-  // Solana auto plans are permissionless to execute but receipt claims remain wallet-signed.
-  // Do not offer the unsupported delegate-based auto-claim control.
-  autoClaimEnabled = false;
-  // The simplified composer has no round-count choice. Auto always derives the maximum
-  // affordable plan from the connected wallet balance.
-  fundMaxRounds = autoRound;
-
-  // With "Max" on the round count is derived from the balance, so the stepper is read-only.
-  document.querySelector('#rounds-minus').disabled = fundMaxRounds;
-  document.querySelector('#rounds-plus').disabled = fundMaxRounds;
-  untilBalanceToggle.disabled = !autoRound;
-  untilBalanceToggle.setAttribute('aria-checked', String(fundMaxRounds));
-  untilBalanceToggle.classList.toggle('active', fundMaxRounds);
-
   autoToggle.setAttribute('aria-checked', String(autoRound));
   autoToggle.classList.toggle('active', autoRound);
   autoToggle.querySelector('b').textContent = autoRound ? 'On' : 'Off';
@@ -3395,35 +3408,46 @@ const syncAutoControls = () => {
     syncAutoRewardMode();
   }
 
-  document.querySelector('.auto-claim-row').hidden = true;
+  autoFundingRow.hidden = !autoRound;
+  autoFundingOptions.forEach((button) => {
+    const active = button.dataset.autoFunding === autoFundingMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  document.querySelector('.auto-funding-input').hidden = !autoRound || autoFundingMode !== 'fixed';
+  document.querySelector('.auto-claim-row').hidden = !autoRound;
   document.querySelector('.auto-reward-row').hidden = !autoRound;
   autoClaimToggle.setAttribute('aria-checked', String(autoClaimEnabled));
   autoClaimToggle.classList.toggle('active', autoClaimEnabled);
   autoClaimToggle.querySelector('b').textContent = autoClaimEnabled ? 'On' : 'Off';
 
   document.querySelector('#auto-helper').textContent = autoRound
-    ? 'Uses your balance for the maximum rounds'
+    ? `${autoFundingMode === 'max' ? 'Maximum safe' : 'Fixed budget'} · runs while funded`
     : 'Mine this round only';
   updateMine();
 };
-untilBalanceToggle.addEventListener('click', () => {
+autoFundingOptions.forEach((button) => button.addEventListener('click', () => {
   if (!autoRound) return notify('Turn on Auto-round first');
-  fundMaxRounds = !fundMaxRounds;
+  autoFundingMode = button.dataset.autoFunding === 'fixed' ? 'fixed' : 'max';
+  try { window.localStorage.setItem('myne-auto-funding-mode', autoFundingMode); } catch { /* optional */ }
   syncAutoControls();
-  notify(fundMaxRounds
-    ? 'Funding as many rounds as your balance allows'
-    : 'Set the round count manually');
-});
+  if (autoFundingMode === 'fixed') autoFundingInput.focus();
+  notify(autoFundingMode === 'max'
+    ? 'Auto-round will use the maximum safe wallet funding'
+    : 'Enter the exact SOL amount to place in the Auto-round plan');
+}));
+autoFundingInput.addEventListener('input', updateMine);
 autoClaimToggle.addEventListener('click', () => {
   if (!autoRound) return;
   autoClaimEnabled = !autoClaimEnabled;
   syncAutoControls();
   notify(autoClaimEnabled
-    ? 'Auto-claim on — the contract runs the plan until the balance runs out'
-    : 'Auto-claim off — you can set a fixed round count');
+    ? 'Reinvest on — all claimable SOL (mining + staking) returns to this Auto-round balance'
+    : 'Reinvest off — claimable SOL remains available for your wallet');
 });
 autoToggle.addEventListener('click', () => {
   autoRound = !autoRound;
+  if (!autoRound) autoClaimEnabled = false;
   syncAutoControls();
   if (chain.state.account) {
     document.querySelectorAll(`.round-miner-row[data-wallet="${chain.state.account}"]`).forEach((row) => {
@@ -3434,7 +3458,7 @@ autoToggle.addEventListener('click', () => {
   // funded on-chain keeps betting until its plays run out — stopping it needs cancelPlan.
   const live = chain.state.plan?.enabled;
   notify(autoRound
-    ? 'Auto on — funding the maximum rounds your balance allows'
+    ? `Auto on — choose ${autoFundingMode === 'max' ? 'maximum' : 'fixed'} plan funding`
     : live
       ? 'Your active plan is still running — use Cancel & withdraw to stop it'
       : 'Auto-round off — MINE bets on the current round only');
@@ -5031,6 +5055,8 @@ document.querySelector('#deploy').addEventListener('click', () => chain.mine({
   // decides how long it runs — and a paused plan can be topped up instead of re-created.
   plays: chain.UNLIMITED_PLAYS,
   fundRounds: repeatRounds,
+  fundingMode: autoFundingMode,
+  fixedFundingSol: autoFundingInput.value,
   autoClaim: autoRound && autoClaimEnabled,
   rewardMode: autoRound ? autoRewardMode : 'accumulate',
 }));
@@ -5050,7 +5076,6 @@ document.querySelector('#auto-plan').addEventListener('click', async (event) => 
     const input = document.querySelector('#auto-plan-topup-amount');
     return chain.topUpPlan(input?.value ?? '');
   }
-  if (event.target.closest('#approve-delegate')) return chain.approveAutoClaim();
 });
 
 document.querySelector('#auto-plan').addEventListener('keydown', (event) => {
@@ -5914,11 +5939,8 @@ const renderPlan = (state) => {
     ${affordable == null ? '<p class="auto-plan-warn">Live receipt-rent quote unavailable. Round capacity is not estimated until the RPC returns it.</p>' : ''}
     ${stalled ? `<p class="auto-plan-warn">Balance ${chain.format.ethSmart(plan.balance)} SOL is below the ${chain.format.ethSmart(perRoundCost)} SOL needed for one more round (exact wager + receipt rent). Top up to resume, or withdraw what's left.</p>` : ''}
     ${plan.autoClaim
-      ? `<p class="auto-plan-note">${plan.canClaim
-        ? 'SOL winnings are claimed back into the balance automatically. MYNE stays unrefined so it keeps earning dividends.'
-        : '⚠ Auto-claim needs delegate approval — winnings are not being claimed.'}</p>`
-      : ''}
-    ${plan.autoClaim && !plan.canClaim ? '<button class="auto-plan-approve" id="approve-delegate">Approve auto-claim</button>' : ''}
+      ? '<p class="auto-plan-note">Reinvest is on: all claimable SOL (mining + staking) is moved into this Auto-round balance before the next automatic deployment.</p>'
+      : '<p class="auto-plan-note">Reinvest is off: claimable SOL stays in your rewards balance until you claim it.</p>'}
     <div class="auto-plan-topup-entry">
       <label for="auto-plan-topup-amount"><span>TOP UP BALANCE</span><small>Up to ${maximumTopUpSol} SOL · 10% stays in wallet</small></label>
       <div class="auto-plan-topup-input">

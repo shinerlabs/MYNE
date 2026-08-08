@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import web3 from '@solana/web3.js';
 import {
   calculateSpend,
   isCompleteBuybackExecution,
@@ -11,8 +12,11 @@ import {
   NATIVE_SOL_MINT,
   meteoraRouteForProgram,
   pendingSwapIsProvablyExpired,
+  pinLatestBlockhashContext,
   purchasedTokenBaseUnits,
   refreshUnsignedV0TransactionBlockhash,
+  retryTransientBlockhashRead,
+  savedTransactionSendOptions,
   selectIndexedBuybackRound,
   validateJupiterEndpoint,
   validateJupiterPriorityLevel,
@@ -111,6 +115,100 @@ test('Jupiter V0 blockhash refresh accepts only an unsigned sole-payer message',
     expectedPayer: 'other-payer',
     blockhash: 'another-blockhash',
   }), /fee payer changed/);
+});
+
+test('buyback pins refreshed blockhash reads to the exact producing RPC context', () => {
+  const pinned = pinLatestBlockhashContext({
+    context: { slot: 456_789 },
+    value: {
+      blockhash: 'fresh-blockhash',
+      lastValidBlockHeight: 457_000,
+    },
+  }, { commitment: 'confirmed' });
+  assert.deepEqual(pinned, {
+    latestBlockhash: {
+      blockhash: 'fresh-blockhash',
+      lastValidBlockHeight: 457_000,
+    },
+    contextConfig: {
+      commitment: 'confirmed',
+      minContextSlot: 456_789,
+    },
+  });
+  assert.throws(() => pinLatestBlockhashContext({
+    context: {},
+    value: { blockhash: 'fresh-blockhash', lastValidBlockHeight: 457_000 },
+  }, { commitment: 'confirmed' }), /context slot is invalid/);
+  assert.throws(() => pinLatestBlockhashContext({
+    context: { slot: 456_789 },
+    value: { blockhash: '', lastValidBlockHeight: 457_000 },
+  }, { commitment: 'confirmed' }), /blockhash is invalid/);
+  assert.throws(() => pinLatestBlockhashContext({
+    context: { slot: 456_789 },
+    value: { blockhash: 'fresh-blockhash', lastValidBlockHeight: 1.5 },
+  }, { commitment: 'confirmed' }), /last-valid height is invalid/);
+});
+
+test('saved transaction context remains backward-compatible with older journals', () => {
+  assert.deepEqual(savedTransactionSendOptions(undefined, { commitment: 'confirmed' }), {
+    maxRetries: 3,
+    skipPreflight: false,
+    preflightCommitment: 'confirmed',
+  });
+  assert.deepEqual(savedTransactionSendOptions(456_789, { commitment: 'confirmed' }), {
+    maxRetries: 3,
+    skipPreflight: false,
+    preflightCommitment: 'confirmed',
+    minContextSlot: 456_789,
+  });
+  assert.throws(
+    () => savedTransactionSendOptions(-1, { commitment: 'confirmed' }),
+    /minimum context slot is invalid/,
+  );
+});
+
+test('saved transaction recovery accepts a signed legacy journal without rewriting it', () => {
+  const payer = web3.Keypair.generate();
+  const recentBlockhash = web3.Keypair.generate().publicKey.toBase58();
+  const legacy = new web3.Transaction({ feePayer: payer.publicKey, recentBlockhash }).add(
+    web3.SystemProgram.transfer({
+      fromPubkey: payer.publicKey,
+      toPubkey: web3.Keypair.generate().publicKey,
+      lamports: 1,
+    }),
+  );
+  legacy.sign(payer);
+  const raw = legacy.serialize();
+  const recovered = web3.VersionedTransaction.deserialize(raw);
+  assert.equal(recovered.version, 'legacy');
+  assert.equal(recovered.message.recentBlockhash, recentBlockhash);
+  assert.deepEqual(Buffer.from(recovered.serialize()), raw);
+});
+
+test('fee inspection retries only transient blockhash propagation failures', async () => {
+  let reads = 0;
+  const waits = [];
+  const result = await retryTransientBlockhashRead(async () => {
+    reads += 1;
+    if (reads < 3) throw new Error('Blockhash not found');
+    return { value: 5_000 };
+  }, {
+    attempts: 4,
+    wait: async (attempt) => waits.push(attempt),
+  });
+  assert.deepEqual(result, { value: 5_000 });
+  assert.equal(reads, 3);
+  assert.deepEqual(waits, [1, 2]);
+
+  let nonBlockhashReads = 0;
+  await assert.rejects(
+    retryTransientBlockhashRead(async () => {
+      nonBlockhashReads += 1;
+      throw new Error('RPC authorization failed');
+    }),
+    /authorization failed/,
+  );
+  assert.equal(nonBlockhashReads, 1);
 });
 
 test('an absent pending swap is abandoned only after its exact blockhash expires', () => {
@@ -276,6 +374,37 @@ test('buyback keeper re-checks the authoritative on-chain completion flag', asyn
   const refresh = source.indexOf('refreshUnsignedV0TransactionBlockhash(transaction');
   const simulation = source.indexOf('provider.connection.simulateTransaction(transaction');
   assert.ok(validation >= 0 && validation < refresh && refresh < simulation);
+  assert.match(source, /getLatestBlockhashAndContext\(\{ commitment \}\)/);
+  assert.match(source, /getAddressLookupTable\([\s\S]*contextConfig/);
+  assert.match(source, /getBalance\([\s\S]*contextConfig/);
+  assert.match(source, /simulateTransaction\(transaction, \{[\s\S]*\.\.\.contextConfig/);
+  assert.match(source, /swapMinContextSlot: inspected\.minContextSlot/);
+  assert.match(source, /sendSavedTransaction\(pending\.swapRaw, \{[\s\S]*minContextSlot: pending\.swapMinContextSlot/);
+  assert.match(source, /lastValidBlockHeight: pending\.lastValidBlockHeight/);
+  assert.match(source, /burnMinContextSlot: burn\.minContextSlot/);
+  assert.match(source, /sendSavedTransaction\(pending\.burnRaw, \{[\s\S]*minContextSlot: pending\.burnMinContextSlot/);
+  assert.match(source, /lastValidBlockHeight: pending\.burnLastValidBlockHeight/);
+  assert.match(source, /VersionedTransaction\.deserialize\(raw\)/);
+  assert.match(source, /blockhash: saved\.message\.recentBlockhash/);
+  const burnBuilder = source.slice(
+    source.indexOf('async function buildBurnAmountTransaction'),
+    source.indexOf('async function waitForMyneBalance'),
+  );
+  assert.match(burnBuilder, /getLatestBlockhashAndContext\(\{ commitment \}\)/);
+  assert.match(burnBuilder, /new VersionedTransaction\(/);
+  assert.match(burnBuilder, /simulateTransaction\(simulationTransaction, \{[\s\S]*\.\.\.contextConfig[\s\S]*sigVerify: true/);
+  assert.doesNotMatch(burnBuilder, /getLatestBlockhash\(/);
+  assert.doesNotMatch(burnBuilder, /simulateTransaction\(simulationTransaction, \[payer\]\)/);
+  const completion = source.slice(
+    source.indexOf('async function markRoundBuybackComplete'),
+    source.indexOf('function roundJournal'),
+  );
+  assert.match(completion, /getLatestBlockhashAndContext\(\{ commitment \}\)/);
+  assert.match(completion, /new VersionedTransaction\(/);
+  assert.match(completion, /simulateTransaction\(simulationTx, \{[\s\S]*\.\.\.contextConfig[\s\S]*sigVerify: true/);
+  assert.match(completion, /lastValidBlockHeight: latestBlockhash\.lastValidBlockHeight/);
+  assert.doesNotMatch(completion, /getLatestBlockhash\(/);
+  assert.doesNotMatch(completion, /simulateTransaction\(simulationTx, \[payer\]\)/);
   const signing = source.indexOf('swap.sign([payer])');
   const pendingJournal = source.indexOf('journal.pending = {', signing);
   assert.ok(source.indexOf('await inspectSwapTransaction(swap') < signing);

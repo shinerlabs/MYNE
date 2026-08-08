@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   OPERATION_TIMEOUT_CODE,
+  autoPlanExecutionFunding,
   executeAutoPlansDuringWindow,
   fetchActiveAutoPlanAuthorities,
   sendAutoPlanBatchesIsolated,
@@ -34,9 +35,43 @@ test('active Auto Mine plans are read in bounded stable pages and deduplicated',
     indexedRows: async (path) => { paths.push(path); return pages.shift(); },
   });
   assert.deepEqual(authorities, ['A', 'B', 'C']);
-  assert.match(paths[0], /balance_lamports=gt\.0/);
+  assert.match(paths[0], /or=\(balance_lamports\.gt\.0,reward_mode\.gte\.2\)/);
   assert.match(paths[0], /limit=2&offset=0$/);
   assert.match(paths[1], /limit=2&offset=2$/);
+});
+
+test('only explicit composite-mode consent makes claimable SOL executable plan funding', () => {
+  const optedOut = autoPlanExecutionFunding({
+    rewardMode: 1,
+    balanceLamports: 40n,
+    pendingSol: 70n,
+    requiredLamports: 100n,
+  });
+  assert.deepEqual(optedOut, {
+    reinvestSol: false,
+    pendingSol: 0n,
+    availableLamports: 40n,
+    executable: false,
+  });
+
+  const optedIn = autoPlanExecutionFunding({
+    rewardMode: 3,
+    balanceLamports: 40n,
+    pendingSol: 70n,
+    requiredLamports: 100n,
+  });
+  assert.deepEqual(optedIn, {
+    reinvestSol: true,
+    pendingSol: 70n,
+    availableLamports: 110n,
+    executable: true,
+  });
+  assert.throws(() => autoPlanExecutionFunding({
+    rewardMode: 4,
+    balanceLamports: 0n,
+    pendingSol: 0n,
+    requiredLamports: 1n,
+  }), /reward mode is invalid/);
 });
 
 test('one stale plan is bisected away without skipping valid neighbours', async () => {

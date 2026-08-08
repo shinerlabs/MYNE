@@ -39,6 +39,7 @@ import {
   serverRandomnessCommitment,
 } from './server-randomness-policy.mjs';
 import {
+  autoPlanExecutionFunding,
   executeAutoPlansDuringWindow,
   withOperationTimeout,
 } from './auto-plan-executor.mjs';
@@ -611,26 +612,53 @@ if ((await chainTimeSeconds()) < bettingEndsAt) {
       );
       if (!plan || !plan.authority.equals(authority)) return null;
       const perRound = plan.amounts.reduce((sum, amount) => sum + asBigInt(amount), 0n);
-      if (!plan.active || asBigInt(plan.balanceLamports) < perRound + receiptRent
+      const rewardMode = Number(plan.rewardMode ?? 0);
+      const reinvestSol = (rewardMode & 2) !== 0;
+      const stakePosition = pda('stake_position', authority.toBuffer());
+      const position = reinvestSol
+        ? await boundedRpc(
+          `Stake position read for ${authority.toBase58()}`,
+          () => program.account.stakePosition.fetchNullable(stakePosition),
+          autoPlanOperationTimeoutMs,
+        )
+        : null;
+      if (reinvestSol && (!position || !position.authority.equals(authority))) return null;
+      const funding = autoPlanExecutionFunding({
+        rewardMode,
+        balanceLamports: plan.balanceLamports,
+        pendingSol: position?.pendingSol ?? 0,
+        requiredLamports: perRound + receiptRent,
+      });
+      if (!plan.active
+          || !funding.executable
           || asBigInt(plan.lastRound) === ROUND_ID) return null;
       const nonce = asBigInt(plan.nextNonce);
       const nonceSeed = Buffer.alloc(8);
       nonceSeed.writeBigUInt64LE(nonce);
       const miner = pda('miner', authority.toBuffer());
       const receipt = pda('bet', roundSeed, authority.toBuffer(), nonceSeed);
-      const ix = await program.methods
+      const ixs = [];
+      if (reinvestSol && funding.pendingSol > 0n) {
+        ixs.push(await program.methods
+          .reinvestAutoPlanRewards()
+          .accounts({
+            config, autoPlan, stakePool, stakePosition, executor: keypair.publicKey,
+          })
+          .instruction());
+      }
+      ixs.push(await program.methods
         .executeAutoPlan(ROUND_ID_BN, new anchor.BN(nonce.toString()))
         .accounts({
           config, autoPlan, miner, round, receipt, executor: keypair.publicKey,
           randomnessAccount: null, systemProgram: SystemProgram.programId,
         })
-        .instruction();
-      return { authority: authority.toBase58(), ix };
+        .instruction());
+      return { authority: authority.toBase58(), ixs };
     },
     sendBatch: (batch) => {
       emitRoundHeartbeat('tick-start', 'auto-plan-send', `batch:${batch.length}`);
       return sendKeeperInstructions(
-        batch.map(({ ix }) => ix),
+        batch.flatMap(({ ixs }) => ixs),
         'Auto-plan execution',
       );
     },

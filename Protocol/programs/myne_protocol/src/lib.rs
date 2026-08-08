@@ -46,6 +46,12 @@ pub const MOTHERLODE_ROUND_EMISSION: u64 = 200_000_000;
 pub const BURN_WEIGHT_MULTIPLIER: u64 = 5;
 pub const AUTO_REWARD_ACCUMULATE: u8 = 0;
 pub const AUTO_REWARD_BURN: u8 = 1;
+/// AutoPlan-only consent bit. When set, a permissionless keeper may move the
+/// plan owner's canonical claimable SOL into that same AutoPlan immediately
+/// before an execution. BetReceipt.reward_mode always stores only the low
+/// reward-mode bit, so receipt and index layouts remain 0=accumulate/1=burn.
+pub const AUTO_PLAN_REINVEST_SOL: u8 = 1 << 1;
+const AUTO_PLAN_ALLOWED_MODE_MASK: u8 = AUTO_REWARD_BURN | AUTO_PLAN_REINVEST_SOL;
 /// High-precision unclaimed-reward shares. The hard MYNE cap keeps aggregate
 /// scaled shares comfortably below u128, while the custom wide mul/div below
 /// avoids intermediate overflow.
@@ -1150,10 +1156,7 @@ pub mod myne_protocol {
             MyneError::DeploymentTooSmall
         );
         let plan = &mut ctx.accounts.auto_plan;
-        require!(
-            reward_mode <= AUTO_REWARD_BURN,
-            MyneError::InvalidRewardMode
-        );
+        assert_auto_plan_reward_mode(reward_mode)?;
         plan.bump = ctx.bumps.auto_plan;
         plan.authority = ctx.accounts.authority.key();
         plan.active = true;
@@ -1197,10 +1200,7 @@ pub mod myne_protocol {
             per_round >= ctx.accounts.config.minimum_round_lamports,
             MyneError::DeploymentTooSmall
         );
-        require!(
-            reward_mode <= AUTO_REWARD_BURN,
-            MyneError::InvalidRewardMode
-        );
+        assert_auto_plan_reward_mode(reward_mode)?;
         ctx.accounts.auto_plan.amounts = amounts;
         ctx.accounts.auto_plan.active = active;
         ctx.accounts.auto_plan.reward_mode = reward_mode;
@@ -1250,6 +1250,55 @@ pub mod myne_protocol {
         emit!(AutoPlanCancelled {
             authority: ctx.accounts.authority.key(),
             returned_lamports: amount
+        });
+        Ok(())
+    }
+
+    /// Permissionlessly reinvests this plan owner's claimable SOL into their
+    /// canonical AutoPlan. Consent is stored in AutoPlan.reward_mode and can
+    /// only be changed by the owner-signed create/configure instructions.
+    ///
+    /// Keepers place this immediately before execute_auto_plan in one atomic
+    /// transaction. If execution later fails, Solana rolls this transfer back;
+    /// if an owner claim races it, account locking ensures only one path can
+    /// consume the pending balance.
+    pub fn reinvest_auto_plan_rewards(ctx: Context<ReinvestAutoPlanRewards>) -> Result<()> {
+        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
+        require_eq!(
+            ctx.accounts.config.version,
+            CURRENT_VERSION,
+            MyneError::ProtocolUpgradeRequired
+        );
+        require!(ctx.accounts.auto_plan.active, MyneError::AutoPlanInactive);
+        require!(
+            auto_plan_reinvests_sol(ctx.accounts.auto_plan.reward_mode),
+            MyneError::InvalidRewardMode
+        );
+
+        checkpoint_stake(
+            &mut ctx.accounts.stake_position,
+            &ctx.accounts.stake_pool,
+        )?;
+        let amount = ctx.accounts.stake_position.pending_sol;
+        if amount > 0 {
+            let next_balance =
+                checked_add(ctx.accounts.auto_plan.balance_lamports, amount)?;
+            let next_claimed =
+                checked_add(ctx.accounts.stake_pool.total_claimed_lamports, amount)?;
+            move_lamports(
+                &ctx.accounts.stake_pool.to_account_info(),
+                &ctx.accounts.auto_plan.to_account_info(),
+                amount,
+            )?;
+            ctx.accounts.stake_position.pending_sol = 0;
+            ctx.accounts.auto_plan.balance_lamports = next_balance;
+            ctx.accounts.stake_pool.total_claimed_lamports = next_claimed;
+        }
+        emit!(AutoPlanRewardsReinvested {
+            authority: ctx.accounts.auto_plan.authority,
+            executor: ctx.accounts.executor.key(),
+            lamports: amount,
+            balance_lamports: ctx.accounts.auto_plan.balance_lamports,
         });
         Ok(())
     }
@@ -1304,7 +1353,9 @@ pub mod myne_protocol {
         receipt.amounts = amounts;
         receipt.cumulative_starts = ctx.accounts.round.tile_lamports;
         receipt.total_lamports = total;
-        receipt.reward_mode = ctx.accounts.auto_plan.reward_mode;
+        // AutoPlan.reward_mode also stores the owner's SOL-reinvestment
+        // consent bit. Receipts retain the stable public 0/1 reward mode.
+        receipt.reward_mode = auto_plan_receipt_reward_mode(ctx.accounts.auto_plan.reward_mode)?;
         receipt.claimed = false;
         receipt.refunded = false;
         for (index, amount) in amounts.iter().enumerate() {
@@ -1356,7 +1407,7 @@ pub mod myne_protocol {
             receipt: receipt.key(),
             nonce,
             total_lamports: total,
-            reward_mode: ctx.accounts.auto_plan.reward_mode,
+            reward_mode: receipt.reward_mode,
             amounts,
             cumulative_starts: receipt.cumulative_starts,
         });
@@ -2965,6 +3016,8 @@ fn assert_canonical_token_account(
 #[cfg(test)]
 mod motherlode_tests {
     use super::{
+        assert_auto_plan_reward_mode, auto_plan_receipt_reward_mode,
+        auto_plan_reinvests_sol,
         assert_operational_roles_distinct, assert_randomness_program_allowed_for_build,
         checked_bps, distribute_mining_rewards, is_supported_meteora_program,
         liquidity_gate_required, max_supply_base_units, mining_basis_after_credit,
@@ -2973,6 +3026,7 @@ mod motherlode_tests {
         proportional_interval_share, round_can_open_after_emission, round_emissions,
         select_slot_hash_at_or_after, server_randomness_commitment, server_randomness_output,
         stake_reward_increment_and_remainder, switchboard_randomness_is_uncommitted,
+        AUTO_PLAN_REINVEST_SOL, AUTO_REWARD_ACCUMULATE, AUTO_REWARD_BURN,
         BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER, METEORA_DAMM_ACTIVATION_POINT_OFFSET,
         METEORA_DAMM_ACTIVATION_TYPE_OFFSET, METEORA_DAMM_POOL_STATUS_OFFSET,
         METEORA_DAMM_POOL_TYPE_OFFSET, METEORA_DAMM_TOKEN_A_MINT_OFFSET,
@@ -2993,6 +3047,25 @@ mod motherlode_tests {
     };
     use crate::state::MiningPool;
     use anchor_lang::prelude::Pubkey;
+
+    #[test]
+    fn auto_plan_composite_mode_preserves_receipt_mode_and_explicit_consent() {
+        assert!(assert_auto_plan_reward_mode(AUTO_REWARD_ACCUMULATE).is_ok());
+        assert!(assert_auto_plan_reward_mode(AUTO_REWARD_BURN).is_ok());
+        assert!(assert_auto_plan_reward_mode(AUTO_PLAN_REINVEST_SOL).is_ok());
+        assert!(assert_auto_plan_reward_mode(AUTO_PLAN_REINVEST_SOL | AUTO_REWARD_BURN).is_ok());
+        assert!(assert_auto_plan_reward_mode(1 << 2).is_err());
+        assert_eq!(
+            auto_plan_receipt_reward_mode(AUTO_PLAN_REINVEST_SOL).unwrap(),
+            AUTO_REWARD_ACCUMULATE,
+        );
+        assert_eq!(
+            auto_plan_receipt_reward_mode(AUTO_PLAN_REINVEST_SOL | AUTO_REWARD_BURN).unwrap(),
+            AUTO_REWARD_BURN,
+        );
+        assert!(!auto_plan_reinvests_sol(AUTO_REWARD_BURN));
+        assert!(auto_plan_reinvests_sol(AUTO_PLAN_REINVEST_SOL));
+    }
 
     #[test]
     fn meteora_gate_accepts_only_the_lb_pair_account_discriminator() {
@@ -4048,6 +4121,23 @@ fn move_lamports(from: &AccountInfo<'_>, to: &AccountInfo<'_>, amount: u64) -> R
     Ok(())
 }
 
+fn assert_auto_plan_reward_mode(reward_mode: u8) -> Result<()> {
+    require!(
+        reward_mode & !AUTO_PLAN_ALLOWED_MODE_MASK == 0,
+        MyneError::InvalidRewardMode
+    );
+    Ok(())
+}
+
+fn auto_plan_receipt_reward_mode(reward_mode: u8) -> Result<u8> {
+    assert_auto_plan_reward_mode(reward_mode)?;
+    Ok(reward_mode & AUTO_REWARD_BURN)
+}
+
+fn auto_plan_reinvests_sol(reward_mode: u8) -> bool {
+    reward_mode & AUTO_PLAN_REINVEST_SOL != 0
+}
+
 /// Moves a settled receipt's SOL reward out of the temporary Round PDA and
 /// records it in the owner's durable claim balance. The StakePool is already
 /// the canonical SOL claim vault for every registered miner, so this preserves
@@ -4637,6 +4727,29 @@ pub struct FundAutoPlan<'info> {
     pub system_program: Program<'info, System>,
 }
 #[derive(Accounts)]
+pub struct ReinvestAutoPlanRewards<'info> {
+    #[account(seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(
+        mut,
+        seeds=[b"auto_plan", auto_plan.authority.as_ref()],
+        bump=auto_plan.bump
+    )]
+    pub auto_plan: Account<'info, AutoPlan>,
+    #[account(mut, seeds=[STAKE_POOL_SEED], bump=stake_pool.bump)]
+    pub stake_pool: Account<'info, StakePool>,
+    #[account(
+        mut,
+        seeds=[STAKE_POSITION_SEED, auto_plan.authority.as_ref()],
+        bump=stake_position.bump,
+        constraint=stake_position.authority == auto_plan.authority @ MyneError::InvalidReceiptAuthority
+    )]
+    pub stake_position: Account<'info, StakePosition>,
+    /// Any signer may relay the owner-authorized reinvestment. No funds can be
+    /// directed to this account.
+    pub executor: Signer<'info>,
+}
+#[derive(Accounts)]
 #[instruction(round_id: u64, nonce: u64)]
 pub struct ExecuteAutoPlan<'info> {
     #[account(seeds=[CONFIG_SEED], bump=config.bump)]
@@ -5082,6 +5195,13 @@ pub struct AutoPlanConfigured {
 #[event]
 pub struct AutoPlanFunded {
     pub authority: Pubkey,
+    pub lamports: u64,
+    pub balance_lamports: u64,
+}
+#[event]
+pub struct AutoPlanRewardsReinvested {
+    pub authority: Pubkey,
+    pub executor: Pubkey,
     pub lamports: u64,
     pub balance_lamports: u64,
 }
