@@ -64,3 +64,15 @@ test('an existing auto plan owns the primary Mine action', async () => {
   assert.match(minePage, /if \(state\.plan\?\.enabled\)[\s\S]*is already active\. Use the plan controls to top up or cancel it/);
   assert.match(styles, /#deploy\.auto-plan-status:disabled \{[\s\S]*background:\s*#f3f3f4 !important;[\s\S]*opacity:\s*1 !important/);
 });
+
+test('Auto-mine controls use the final MYNE surface hierarchy', async () => {
+  const [main, styles] = await Promise.all([
+    readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/viewport-fit.css', import.meta.url), 'utf8'),
+  ]);
+  assert.match(main, /box\.dataset\.planState = stalled \? 'stalled' : 'active'/);
+  assert.match(main, /\$\{planModeLabel\} \$\{stalled \? 'PAUSED' : 'ACTIVE'\}/);
+  assert.match(styles, /\.deploy-panel > \.auto-plan \{[\s\S]*background:\s*#101012 !important;[\s\S]*box-shadow:/);
+  assert.match(styles, /\.auto-plan-actions \.auto-plan-topup,[\s\S]*background:\s*#f3f3f4 !important;[\s\S]*color:\s*#09090b !important/);
+  assert.match(styles, /button\[data-auto-reward="burn"\]\.active \{[\s\S]*var\(--gld-spectrum\) border-box !important/);
+});

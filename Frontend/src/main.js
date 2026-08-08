@@ -1702,6 +1702,15 @@ const saveStakingApySnapshot = (metrics) => {
   return snapshot;
 };
 
+const stakingApyWindowLabel = (metrics, { paused = false } = {}) => {
+  if (metrics?.apyStandardPct == null) return 'LAST 30 MINUTES · NON-COMPOUNDING EST.';
+  const minutes = Math.max(1, Math.round((metrics.aprWindowDays ?? 0) * 1440));
+  const observed = minutes <= 2 ? 'LATEST VERIFIED ROUND' : `LATEST VERIFIED ${minutes}M`;
+  if (paused) return `PAUSED SNAPSHOT · ${observed}`;
+  if (metrics.aprFallback) return `${observed} · NON-COMPOUNDING EST.`;
+  return 'LAST 30 MINUTES · NON-COMPOUNDING EST.';
+};
+
 const updateStake = () => {
   const principal = Math.max(0, Number(stakeAmount.value || 0));
   const s = stakingState;
@@ -1964,11 +1973,7 @@ const refreshStakingMetrics = async () => {
     setMetric('#stake-flex-apy', formatApyPercent(m.apyStandardPct));
     setMetric('#stake-burn-apy', formatApyPercent(m.apyBurnPct));
     const apyWindowLabel = document.querySelector('#stake-apy-window-label');
-    if (apyWindowLabel) apyWindowLabel.textContent = paused && m.apyStandardPct != null
-      ? 'PAUSED SNAPSHOT · LAST VERIFIED 30M'
-      : m.aprFallback && m.apyStandardPct != null
-      ? 'LATEST VERIFIED 30M · HISTORICAL'
-      : 'LAST 30 MINUTES · NON-COMPOUNDING EST.';
+    if (apyWindowLabel) apyWindowLabel.textContent = stakingApyWindowLabel(m, { paused });
     setMetric('#metric-staked', m.totalStakedPrincipal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
     const poolText = m.rewardMode === 'eth'
       ? `${m.rewardsPoolEth < 0.001 && m.rewardsPoolEth > 0
@@ -2035,9 +2040,7 @@ const refreshStakingMetrics = async () => {
       setMetric('#stake-flex-apy', formatApyPercent(snapshot.apyStandardPct));
       setMetric('#stake-burn-apy', formatApyPercent(snapshot.apyBurnPct));
       const apyWindowLabel = document.querySelector('#stake-apy-window-label');
-      if (apyWindowLabel) apyWindowLabel.textContent = paused
-        ? 'PAUSED SNAPSHOT · LAST VERIFIED 30M'
-        : 'LATEST VERIFIED 30M · HISTORICAL';
+      if (apyWindowLabel) apyWindowLabel.textContent = stakingApyWindowLabel(snapshot, { paused });
       updateStakeFlexCard();
       updateProjection();
       return;
@@ -2530,6 +2533,9 @@ const updateProjection = () => {
     ? 'MYNE staking projection is waiting for live reward and market data.'
     : `${principal.toLocaleString()} MYNE in ${tierLabel} currently estimates ${projectionSol(ethReward)} SOL over ${projectionDays} days.`;
   setHref('#share-projection-x', `https://x.com/intent/post?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(calculatorUrl())}`);
+  if (!stakingCalculatorOverlay?.hidden && window.location.hash.includes('calculator=1')) {
+    window.history.replaceState(null, '', calculatorHash());
+  }
 };
 
 const roundedRect = (context, x, y, width, height, radius) => {
@@ -5058,8 +5064,8 @@ const relocateChat = (route) => {
   // stops existing.
   if (host === workspace) host.insertBefore(chatPanelNode, chatHomeAnchor);
   else host.appendChild(chatPanelNode);
-  // Moving a node resets its scrollTop to 0 — the TOP of the list, i.e. the oldest message. Put
-  // the reader back on the newest one, which is what they were looking at before the move.
+  // This is a one-time initial default. After it has run, layout moves preserve the reader's place
+  // instead of repeatedly forcing them back to the newest message.
   social?.showLatestMessages?.();
   // Crossing the breakpoint (rotation, desktop resize) has to hand the panel back.
   if (!PHONE.matches) closeSheets();
@@ -5069,8 +5075,8 @@ const relocateChat = (route) => {
 const setChat = (visible) => {
   workspace.classList.toggle('chat-hidden', !visible);
   document.querySelector('#show-chat')?.classList.toggle('visible', !visible);
-  // Opening it should always land on the newest message. On a phone the drawer was display:none
-  // until this moment, so any scroll position set while it was hidden was thrown away.
+  // A phone drawer has no measurable viewport while hidden, so its one initial newest-message
+  // position is applied on first open. Subsequent opens leave the reader where they were.
   if (visible) social?.showLatestMessages?.();
 };
 // closeSheets() is a no-op off-phone, and on a phone it is what actually dismisses the drawer —
@@ -5111,8 +5117,9 @@ const openSheet = (which) => {
   const already = target?.classList.contains('open');
   closeSheets();
   if (already) return; // tapping the same tab twice closes it
-  if (which === 'chat') setChat(true);
   target?.classList.add('open');
+  // Make the drawer measurable before applying its one page-load-only newest-message position.
+  if (which === 'chat') setChat(true);
   if (scrim && which === 'more') scrim.hidden = false;
   syncTabbar();
 };
@@ -5685,14 +5692,21 @@ const renderPlan = (state) => {
   if (!box) return;
   const plan = state.plan;
   box.hidden = !plan;
-  if (!plan) return;
+  if (!plan) {
+    delete box.dataset.planState;
+    delete box.dataset.rewardMode;
+    return;
+  }
+  const planModeLabel = plan.rewardMode === 'burn' ? 'AUTO-BURN' : 'AUTO-MINE';
+  box.dataset.rewardMode = plan.rewardMode === 'burn' ? 'burn' : 'accumulate';
 
   // A finished plan keeps its unspent deposit until it's withdrawn — show that state
   // explicitly so the balance is never stranded.
   if (!plan.enabled) {
+    box.dataset.planState = 'ended';
     box.innerHTML = `
       <div class="auto-plan-head">
-        <span class="auto-plan-live ended"><i></i>AUTO-ROUND ENDED</span>
+        <span class="auto-plan-live ended"><i></i>${planModeLabel} ENDED</span>
         <b>${chain.format.ethSmart(plan.balance)} SOL left</b>
       </div>
       <p class="auto-plan-note">This plan has finished, but its unspent deposit is still held by the contract. Withdraw it back to your wallet.</p>
@@ -5709,16 +5723,17 @@ const renderPlan = (state) => {
   const perRoundCost = receiptRent == null ? null : plan.amountPerPlay + receiptRent;
   const affordable = perRoundCost != null && perRoundCost > 0n ? plan.balance / perRoundCost : null;
   const stalled = affordable === 0n;
+  box.dataset.planState = stalled ? 'stalled' : 'active';
   const rounds = affordable == null
     ? '—'
     : plan.unlimited ? `~${affordable}` : String(plan.playsRemaining);
   box.innerHTML = `
     <div class="auto-plan-head">
-      <span class="auto-plan-live${stalled ? ' stalled' : ''}"><i></i>${stalled ? 'AUTO-ROUND PAUSED' : 'AUTO-ROUND ACTIVE'}</span>
+      <span class="auto-plan-live${stalled ? ' stalled' : ''}"><i></i>${planModeLabel} ${stalled ? 'PAUSED' : 'ACTIVE'}</span>
       <b>${affordable == null ? 'cost loading' : stalled ? 'needs top-up' : `${rounds} round${rounds === '1' ? '' : 's'} left`}</b>
     </div>
     <p class="auto-plan-summary">${plan.tiles.length} tile${plan.tiles.length === 1 ? '' : 's'} · ${chain.format.ethSmart(plan.amountPerPlay)} SOL per round · ${chain.format.ethSmart(plan.balance)} SOL left</p>
-    <p class="auto-plan-reward-mode"><b>${plan.rewardMode === 'burn' ? 'AUTO-BURN' : 'AUTO-MINE'}</b> · ${plan.rewardMode === 'burn' ? 'Stake + burn your MYNE for 5× staking pool weight. 0% Claim Fee' : 'Keep your MYNE in-system and accumulating. 10% Claim Fee'}</p>
+    <p class="auto-plan-reward-mode"><b>REWARD MODE</b><span>${plan.rewardMode === 'burn' ? 'Stake + burn MYNE · 5× staking weight · 0% claim fee' : 'MYNE accumulates in-system · 10% claim fee'}</span></p>
     ${affordable == null ? '<p class="auto-plan-warn">Live receipt-rent quote unavailable. Round capacity is not estimated until the RPC returns it.</p>' : ''}
     ${stalled ? `<p class="auto-plan-warn">Balance ${chain.format.ethSmart(plan.balance)} SOL is below the ${chain.format.ethSmart(perRoundCost)} SOL needed for one more round (exact wager + receipt rent). Top up to resume, or withdraw what's left.</p>` : ''}
     ${plan.autoClaim

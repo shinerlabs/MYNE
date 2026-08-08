@@ -475,6 +475,7 @@ const trimChatToLimit = () => {
  * it immediately — this must never fight someone reading scrollback.
  */
 let releasePin = null;
+let initialLatestPositioned = false;
 const PIN_RELEASE_EVENTS = ['wheel', 'touchmove', 'keydown', 'pointerdown'];
 export const pinChatToLatest = (holdMs = 1200) => {
   const el = chatMessagesEl;
@@ -495,6 +496,21 @@ export const pinChatToLatest = (holdMs = 1200) => {
     else stop();
   };
   step();
+};
+
+/**
+ * Apply the newest-message default once per page load.
+ *
+ * Desktop chat is visible while history loads, so it is positioned immediately. On mobile the
+ * drawer is initially hidden and has no measurable viewport; leave the request pending until the
+ * user first opens it. Later panel opens and layout moves must preserve the reader's position.
+ */
+export const pinInitialChatToLatest = (holdMs = 1200) => {
+  const el = chatMessagesEl;
+  if (!el || initialLatestPositioned || !el.isConnected || el.clientHeight <= 0) return false;
+  initialLatestPositioned = true;
+  pinChatToLatest(holdMs);
+  return true;
 };
 
 let pipEl = null;
@@ -590,11 +606,13 @@ export async function loadChatHistory() {
     chatMessagesEl.appendChild(empty);
 
     [...rows].reverse().forEach(appendChatMessage);
-    pinChatToLatest();
+    const initiallyPositioned = pinInitialChatToLatest();
     await hydrateReactions(rows.map((r) => r.id));
     // Reactions land after the await and add a row of chips to any message carrying one, so the
-    // list is taller now than when the pin above started. Re-pin briefly rather than assume it held.
-    pinChatToLatest(400);
+    // list is taller now than when the pin above started. Finish the one initial positioning pass,
+    // but do not create a new auto-scroll rule for later panel opens.
+    if (initiallyPositioned) pinChatToLatest(400);
+    else pinInitialChatToLatest(400);
   } catch (err) {
     console.warn('chat history request failed', err);
   }

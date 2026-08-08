@@ -1,7 +1,7 @@
 import { supabase, isSocialConfigured } from '../social/config.js';
 import { ROUND_DURATION } from './config.js';
 import { nowSeconds as chainNowSeconds } from './round.js';
-import { selectLatestCompleteStakingRewardWindow } from './staking-apy.js';
+import { selectLatestVerifiedStakingRewardWindow } from './staking-apy.js';
 import {
   commitmentHexFromAccount, describeRandomnessRound, normalizeProofHex,
 } from './randomness-mode.js';
@@ -17,8 +17,9 @@ import {
  * Every function here returns `null` rather than throwing when the index is unavailable. Local
  * and Devnet can fall back to direct chain reads; Mainnet refuses unbounded account scans.
  *
- * The LIVE round is never served from here. It is unresolved by definition and the indexer only
- * writes rounds up to `current - 1`.
+ * The active round is read directly from its Round PDA by rounds-page.js. The index remains the
+ * source for older rows; callers can cap it at the active id and exclude that id so a pre-opened
+ * future round or an indexer copy of the live round cannot duplicate/out-rank the chain row.
  */
 
 /**
@@ -247,15 +248,22 @@ export async function loadIndexedRoundStats() {
  *
  * @returns {Promise<null|{rows, total, filteredTotal, summary}>} null → caller should use chain
  */
-export async function loadIndexedRounds({ page, pageSize, filter }) {
+export async function loadIndexedRounds({
+  page, pageSize, filter, currentRoundId = null, offset = null, excludeRoundId = null,
+}) {
   if (!(await indexAvailable())) return null;
   try {
-    const from = page * pageSize;
+    const from = offset ?? page * pageSize;
 
-    const listQuery = applyFilter(
+    let listQuery = applyFilter(
       supabase.from('mine_rounds').select(ROUND_COLUMNS, { count: 'exact' }),
       filter,
-    ).order('round_id', { ascending: false }).range(from, from + pageSize - 1);
+    );
+    if (currentRoundId !== null) listQuery = listQuery.lte('round_id', String(currentRoundId));
+    if (excludeRoundId !== null) listQuery = listQuery.neq('round_id', String(excludeRoundId));
+    listQuery = listQuery
+      .order('round_id', { ascending: false })
+      .range(from, from + pageSize - 1);
 
     const [list, stats] = await Promise.all([listQuery, loadIndexedRoundStats()]);
     if (list.error || !stats) return null;
@@ -323,7 +331,7 @@ export async function loadMyBetRounds(address) {
   }
 }
 
-const STAKING_WINDOW_CACHE_MS = 30_000;
+const STAKING_WINDOW_CACHE_MS = 5_000;
 const ROUND_CADENCE_SECONDS = Number(ROUND_DURATION);
 const STAKING_WINDOW_FALLBACK_LOOKBACK_SECONDS = 6 * 60 * 60;
 let stakingWindowCache = null;
@@ -377,7 +385,7 @@ export async function loadStakingRewardWindow(
       .order('settles_at', { ascending: true })
       .limit(1000);
     if (error) return null;
-    const selected = selectLatestCompleteStakingRewardWindow(data ?? [], {
+    const selected = selectLatestVerifiedStakingRewardWindow(data ?? [], {
       windowMinutes,
       roundCadenceSeconds: ROUND_CADENCE_SECONDS,
       observedAt,
@@ -389,7 +397,7 @@ export async function loadStakingRewardWindow(
     const staleLatestRow = observedAt - end > ROUND_CADENCE_SECONDS * 3;
     return {
       ...selected,
-      isFallback: selected.lastSettlesAt !== end || staleLatestRow,
+      isFallback: selected.isPartial || selected.lastSettlesAt !== end || staleLatestRow,
     };
   })().catch(() => null);
   stakingWindowCache = { key, promise };

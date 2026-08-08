@@ -2,7 +2,7 @@ import { isSocialConfigured } from './config.js';
 import { configureSession, getSession, clearSession } from './session.js';
 import {
   mountChat, setChatAdmin, setChatComposeEnabled, getMessageIndex,
-  pinChatToLatest,
+  pinInitialChatToLatest,
 } from './chat.js';
 import {
   configureProfile, loadMyProfile, openProfileEditor, applyProfileBroadcast, getMyProfile,
@@ -113,11 +113,8 @@ export function mountSocial(host) {
 
   return {
     syncAccount,
-    /**
-     * Jump the message list to the newest message. main.js calls this whenever it shows or MOVES
-     * the panel, because both leave the list scrolled to the oldest message. See pinChatToLatest.
-     */
-    showLatestMessages: pinChatToLatest,
+    /** Apply the newest-message default once, when the chat first has a visible viewport. */
+    showLatestMessages: pinInitialChatToLatest,
     getMyProfile,
     loadPublicProfile,
     buildAvatar,

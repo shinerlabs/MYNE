@@ -8,6 +8,7 @@ import {
   positionApyPercent,
   positionRewardEstimate,
   selectLatestCompleteStakingRewardWindow,
+  selectLatestVerifiedStakingRewardWindow,
   selectPausedApySnapshot,
   stakingApyVariants,
   stakingApySnapshot,
@@ -176,6 +177,59 @@ test('paused APY uses the newest earlier fully verified window across an index g
   });
 });
 
+test('APY falls back to the newest verified contiguous period and updates with each fee row', () => {
+  const beforeGap = completeRows();
+  const latest = [
+    { round_id: '30', resolved: true, settles_at: 1_330, staking_net_lamports: '600' },
+    { round_id: '31', resolved: true, settles_at: 1_395, staking_net_lamports: '700' },
+    { round_id: '32', resolved: true, settles_at: 1_460, staking_net_lamports: '800' },
+  ];
+  const first = selectLatestVerifiedStakingRewardWindow([...beforeGap, ...latest], {
+    windowMinutes: 30,
+    roundCadenceSeconds: 65,
+    observedAt: 1_500,
+  });
+  assert.deepEqual(first, {
+    complete: true,
+    windowMinutes: 3.25,
+    requestedWindowMinutes: 30,
+    rewardLamports: 2_100n,
+    rounds: 3,
+    firstSettlesAt: 1_330,
+    lastSettlesAt: 1_460,
+    isPartial: true,
+  });
+
+  const next = selectLatestVerifiedStakingRewardWindow([...beforeGap, ...latest, {
+    round_id: '33', resolved: true, settles_at: 1_525, staking_net_lamports: '900',
+  }], {
+    windowMinutes: 30,
+    roundCadenceSeconds: 65,
+    observedAt: 1_540,
+  });
+  assert.equal(next.rounds, 4);
+  assert.equal(next.rewardLamports, 3_000n);
+  assert.equal(next.lastSettlesAt, 1_525);
+  assert.equal(next.windowMinutes, 65 * 4 / 60);
+});
+
+test('APY fallback never interprets unresolved or missing-fee rows as zero', () => {
+  const rows = [
+    { round_id: '40', resolved: true, settles_at: 2_000, staking_net_lamports: '500' },
+    { round_id: '41', resolved: false, settles_at: 2_065, staking_net_lamports: null },
+    { round_id: '42', resolved: true, settles_at: 2_130, staking_net_lamports: '700' },
+  ];
+  const selected = selectLatestVerifiedStakingRewardWindow(rows, {
+    windowMinutes: 30,
+    roundCadenceSeconds: 65,
+    observedAt: 2_140,
+  });
+  assert.equal(selected.rounds, 1);
+  assert.equal(selected.rewardLamports, 700n);
+  assert.equal(selected.firstSettlesAt, 2_130);
+  assert.equal(selected.lastSettlesAt, 2_130);
+});
+
 test('staking reward window rejects a missing scheduled id even when timestamps look continuous', () => {
   const rows = completeRows();
   rows[2] = { ...rows[2], round_id: '13' };
@@ -267,8 +321,8 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(main, /stakingMetricsState = null;[\s\S]*#header-staking-apr[\s\S]*updateStakeFlexCard\(\)/);
   assert.match(main, /requestId !== stakingMetricsRefreshId/);
   assert.match(main, /const paused = current\.protocolPaused === true/);
-  assert.match(main, /PAUSED SNAPSHOT · LAST VERIFIED 30M/);
-  assert.match(main, /LATEST VERIFIED 30M · HISTORICAL/);
+  assert.match(main, /PAUSED SNAPSHOT · \$\{observed\}/);
+  assert.match(main, /\$\{observed\} · NON-COMPOUNDING EST\./);
   assert.match(main, /aprFallback: !paused/);
   assert.match(main, /selectPausedApySnapshot\(current, previousApy\)/);
   assert.match(main, /ctx\.fillText\('POSITION APY'/);
@@ -288,6 +342,7 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(rounds, /nowSeconds = Number\(chainNowSeconds\(\)\)/);
   assert.match(rounds, /\.eq\('resolved', true\)[\s\S]*\.not\('staking_net_lamports', 'is', null\)/);
   assert.match(rounds, /STAKING_WINDOW_FALLBACK_LOOKBACK_SECONDS/);
-  assert.match(rounds, /selectLatestCompleteStakingRewardWindow\(data \?\? \[\],/);
-  assert.match(rounds, /isFallback: selected\.lastSettlesAt !== end \|\| staleLatestRow/);
+  assert.match(rounds, /selectLatestVerifiedStakingRewardWindow/);
+  assert.match(rounds, /selectLatestVerifiedStakingRewardWindow\(data \?\? \[\],/);
+  assert.match(rounds, /isFallback: selected\.isPartial \|\| selected\.lastSettlesAt !== end \|\| staleLatestRow/);
 });

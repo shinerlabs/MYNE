@@ -1,6 +1,9 @@
-import { readRoundsRange, readWinnerCounts, readMyClaimStatus, readExpectedRewards, readRoundIndexAtResolve, countUnknownClaimStatus } from './lottery.js';
+import {
+  readRound, readRoundsRange, readWinnerCounts, readMyClaimStatus, readExpectedRewards,
+  readRoundIndexAtResolve, countUnknownClaimStatus,
+} from './lottery.js';
 import { settledSolReward } from './round-rewards.js';
-import { roundIdAt, roundEnd } from './round.js';
+import { roundIdAt, roundEnd, roundState } from './round.js';
 import { loadIndexedRounds, loadSettledRounds } from './rounds-index.js';
 import { NETWORK } from '../app-config.js';
 
@@ -20,7 +23,7 @@ import { NETWORK } from '../app-config.js';
  * A short-lived cache of the raw scan means paging/filtering doesn't re-scan the chain on every
  * click; it refreshes when the round advances or the cache ages past STALE_MS.
  */
-export const ROUND_PAGE_SIZE = 12;
+export const ROUND_PAGE_SIZE = 50;
 const STALE_MS = 3000;
 
 let cache = { all: [], fetchedAt: 0, current: -1n, truncated: false };
@@ -38,6 +41,37 @@ const decorate = (r) => {
 
 const matchesFilter = (r, filter) => filter === 'all'
   || (filter === 'mined' ? r.status === 'settled' && r.totalWager > 0n : r.mode === filter);
+
+/**
+ * Convert the exact active Round PDA into the same row shape as indexed history.
+ * A missing PDA is not invented as a round; once the provider pre-opens it, the row appears.
+ */
+export function currentRoundHistoryEntry({ roundId, round, phase, secondsLeft }) {
+  if (!round || BigInt(round.requestedAt ?? 0) <= 0n) return null;
+  const activeId = BigInt(round.id ?? roundId);
+  if (activeId !== BigInt(roundId)) return null;
+  const row = decorate({ ...round, roundId: activeId });
+  if (row.resolved) return { ...row, isLive: true, phase, secondsLeft };
+  const status = phase === 'betting' ? 'live' : 'resolving';
+  return { ...row, status, mode: status, isLive: true, phase, secondsLeft };
+}
+
+const indexedWindow = (page, pageSize, hasLive) => ({
+  offset: hasLive && page > 0 ? page * pageSize - 1 : page * pageSize,
+  pageSize: hasLive && page === 0 ? pageSize - 1 : pageSize,
+});
+
+async function readCurrentRoundEntry(current) {
+  const timing = roundState();
+  if (timing.roundId !== current) return null;
+  const round = await readRound(current);
+  return currentRoundHistoryEntry({
+    roundId: current,
+    round,
+    phase: timing.phase,
+    secondsLeft: timing.secondsLeft,
+  });
+}
 
 /**
  * @returns {{rows, page, pages, total, filteredTotal, truncated, summary}}
@@ -99,30 +133,63 @@ async function buildClaimable(settled, mine, account) {
  * still read from the chain, because they are per-account state the indexer does not hold.
  * What the index removes is the full `getRound` scan — the part that was capped at 2000 rounds.
  */
-async function loadFromIndex({ page, pageSize, account, filter, current }) {
-  const indexed = await loadIndexedRounds({ page, pageSize, filter, currentRoundId: current });
+async function loadFromIndex({ page, pageSize, account, filter, current, liveRound }) {
+  const hasLive = filter === 'all' && Boolean(liveRound);
+  const loadPage = async (targetPage) => {
+    const window = indexedWindow(targetPage, pageSize, hasLive);
+    return loadIndexedRounds({
+      page: targetPage,
+      pageSize: window.pageSize,
+      offset: window.offset,
+      filter,
+      currentRoundId: current,
+      excludeRoundId: hasLive ? current : null,
+    });
+  };
+  const indexed = await loadPage(page);
   if (!indexed) return null;
   // Scoped to this account's own bets when the index can say — otherwise every settled round.
   const settled = await loadSettledRounds(account);
   if (!settled) return null; // half the data would mean a wrong claimable panel — bail to chain
 
-  const pages = Math.max(1, Math.ceil(indexed.filteredTotal / pageSize));
+  const filteredTotal = indexed.filteredTotal + (hasLive ? 1 : 0);
+  const pages = Math.max(1, Math.ceil(filteredTotal / pageSize));
   const safePage = Math.min(Math.max(0, page), pages - 1);
   // The query already ran at the requested page; if that page no longer exists (filter changed,
   // history shrank) re-run at the clamped one rather than rendering an empty table.
-  const rowsRaw = safePage === page
-    ? indexed.rows
-    : (await loadIndexedRounds({ page: safePage, pageSize, filter, currentRoundId: current }))?.rows ?? [];
+  const finalIndexed = safePage === page ? indexed : await loadPage(safePage);
+  const rowsRaw = finalIndexed?.rows ?? [];
+  const slice = hasLive && safePage === 0 ? [liveRound, ...rowsRaw] : rowsRaw.map(decorate);
+  if (hasLive && safePage === 0) {
+    for (let index = 1; index < slice.length; index += 1) slice[index] = decorate(slice[index]);
+  }
 
-  return { indexed, settled, pages, safePage, slice: rowsRaw.map(decorate) };
+  const total = hasLive ? filteredTotal : finalIndexed.filteredTotal;
+  const summary = hasLive
+    ? { ...finalIndexed.summary, count: Math.max(finalIndexed.summary.count, total) }
+    : finalIndexed.summary;
+
+  return {
+    indexed: { ...finalIndexed, filteredTotal, total, summary },
+    settled,
+    pages,
+    safePage,
+    slice,
+  };
 }
 
-export async function loadRoundHistory({ page = 0, pageSize = ROUND_PAGE_SIZE, account = null, filter = 'all', force = false } = {}) {
+export async function loadRoundHistory({
+  page = 0, pageSize = ROUND_PAGE_SIZE, account = null, filter = 'all', force = false,
+  includeLive = false,
+} = {}) {
   const current = roundIdAt();
   const now = Date.now();
   const stale = force || current !== cache.current || (now - cache.fetchedAt) > STALE_MS || !cache.all.length;
+  const liveRound = includeLive && filter === 'all'
+    ? await readCurrentRoundEntry(current).catch(() => null)
+    : null;
 
-  const viaIndex = await loadFromIndex({ page, pageSize, account, filter, current });
+  const viaIndex = await loadFromIndex({ page, pageSize, account, filter, current, liveRound });
   if (viaIndex) {
     const { indexed, settled, pages, safePage, slice } = viaIndex;
     const pageSettled = slice.filter((r) => r.status === 'settled');
@@ -133,7 +200,7 @@ export async function loadRoundHistory({ page = 0, pageSize = ROUND_PAGE_SIZE, a
     const rows = slice.map((r) => ({
       ...r,
       winners: counts.get(String(r.roundId)) ?? 0n,
-      myBet: mine.get(String(r.roundId))?.myBet ?? 0n,
+      myBet: mine.get(String(r.roundId))?.myBet ?? r.myBet ?? 0n,
       claimed: mine.get(String(r.roundId))?.claimed ?? false,
     }));
     const claimable = await buildClaimable(settled, mine, account);
@@ -169,7 +236,9 @@ export async function loadRoundHistory({ page = 0, pageSize = ROUND_PAGE_SIZE, a
     }
   }
 
-  const all = cache.all;
+  const all = liveRound
+    ? [liveRound, ...cache.all.filter((row) => row.roundId !== liveRound.roundId)]
+    : cache.all;
   const filtered = filter === 'all' ? all : all.filter((r) => matchesFilter(r, filter));
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(Math.max(0, page), pages - 1);

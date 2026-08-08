@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const [chat, social, profile, styles, baseStyles] = await Promise.all([
+const [chat, social, profile, styles, baseStyles, main] = await Promise.all([
   readFile(new URL('../src/social/chat.js', import.meta.url), 'utf8'),
   readFile(new URL('../src/social/index.js', import.meta.url), 'utf8'),
   readFile(new URL('../src/social/profile.js', import.meta.url), 'utf8'),
   readFile(new URL('../src/chat-social.css', import.meta.url), 'utf8'),
   readFile(new URL('../src/style.css', import.meta.url), 'utf8'),
+  readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
 ]);
 
 test('locked chat keeps a neutral composer placeholder', () => {
@@ -26,6 +27,15 @@ test('disconnected chat does not render its own wallet connection card', () => {
 test('chat history limit remains internal rather than appearing as a feed caption', () => {
   assert.doesNotMatch(chat, /Showing last/);
   assert.doesNotMatch(chat, /chat-history-status/);
+});
+
+test('chat defaults to latest only once per page load', () => {
+  assert.match(chat, /let initialLatestPositioned = false/);
+  assert.match(chat, /initialLatestPositioned \|\| !el\.isConnected \|\| el\.clientHeight <= 0/);
+  assert.match(chat, /initialLatestPositioned = true;[\s\S]*pinChatToLatest\(holdMs\)/);
+  assert.match(social, /showLatestMessages:\s*pinInitialChatToLatest/);
+  assert.doesNotMatch(social, /showLatestMessages:\s*pinChatToLatest/);
+  assert.match(main, /target\?\.classList\.add\('open'\);[\s\S]*if \(which === 'chat'\) setChat\(true\)/);
 });
 
 test('fallback chat avatars use stable wallet-derived MYNE gradients', () => {

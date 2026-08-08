@@ -260,3 +260,76 @@ export function selectLatestCompleteStakingRewardWindow(
   }
   return null;
 }
+
+/**
+ * Prefer the exact requested window, then fall back to the newest contiguous
+ * run of fully resolved fee rows. A gap shortens the observed period; it is
+ * never silently counted as a zero-reward round. This keeps the displayed APY
+ * responsive after an index/keeper interruption while preserving an honest,
+ * auditable denominator for the estimate.
+ */
+export function selectLatestVerifiedStakingRewardWindow(
+  rows,
+  {
+    windowMinutes,
+    roundCadenceSeconds,
+    observedAt,
+    maxRows = 1000,
+    minimumFallbackRounds = 1,
+  },
+) {
+  const exact = selectLatestCompleteStakingRewardWindow(rows, {
+    windowMinutes, roundCadenceSeconds, observedAt, maxRows,
+  });
+  if (exact) return { ...exact, isPartial: false };
+  if (!Array.isArray(rows) || rows.length === 0 || rows.length >= maxRows
+    || !Number.isFinite(windowMinutes) || !(windowMinutes > 0)
+    || !Number.isSafeInteger(roundCadenceSeconds) || roundCadenceSeconds <= 0
+    || !Number.isSafeInteger(observedAt)
+    || !Number.isSafeInteger(minimumFallbackRounds) || minimumFallbackRounds < 1) return null;
+
+  const targetSeconds = Math.round(windowMinutes * 60);
+  const maxSettlementGapSeconds = roundCadenceSeconds + 5;
+  const accepted = [];
+  let expectedRoundId = null;
+  let laterSettlesAt = null;
+
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    const roundId = unsignedInteger(row?.round_id);
+    const settlesAt = Number(row?.settles_at);
+    const reward = unsignedInteger(row?.staking_net_lamports);
+    const valid = roundId !== null && reward !== null && row?.resolved === true
+      && Number.isSafeInteger(settlesAt) && settlesAt <= observedAt;
+    if (!valid) {
+      if (accepted.length) break;
+      continue;
+    }
+    if (expectedRoundId !== null && roundId + 1n !== expectedRoundId) break;
+    if (laterSettlesAt !== null) {
+      const gap = laterSettlesAt - settlesAt;
+      if (gap <= 0 || gap > maxSettlementGapSeconds) break;
+    }
+    accepted.push({ settlesAt, reward });
+    expectedRoundId = roundId;
+    laterSettlesAt = settlesAt;
+    if (accepted.length * roundCadenceSeconds >= targetSeconds) break;
+  }
+
+  if (accepted.length < minimumFallbackRounds) return null;
+  accepted.reverse();
+  const firstSettlesAt = accepted[0].settlesAt;
+  const lastSettlesAt = accepted.at(-1).settlesAt;
+  const observedSeconds = Math.min(targetSeconds, accepted.length * roundCadenceSeconds);
+  const effectiveWindowMinutes = observedSeconds / 60;
+  return {
+    complete: true,
+    windowMinutes: effectiveWindowMinutes,
+    requestedWindowMinutes: windowMinutes,
+    rewardLamports: accepted.reduce((total, row) => total + row.reward, 0n),
+    rounds: accepted.length,
+    firstSettlesAt,
+    lastSettlesAt,
+    isPartial: effectiveWindowMinutes < windowMinutes,
+  };
+}
