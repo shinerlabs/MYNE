@@ -76,7 +76,10 @@ pub const SLOT_HASHES_SYSVAR: Pubkey = pubkey!("SysvarS1otHashes1111111111111111
 /// yet been locked.
 pub const SERVER_RANDOMNESS_SLOT_FLAG: u64 = 1u64 << 63;
 pub const SERVER_RANDOMNESS_PENDING: u64 = u64::MAX;
-pub const SERVER_ENTROPY_DELAY_SLOTS: u64 = 16;
+/// One strictly-future slot keeps the entropy unknowable while betting is
+/// open, but lets settlement complete inside the five-second winner phase.
+/// A longer delay can push the confirmed winner into the next betting round.
+pub const SERVER_ENTROPY_DELAY_SLOTS: u64 = 1;
 const SERVER_RANDOMNESS_SLOT_MASK: u64 = !SERVER_RANDOMNESS_SLOT_FLAG;
 const SLOT_HASHES_MAX_ENTRIES: usize = 512;
 const SLOT_HASHES_HEADER_SIZE: usize = 8;
@@ -2981,8 +2984,8 @@ mod motherlode_tests {
         METEORA_LB_PAIR_RESERVE_Y_OFFSET, METEORA_LB_PAIR_SIZE, METEORA_LB_PAIR_STATUS_OFFSET,
         METEORA_LB_PAIR_TOKEN_X_MINT_OFFSET, METEORA_LB_PAIR_TOKEN_Y_MINT_OFFSET,
         MINING_PROTOCOL_FEE_BPS, MINING_SHARE_SCALE, MOTHERLODE_ODDS, REWARD_SCALE,
-        SERVER_RANDOMNESS_PENDING, SERVER_RANDOMNESS_PROGRAM, SERVER_RANDOMNESS_SLOT_MASK,
-        SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
+        SERVER_ENTROPY_DELAY_SLOTS, SERVER_RANDOMNESS_PENDING, SERVER_RANDOMNESS_PROGRAM,
+        SERVER_RANDOMNESS_SLOT_MASK, SWITCHBOARD_DEVNET_PROGRAM, SWITCHBOARD_MAINNET_PROGRAM,
     };
     use super::{
         decode_server_randomness_slot, encode_server_randomness_slot, is_fresh_switchboard_commit,
@@ -3326,6 +3329,15 @@ mod motherlode_tests {
         assert!(decode_server_randomness_slot(SERVER_RANDOMNESS_PENDING).is_err());
         assert!(encode_server_randomness_slot(0).is_err());
         assert!(encode_server_randomness_slot(SERVER_RANDOMNESS_SLOT_MASK).is_err());
+    }
+
+    #[test]
+    fn server_entropy_targets_the_next_slot_for_the_five_second_result_phase() {
+        // The lock instruction is accepted only after betting closes. A
+        // one-slot delay therefore remains future/unavailable at lock time,
+        // while avoiding the old sixteen-slot delay that outlived the entire
+        // five-second result phase.
+        assert_eq!(SERVER_ENTROPY_DELAY_SLOTS, 1);
     }
 
     #[test]

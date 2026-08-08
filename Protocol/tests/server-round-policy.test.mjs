@@ -79,6 +79,19 @@ test('server keeper binds before start, preserves the future-slot mix, and settl
   assert.doesNotMatch(source, /@switchboard-xyz/);
 });
 
+test('server entropy delay fits inside the five-second winner phase', async () => {
+  const source = await readFile(
+    new URL('../programs/myne_protocol/src/lib.rs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /SERVER_ENTROPY_DELAY_SLOTS:\s*u64\s*=\s*1;/);
+  assert.match(
+    source,
+    /clock\.unix_timestamp\s*>=\s*round\.betting_ends_at[\s\S]*clock\s*\.slot[\s\S]*checked_add\(SERVER_ENTROPY_DELAY_SLOTS\)/,
+    'The next-slot target must still be locked only after betting closes',
+  );
+});
+
 test('generated keeper IDL includes every server commit-reveal instruction', async () => {
   const idl = JSON.parse(await readFile(
     new URL('../target/idl/myne_protocol.json', import.meta.url),
