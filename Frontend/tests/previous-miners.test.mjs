@@ -41,6 +41,14 @@ test('the same confirmed miner roster remains stable while the live round change
   // Live-round fields are intentionally ignored. Only a newer settled result may replace it.
   assert.equal(shouldRefreshConfirmedMiners({ ...previous, liveRoundId: 99n, totalWager: 1_000_000_000n }, '8', ''), false);
   assert.equal(shouldRefreshConfirmedMiners({ roundId: 9n, resolved: true }, '8', ''), true);
+  assert.equal(shouldRefreshConfirmedMiners({ roundId: 7n, resolved: true }, '8', ''), false);
+});
+
+test('the index refreshes the miners card without waiting for Solana RPC readiness', () => {
+  assert.match(main, /loadLatestPlayedSettledRound/);
+  assert.match(main, /loadIndexedMinerRoster/);
+  assert.match(main, /if \(document\.body\.dataset\.route === 'mine'\) void refreshIndexedConfirmedMiners\(\)/);
+  assert.match(main, /if \(route === 'mine'\) void refreshIndexedConfirmedMiners\(\);\s*if \(!protocolReady\) return;/);
 });
 
 test('the latest settled round remains authoritative across delayed reads', () => {

@@ -18,7 +18,8 @@ import { subscribeRoundIndexChanges } from './chain/round-index-realtime.js';
 import * as chain from './chain/mine-page.js';
 import { WALLET_LOGOS } from './wallet-logos.js';
 import {
-  loadRoundBets, loadIndexedRounds, loadIndexedRoundStats,
+  loadRoundBets, loadIndexedMinerRoster, loadIndexedRounds, loadIndexedRoundStats,
+  loadLatestPlayedSettledRound,
   loadRoundRandomnessProof,
 } from './chain/rounds-index.js';
 import { loadRoundHistory, ROUND_PAGE_SIZE } from './chain/rounds-page.js';
@@ -3209,7 +3210,10 @@ const setRoute = (route, { updateHash = true, aboutTarget } = {}) => {
   document.body.dataset.route = target;
   chain.setLive(target === 'mine');
   scheduleSocialLoad(target);
-  if (target === 'mine') renderChain(chain.state);
+  if (target === 'mine') {
+    renderChain(chain.state);
+    void refreshIndexedConfirmedMiners();
+  }
   if (target === 'about') setAboutSection(aboutTarget || 'intro');
   if (target === 'rounds') {
     void refreshRoundStats();
@@ -4573,9 +4577,13 @@ const PAGE_POLL_MS = 10000;
 const STAKING_POLL_MS = 5000;
 const ROUNDS_POLL_MS = 4000;
 window.setInterval(() => {
-  if (document.hidden || !protocolReady) return;
+  if (document.hidden) return;
+  const route = document.body.dataset.route;
+  // The public indexed roster remains available when Helius is reconnecting or rate-limited.
+  if (route === 'mine') void refreshIndexedConfirmedMiners();
+  if (!protocolReady) return;
   refreshGldPrice();   // route-independent: the Motherlode headline needs it on Mine too
-  switch (document.body.dataset.route) {
+  switch (route) {
     case 'referrals':
       refreshReferral(true);
       renderLeaderboard(true);
@@ -5328,6 +5336,7 @@ const CONFIRMED_MINERS_PAGE_SIZE = 10;
 const minerRoundResult = (miner) => {
   return {
     resolved: true,
+    amountKnown: miner.amountKnown !== false,
     ethWon: miner.eth ?? 0n,
     winningStake: miner.winningStake ?? 0n,
     winningTileTotal: miner.winningTileTotal ?? 0n,
@@ -5377,12 +5386,12 @@ const openRoundMinerCard = (wallet, anchor) => {
     const title = amount > 0n ? ` title="Tile ${index + 1}: ${chain.format.ethSmart(amount)} SOL"` : '';
     return `<i class="${classes}"${title}>${index + 1}</i>`;
   }).join('');
-  const solReward = result.resolved
+  const solReward = result.resolved && result.amountKnown
     ? `${solIcon('miner-card-eth')}<b>${chain.format.ethSmart(result.ethWon)}</b>`
-    : '<em>Pending result</em>';
-  const myneReward = result.resolved
+    : '<em>Exact reward pending</em>';
+  const myneReward = result.resolved && result.amountKnown
     ? `<img src="/myne-token-icon.svg" alt=""/><b>${chain.format.solIcon(result.gldWon, 2)}</b>`
-    : '<em>Pending result</em>';
+    : '<em>Exact reward pending</em>';
   const deployedTitle = 'Total SOL deployed across every tile';
   const winningShare = winningTileShareBps(result.winningStake, result.winningTileTotal);
   const winningStakeTitle = result.winningTileTotal > 0n
@@ -5514,6 +5523,25 @@ try {
     confirmedMinerRenderedKey = String(cached.roundId);
   }
 } catch { /* ignore malformed or unavailable cache */ }
+
+let indexedMinerRefreshId = 0;
+const refreshIndexedConfirmedMiners = async () => {
+  const requestId = ++indexedMinerRefreshId;
+  const round = await loadLatestPlayedSettledRound();
+  if (requestId !== indexedMinerRefreshId || !round) return;
+  const key = String(round.roundId);
+  if (confirmedMinerRenderedKey !== '') {
+    try { if (BigInt(key) <= BigInt(confirmedMinerRenderedKey)) return; } catch { return; }
+  }
+  const result = await loadIndexedMinerRoster(round);
+  if (requestId !== indexedMinerRefreshId || !result) return;
+  // A settled played round with a non-zero receipt count cannot authoritatively have an empty
+  // roster. Leave the previous card in place and retry on the next Realtime/poll signal.
+  if (!result.miners.length && round.totalReceipts > 0n) return;
+  renderConfirmedMiners(previousRoundMinerRoster(result), round.roundId, result.winningSquare);
+  confirmedMinerRenderedKey = key;
+  if (confirmedMinerRequestKey === key) confirmedMinerRequestKey = '';
+};
 
 const scheduleRoundMinersRefresh = (state) => {
   if (!protocolReady) return;
@@ -6134,6 +6162,7 @@ const scheduleRealtimeSurfaceRefresh = ({ indexed = false, staking = false, glob
 
 subscribeRoundIndexChanges(() => {
   // The indexer has now committed the row, so this refresh cannot race the database tail poll.
+  if (document.body.dataset.route === 'mine') void refreshIndexedConfirmedMiners();
   scheduleRealtimeSurfaceRefresh({ indexed: true, staking: true, global: true });
 });
 subscribeAccountActivity(protocolPdas.stakePool, () => {

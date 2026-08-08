@@ -606,6 +606,153 @@ export async function loadLatestPlayedSettledRoundId(atOrBefore = null) {
   }
 }
 
+/** Latest played settlement with the exact indexed fields needed by the Mine miners card. */
+export async function loadLatestPlayedSettledRound(atOrBefore = null) {
+  if (!(await indexAvailable())) return null;
+  try {
+    let query = supabase
+      .from('mine_rounds')
+      .select(ROUND_COLUMNS)
+      .eq('resolved', true)
+      .gt('total_wager_wei', 0)
+      .order('round_id', { ascending: false })
+      .limit(1);
+    if (atOrBefore !== null) query = query.lte('round_id', String(atOrBefore));
+    const { data, error } = await query;
+    if (error || !data?.length) return null;
+    return fromRow(data[0]);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reconstruct the complete previous-round miner roster from the append-only bet index.
+ *
+ * This mirrors the normal Split/Solo interval arithmetic used by the contract and keeps the
+ * public roster usable during an RPC outage. A Motherlode's accumulated SOL/MYNE pools are not
+ * present in the public round row, so those rare reward amounts remain explicitly unavailable
+ * until the direct account read succeeds; participant identity and deployment remain exact.
+ */
+export function indexedMinerRoster(round, rows) {
+  const receipts = new Map();
+  for (const row of rows) {
+    const square = Number(row.square);
+    if (!Number.isInteger(square) || square < 0 || square >= 25) continue;
+    const key = String(row.receipt);
+    const receipt = receipts.get(key) ?? {
+      authority: String(row.bettor),
+      amounts: Array(25).fill(0n),
+      starts: Array(25).fill(0n),
+      total: 0n,
+      rewardMode: 0,
+    };
+    const amount = unwrap(row.amount_wei);
+    receipt.amounts[square] += amount;
+    receipt.starts[square] = unwrap(row.cumulative_start_wei);
+    receipt.total += amount;
+    receipt.rewardMode = Math.max(receipt.rewardMode, Number(row.reward_mode ?? 0));
+    receipts.set(key, receipt);
+  }
+
+  const grouped = new Map();
+  for (const receipt of receipts.values()) {
+    const miner = grouped.get(receipt.authority) ?? {
+      address: receipt.authority,
+      tileBets: Array(25).fill(0n),
+      deployed: 0n,
+      receiptCount: 0,
+      claimed: false,
+      autoRound: false,
+      autoBurn: false,
+      autoMode: 'accumulate',
+      receipts: [],
+    };
+    receipt.amounts.forEach((amount, square) => { miner.tileBets[square] += amount; });
+    miner.deployed += receipt.total;
+    miner.receiptCount += 1;
+    miner.receipts.push(receipt);
+    if (receipt.rewardMode === 1) {
+      miner.autoRound = true;
+      miner.autoBurn = true;
+      miner.autoMode = 'burn';
+    }
+    grouped.set(receipt.authority, miner);
+  }
+
+  const winningSquare = Number(round.winningSquare);
+  const miners = [...grouped.values()].map((miner) => {
+    const winningStake = miner.tileBets[winningSquare] ?? 0n;
+    const onWinningTile = winningStake > 0n && round.winnerTotal > 0n;
+    const isSoloWinner = Boolean(round.singleMinerRound
+      && round.singleMinerWinner === miner.address);
+    const winningSolReward = miner.receipts.reduce((sum, receipt) => sum + intervalReward(
+      round.potForWinners,
+      receipt.starts[winningSquare],
+      receipt.amounts[winningSquare],
+      round.winnerTotal,
+    ), 0n);
+    const baseMyneReward = !onWinningTile ? 0n
+      : round.singleMinerRound ? (isSoloWinner ? round.bullionForWinners : 0n)
+        : miner.receipts.reduce((sum, receipt) => sum + intervalReward(
+          round.bullionForWinners,
+          receipt.starts[winningSquare],
+          receipt.amounts[winningSquare],
+          round.winnerTotal,
+        ), 0n);
+    return {
+      ...miner,
+      receipts: undefined,
+      tiles: miner.tileBets.filter((amount) => amount > 0n).length,
+      wagered: miner.deployed,
+      eth: winningSolReward,
+      winningStake,
+      winningTileTotal: round.winnerTotal,
+      winningSolReward,
+      motherlodeSolReward: 0n,
+      prizeLamports: round.potForWinners,
+      bullion: baseMyneReward,
+      won: round.jackpotHit ? miner.deployed > 0n : (onWinningTile || isSoloWinner),
+      onWinningTile,
+      isSoloWinner,
+      motherlodeShare: round.jackpotHit && miner.deployed > 0n,
+      amountKnown: !round.jackpotHit,
+    };
+  }).sort((a, b) => a.deployed === b.deployed
+    ? a.address.localeCompare(b.address)
+    : (a.deployed > b.deployed ? -1 : 1));
+
+  return {
+    winningSquare,
+    winnerTotal: round.winnerTotal,
+    solo: round.singleMinerRound,
+    winners: miners.filter((miner) => miner.won),
+    miners,
+  };
+}
+
+export async function loadIndexedMinerRoster(round) {
+  if (!round?.resolved || !(await indexAvailable())) return null;
+  try {
+    const rows = [];
+    for (let offset = 0; ; offset += PAGE) {
+      const { data: chunk, error } = await supabase
+        .from('mine_round_bets')
+        .select('receipt,bettor,square,amount_wei::text,cumulative_start_wei::text,reward_mode')
+        .eq('round_id', String(round.roundId))
+        .order('receipt', { ascending: true })
+        .order('square', { ascending: true })
+        .range(offset, offset + PAGE - 1);
+      if (error) return null;
+      rows.push(...(chunk ?? []));
+      if (!chunk || chunk.length < PAGE) break;
+    }
+    return indexedMinerRoster(round, rows);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Miners who bet on a given square in a given round, biggest stake first.
  *

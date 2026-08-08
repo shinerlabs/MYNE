@@ -29,7 +29,12 @@ export function previousConfirmedRoundId(currentRoundId) {
 
 export function shouldRefreshConfirmedMiners(lastResolved, renderedKey, requestKey) {
   const key = confirmedMinerRoundKey(lastResolved);
-  return key !== null && key !== renderedKey && key !== requestKey;
+  if (key === null || key === renderedKey || key === requestKey) return false;
+  // A delayed RPC response must never replace a newer roster already rendered from the index.
+  if (renderedKey !== '') {
+    try { return BigInt(key) > BigInt(renderedKey); } catch { return false; }
+  }
+  return true;
 }
 
 /** An on-chain zero receipt count makes an empty roster authoritative, not a transient read. */
