@@ -86,6 +86,12 @@ randomness keeper. In server mode each scheduled round is opened and bound durin
 60-second preparation lead, but neither manual nor Auto Mine wagers are accepted before the
 scheduled `opened_at`; the complete `[opened_at, betting_ends_at)` interval remains 60 seconds.
 Each persistent loop exits on an error so the supervisor can restart it with bounded backoff.
+The indexer and lifecycle loops also terminate any cycle that exceeds their configured watchdog
+deadline (120 seconds by default), then resume from their durable cursor in a fresh child process.
+Confirmed-program WebSocket notifications are debounced for 750 milliseconds before the next
+cycle; the normal polling interval remains the fallback if WebSocket delivery is interrupted.
+Lifecycle recovery processes a fair maximum of 12 rounds per cycle by default, preventing an old
+backlog from exhausting the shared RPC allowance or delaying current reward processing.
 
 Server mode commits a secret before betting, locks a future Solana SlotHashes entry only after
 betting closes, and publishes the reveal during settlement. It cannot select a known winning tile

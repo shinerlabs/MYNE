@@ -29,7 +29,7 @@ import {
   myneClaimProjection,
 } from './referral-index-policy.mjs';
 import { normalizeAnchorEventData, normalizeAnchorEventName } from './anchor-event-data.mjs';
-import { attachProgramWake, createWakeSignal } from './event-driven-loop.mjs';
+import { attachProgramWake, createWakeSignal, runWorkerTick } from './event-driven-loop.mjs';
 
 const { AnchorProvider, EventParser, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -55,6 +55,8 @@ const rpcIdentity = createHash('sha256')
 const INDEXER_ID = `${PROGRAM_ID.toBase58()}:${rpcIdentity}`;
 const REFERRAL_INDEXER_ID = `${INDEXER_ID}:referrals:v${REFERRAL_PROJECTION_VERSION}`;
 const intervalMs = Number(process.env.ROUND_INDEXER_INTERVAL_MS || 3000);
+const tickTimeoutMs = Number(process.env.ROUND_INDEXER_TICK_TIMEOUT_MS || 120_000);
+const realtimeDebounceMs = Number(process.env.ROUND_INDEXER_REALTIME_DEBOUNCE_MS || 750);
 const startSlot = Number(process.env.ROUND_INDEXER_START_SLOT ?? -1);
 const referralStartSlot = Number(process.env.REFERRAL_INDEXER_START_SLOT ?? startSlot);
 const maxPages = Number(process.env.ROUND_INDEXER_MAX_PAGES || 100);
@@ -64,6 +66,14 @@ const SERVER_RANDOMNESS_SLOT_FLAG = 1n << 63n;
 const SERVER_RANDOMNESS_SLOT_MASK = SERVER_RANDOMNESS_SLOT_FLAG - 1n;
 const SIGNED_BIGINT_MAX = SERVER_RANDOMNESS_SLOT_MASK;
 assert.ok(Number.isInteger(intervalMs) && intervalMs >= 1000, 'ROUND_INDEXER_INTERVAL_MS must be >= 1000');
+assert.ok(
+  Number.isInteger(tickTimeoutMs) && tickTimeoutMs >= 15_000 && tickTimeoutMs <= 600_000,
+  'ROUND_INDEXER_TICK_TIMEOUT_MS must be between 15000 and 600000',
+);
+assert.ok(
+  Number.isInteger(realtimeDebounceMs) && realtimeDebounceMs >= 250 && realtimeDebounceMs <= 5_000,
+  'ROUND_INDEXER_REALTIME_DEBOUNCE_MS must be between 250 and 5000',
+);
 assert.ok(Number.isInteger(referralStartSlot), 'REFERRAL_INDEXER_START_SLOT must be an integer');
 assert.ok(Number.isInteger(maxPages) && maxPages > 0, 'ROUND_INDEXER_MAX_PAGES must be positive');
 
@@ -970,7 +980,22 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   do {
     try {
-      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer', ...(await indexerTick()) }));
+      const result = await runWorkerTick({
+        worker: 'round-indexer',
+        timeoutMs: tickTimeoutMs,
+        task: indexerTick,
+        onTimeout: (error) => {
+          console.error(JSON.stringify({
+            at: new Date().toISOString(),
+            event: 'worker-tick-timeout',
+            worker: 'round-indexer',
+            timeoutMs: tickTimeoutMs,
+            message: error.message,
+          }));
+          process.exit(75);
+        },
+      });
+      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer', ...result }));
     } catch (error) {
       console.error(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer-error', message: String(error) }));
       if (process.env.FAIL_FAST === '1') {
@@ -978,6 +1003,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         break;
       }
     }
-    if (!once) await wake.wait(intervalMs);
+    if (!once && await wake.wait(intervalMs) === 'event') await sleep(realtimeDebounceMs);
   } while (!once);
 }

@@ -19,11 +19,11 @@ import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 import { loadExplicitSwitchboardEnv } from './production-switchboard-env.mjs';
 import {
   historicalLifecycleQuery,
-  mergeLifecycleRoundQueues,
   nextHistoricalLifecycleCursor,
   processLifecycleRoundQueue,
+  selectLifecycleRoundBatch,
 } from './lifecycle-queue-policy.mjs';
-import { attachProgramWake, createWakeSignal } from './event-driven-loop.mjs';
+import { attachProgramWake, createWakeSignal, runWorkerTick } from './event-driven-loop.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -46,6 +46,21 @@ assert.match(supabaseUrl, /^https:\/\//, 'SUPABASE_URL must use HTTPS');
 assert.ok(serviceRole, 'SUPABASE_SERVICE_ROLE_KEY is required for indexed keeper reads');
 
 const intervalMs = Math.max(1000, Number(process.env.LIFECYCLE_KEEPER_INTERVAL_MS || 5000));
+const tickTimeoutMs = Number(process.env.LIFECYCLE_TICK_TIMEOUT_MS || 120_000);
+const realtimeDebounceMs = Number(process.env.LIFECYCLE_REALTIME_DEBOUNCE_MS || 750);
+const roundBatchSize = Number(process.env.LIFECYCLE_ROUND_BATCH_SIZE || 12);
+assert.ok(
+  Number.isInteger(tickTimeoutMs) && tickTimeoutMs >= 15_000 && tickTimeoutMs <= 600_000,
+  'LIFECYCLE_TICK_TIMEOUT_MS must be between 15000 and 600000',
+);
+assert.ok(
+  Number.isInteger(realtimeDebounceMs) && realtimeDebounceMs >= 250 && realtimeDebounceMs <= 5_000,
+  'LIFECYCLE_REALTIME_DEBOUNCE_MS must be between 250 and 5000',
+);
+assert.ok(
+  Number.isInteger(roundBatchSize) && roundBatchSize >= 4 && roundBatchSize <= 50,
+  'LIFECYCLE_ROUND_BATCH_SIZE must be between 4 and 50',
+);
 const settleBatchSize = Math.max(1, Math.min(5, Number(process.env.RECEIPT_SETTLE_BATCH_SIZE || 3)));
 const closeBatchSize = Math.max(1, Math.min(8, Number(process.env.RECEIPT_CLOSE_BATCH_SIZE || 6)));
 const randomnessRetentionSeconds = Math.max(
@@ -313,7 +328,8 @@ export async function lifecycleTick() {
     rest('mine_rounds?randomness_id=not.is.null&archive_verified=eq.true&randomness_closed_at=is.null&select=*&order=round_id.asc&limit=25'),
   ]);
   historicalRoundCursor = nextHistoricalLifecycleCursor(historicalRows);
-  const queue = mergeLifecycleRoundQueues(
+  const queue = selectLifecycleRoundBatch(
+    roundBatchSize,
     recentReceiptRows,
     unprocessedRows,
     historicalRows,
@@ -347,7 +363,22 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   do {
     try {
-      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-tick', results: await lifecycleTick() }));
+      const results = await runWorkerTick({
+        worker: 'round-lifecycle',
+        timeoutMs: tickTimeoutMs,
+        task: lifecycleTick,
+        onTimeout: (error) => {
+          console.error(JSON.stringify({
+            at: new Date().toISOString(),
+            event: 'worker-tick-timeout',
+            worker: 'round-lifecycle',
+            timeoutMs: tickTimeoutMs,
+            message: error.message,
+          }));
+          process.exit(75);
+        },
+      });
+      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-tick', results }));
     } catch (error) {
       console.error(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-error', message: String(error) }));
       if (process.env.FAIL_FAST === '1') {
@@ -355,6 +386,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         break;
       }
     }
-    if (!once) await wake.wait(intervalMs);
+    if (!once && await wake.wait(intervalMs) === 'event') await sleep(realtimeDebounceMs);
   } while (!once);
 }

@@ -32,6 +32,50 @@ export function createWakeSignal({ setTimer = setTimeout, clearTimer = clearTime
 }
 
 /**
+ * Bound one worker cycle so a stalled RPC, database request or confirmation cannot leave a
+ * supervised child alive-but-useless forever. Production callers terminate from `onTimeout`;
+ * their parent supervisor then starts a clean process which resumes from the durable cursor.
+ */
+export async function runWorkerTick({
+  worker,
+  timeoutMs,
+  task,
+  onTimeout,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  if (typeof worker !== 'string' || !worker) throw new TypeError('Worker name is required');
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('Worker timeout must be positive');
+  if (typeof task !== 'function') throw new TypeError('Worker task is required');
+  if (typeof onTimeout !== 'function') throw new TypeError('Worker timeout handler is required');
+
+  let completed = false;
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimer(() => {
+      if (completed) return;
+      const error = new Error(`${worker} tick exceeded ${timeoutMs}ms`);
+      error.code = 'WORKER_TICK_TIMEOUT';
+      try {
+        onTimeout(error);
+      } catch (handlerError) {
+        reject(handlerError);
+        return;
+      }
+      reject(error);
+    }, timeoutMs);
+    timer?.unref?.();
+  });
+
+  try {
+    return await Promise.race([Promise.resolve().then(task), timeout]);
+  } finally {
+    completed = true;
+    if (timer !== null) clearTimer(timer);
+  }
+}
+
+/**
  * Wake a worker as soon as Helius/Solana confirms any successful transaction mentioning MYNE.
  * Delayed follow-ups close the small race where a downstream worker depends on an index row that
  * another event-driven process is still committing.
@@ -45,4 +89,3 @@ export async function attachProgramWake({
     for (const delay of followUpDelays) setTimeout(() => wake.signal(), delay);
   }, commitment);
 }
-

@@ -44,6 +44,38 @@ export function mergeLifecycleRoundQueues(...queues) {
   return [...byRound.values()];
 }
 
+/**
+ * Select a bounded, fair slice from the independent lifecycle queues. Large historical recovery
+ * sets must not consume every RPC request in one tick, while current receipts, unprocessed rewards,
+ * archive cleanup and randomness retention must each continue to make progress.
+ */
+export function selectLifecycleRoundBatch(limit, ...queues) {
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new RangeError('Lifecycle round batch limit must be a positive integer');
+  }
+  const selected = new Map();
+  const offsets = queues.map(() => 0);
+  let advanced = true;
+  while (selected.size < limit && advanced) {
+    advanced = false;
+    for (let queueIndex = 0; queueIndex < queues.length && selected.size < limit; queueIndex += 1) {
+      const queue = queues[queueIndex] || [];
+      while (offsets[queueIndex] < queue.length) {
+        const row = queue[offsets[queueIndex]];
+        offsets[queueIndex] += 1;
+        advanced = true;
+        const key = row?.round_id === undefined || row?.round_id === null
+          ? `invalid:${queueIndex}:${offsets[queueIndex]}`
+          : String(row.round_id);
+        if (selected.has(key)) continue;
+        selected.set(key, row);
+        break;
+      }
+    }
+  }
+  return [...selected.values()];
+}
+
 export async function processLifecycleRoundQueue(rows, processor) {
   const results = [];
   for (const row of rows) {
