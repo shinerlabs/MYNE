@@ -132,6 +132,26 @@ const autoPlanOperationTimeoutMs = boundedInteger(
   30_000,
   'AUTO_PLAN_OPERATION_TIMEOUT_MS',
 );
+const keeperPriorityMicrolamports = boundedInteger(
+  process.env.KEEPER_PRIORITY_MICROLAMPORTS,
+  0,
+  0,
+  1_000_000,
+  'KEEPER_PRIORITY_MICROLAMPORTS',
+);
+const serverRoundPriorityMicrolamports = boundedInteger(
+  process.env.SERVER_ROUND_PRIORITY_MICROLAMPORTS,
+  50_000,
+  0,
+  1_000_000,
+  'SERVER_ROUND_PRIORITY_MICROLAMPORTS',
+);
+// Fifteen Mainnet canary rounds consumed exactly 11,139 CU for entropy lock
+// and at most 38,723 CU for settlement. These fixed limits retain substantial
+// headroom while removing a redundant simulation/blockhash round trip from
+// the five-second result path. sendTransaction still confirms the exact bytes.
+const SERVER_ENTROPY_LOCK_COMPUTE_LIMIT = 30_000;
+const SERVER_SETTLEMENT_COMPUTE_LIMIT = 80_000;
 const settlementLateSeconds = Number(process.env.ROUND_KEEPER_SETTLEMENT_LATE_SECONDS ?? 5);
 assert.ok(
   Number.isSafeInteger(settlementLateSeconds) && settlementLateSeconds > 0,
@@ -409,7 +429,12 @@ const indexedRows = async (path) => {
 // A finalized blockhash adds avoidable latency to the five-second result
 // window. The transaction itself is still simulated, sent and confirmed; a
 // fresh confirmed blockhash is the appropriate liveness boundary here.
-const buildKeeperTransaction = async (ixs, units, blockhashCommitment = 'confirmed') => {
+const buildKeeperTransaction = async (
+  ixs,
+  units,
+  blockhashCommitment = 'confirmed',
+  priorityMicrolamports = keeperPriorityMicrolamports,
+) => {
   const { blockhash, lastValidBlockHeight } = await boundedRpc(
     `Latest ${blockhashCommitment} blockhash`,
     () => connection.getLatestBlockhash(blockhashCommitment),
@@ -419,9 +444,9 @@ const buildKeeperTransaction = async (ixs, units, blockhashCommitment = 'confirm
     payerKey: keypair.publicKey,
     instructions: [
       ComputeBudgetProgram.setComputeUnitLimit({ units }),
-      ...(Number(process.env.KEEPER_PRIORITY_MICROLAMPORTS || 0) > 0
+      ...(priorityMicrolamports > 0
         ? [ComputeBudgetProgram.setComputeUnitPrice({
-          microLamports: Math.min(1_000_000, Number(process.env.KEEPER_PRIORITY_MICROLAMPORTS)),
+          microLamports: priorityMicrolamports,
         })]
         : []),
       ...ixs,
@@ -431,7 +456,16 @@ const buildKeeperTransaction = async (ixs, units, blockhashCommitment = 'confirm
   transaction.sign([keypair]);
   return { transaction, blockhash, lastValidBlockHeight };
 };
-const sendKeeperInstructions = async (ixs, label = 'Keeper transaction') => {
+const sendKeeperInstructions = async (ixs, label = 'Keeper transaction', {
+  fixedComputeLimit = null,
+  priorityMicrolamports = keeperPriorityMicrolamports,
+  skipPreflight = false,
+} = {}) => {
+  assert.ok(
+    fixedComputeLimit == null
+      || (Number.isSafeInteger(fixedComputeLimit) && fixedComputeLimit >= 10_000 && fixedComputeLimit <= 1_400_000),
+    `${label} fixed compute limit is invalid`,
+  );
   let timedOut = false;
   const assertFlowActive = () => {
     if (!timedOut) return;
@@ -440,31 +474,45 @@ const sendKeeperInstructions = async (ixs, label = 'Keeper transaction') => {
     throw error;
   };
   return withOperationTimeout(async () => {
-    const simulationBuild = await buildKeeperTransaction(ixs, 1_400_000);
-    assertFlowActive();
-    const simulation = await boundedRpc(
-      `${label} simulation`,
-      () => connection.simulateTransaction(simulationBuild.transaction, {
-        commitment,
-        sigVerify: false,
-        replaceRecentBlockhash: true,
-      }),
-      transactionTimeoutMs,
+    let measuredUnits = null;
+    let computeLimit = fixedComputeLimit;
+    if (computeLimit == null) {
+      const simulationBuild = await buildKeeperTransaction(ixs, 1_400_000);
+      assertFlowActive();
+      const simulation = await boundedRpc(
+        `${label} simulation`,
+        () => connection.simulateTransaction(simulationBuild.transaction, {
+          commitment,
+          sigVerify: false,
+          replaceRecentBlockhash: true,
+        }),
+        transactionTimeoutMs,
+      );
+      assertFlowActive();
+      assert.equal(
+        simulation.value.err,
+        null,
+        `Keeper simulation failed: ${JSON.stringify(simulation.value.err)}\n${(simulation.value.logs || []).join('\n')}`,
+      );
+      emitRoundHeartbeat('tick-start', heartbeatStage, `${label}:simulated`);
+      measuredUnits = Math.max(50_000, Number(simulation.value.unitsConsumed || 1_400_000));
+      computeLimit = Math.min(1_400_000, Math.ceil(measuredUnits * 1.1));
+    } else {
+      emitRoundHeartbeat('tick-start', heartbeatStage, `${label}:fixed-compute:${computeLimit}`);
+    }
+    const finalBuild = await buildKeeperTransaction(
+      ixs,
+      computeLimit,
+      'confirmed',
+      priorityMicrolamports,
     );
-    assertFlowActive();
-    assert.equal(
-      simulation.value.err,
-      null,
-      `Keeper simulation failed: ${JSON.stringify(simulation.value.err)}\n${(simulation.value.logs || []).join('\n')}`,
-    );
-    emitRoundHeartbeat('tick-start', heartbeatStage, `${label}:simulated`);
-    const measuredUnits = Math.max(50_000, Number(simulation.value.unitsConsumed || 1_400_000));
-    const computeLimit = Math.min(1_400_000, Math.ceil(measuredUnits * 1.1));
-    const finalBuild = await buildKeeperTransaction(ixs, computeLimit);
     assertFlowActive();
     const signature = await boundedRpc(
       `${label} send`,
-      () => connection.sendTransaction(finalBuild.transaction, txOpts),
+      () => connection.sendTransaction(finalBuild.transaction, {
+        ...txOpts,
+        skipPreflight,
+      }),
       transactionTimeoutMs,
     );
     assertFlowActive();
@@ -657,6 +705,11 @@ if (!roundState.settled && asBigInt(roundState.randomnessCommitSlot) === SERVER_
   const lockSignature = (await sendKeeperInstructions(
     [lockIx],
     'Server entropy lock',
+    {
+      fixedComputeLimit: SERVER_ENTROPY_LOCK_COMPUTE_LIMIT,
+      priorityMicrolamports: serverRoundPriorityMicrolamports,
+      skipPreflight: true,
+    },
   )).signature;
   roundState = await fetchRoundWithRetry(
     (state) => asBigInt(state.randomnessCommitSlot) !== SERVER_RANDOMNESS_PENDING,
@@ -738,6 +791,11 @@ const settleIx = await program.methods
 const settlementSignature = (await sendKeeperInstructions(
   [settleIx],
   'Server round settlement',
+  {
+    fixedComputeLimit: SERVER_SETTLEMENT_COMPUTE_LIMIT,
+    priorityMicrolamports: serverRoundPriorityMicrolamports,
+    skipPreflight: true,
+  },
 )).signature;
 roundState = await fetchRoundWithRetry((state) => state.settled, 'Server round settlement');
 let finalizedSettlementAt = null;

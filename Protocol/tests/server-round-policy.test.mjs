@@ -103,6 +103,17 @@ test('server keeper binds before start, preserves the future-slot mix, and settl
   assert.match(source, /ROUND_KEEPER_RPC_TIMEOUT_MS/);
   assert.match(source, /ROUND_KEEPER_TRANSACTION_TIMEOUT_MS/);
   assert.match(source, /signal: controller\.signal/);
+  assert.match(source, /SERVER_ENTROPY_LOCK_COMPUTE_LIMIT = 30_000/);
+  assert.match(source, /SERVER_SETTLEMENT_COMPUTE_LIMIT = 80_000/);
+  assert.match(source, /SERVER_ROUND_PRIORITY_MICROLAMPORTS[\s\S]*50_000/);
+  assert.match(
+    source,
+    /'Server entropy lock',[\s\S]*fixedComputeLimit: SERVER_ENTROPY_LOCK_COMPUTE_LIMIT,[\s\S]*skipPreflight: true/,
+  );
+  assert.match(
+    source,
+    /'Server round settlement',[\s\S]*fixedComputeLimit: SERVER_SETTLEMENT_COMPUTE_LIMIT,[\s\S]*skipPreflight: true/,
+  );
   assert.doesNotMatch(source, /roundState\.(?:totalReceipts|grossDeployedLamports)\s*[!<>=]/);
   assert.doesNotMatch(source, /@switchboard-xyz/);
 });
