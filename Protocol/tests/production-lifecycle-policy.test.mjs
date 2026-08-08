@@ -71,7 +71,7 @@ test('administrative transaction scripts require an exact RPC genesis acknowledg
   }
 });
 
-test('server randomness provider cutover preview is paused, drained, and simulation-only', async () => {
+test('server randomness provider cutover is paused, drained, simulated, and explicitly submitted', async () => {
   const source = await readFile(
     new URL('../scripts/preview-mainnet-server-randomness-switch.mjs', import.meta.url),
     'utf8',
@@ -88,8 +88,15 @@ test('server randomness provider cutover preview is paused, drained, and simulat
   assert.match(source, /CONFIRM_SERVER_RANDOMNESS_REVIEW/);
   assert.match(source, /setRandomnessProgram\(PROGRAM_ID\)/);
   assert.match(source, /simulateTransaction/);
-  assert.match(source, /submissionSupported: false/);
-  assert.doesNotMatch(source, /sendRawTransaction|sendTransaction/);
+  assert.match(source, /SUBMIT_MAINNET_SERVER_RANDOMNESS/);
+  assert.match(source, /sendRawTransaction/);
+  assert.match(source, /confirmTransaction/);
+  assert.match(source, /switchedConfig\?\.paused, true/);
+  assert.match(source, /switchedConfig\?\.randomnessProgram\.equals\(PROGRAM_ID\)/);
+  assert.ok(
+    source.indexOf('simulateTransaction') < source.indexOf('sendRawTransaction'),
+    'The exact transaction must be simulated before submission',
+  );
 });
 
 test('MYNE metadata creation is fixed, hosted, simulated, and explicitly submitted', async () => {

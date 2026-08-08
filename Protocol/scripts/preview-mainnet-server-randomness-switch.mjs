@@ -1,8 +1,9 @@
 /**
- * Read-only cutover preview for MYNE server commit–reveal.
+ * Guarded cutover for MYNE server commit–reveal.
  *
- * This constructs and simulates set_randomness_program while the protocol is
- * paused. It deliberately contains no transaction submission path.
+ * The default path is read-only and only simulates set_randomness_program.
+ * Submission additionally requires SUBMIT_MAINNET_SERVER_RANDOMNESS to equal
+ * the exact config PDA, then confirms and reads the paused config back.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -154,10 +155,56 @@ assert.equal(
   `Server-randomness switch simulation failed:\n${(simulation.value.logs || []).join('\n')}`,
 );
 
+if (process.env.SUBMIT_MAINNET_SERVER_RANDOMNESS !== config.toBase58()) {
+  console.log(JSON.stringify({
+    ok: true,
+    simulationOnly: true,
+    submissionSupported: true,
+    config: config.toBase58(),
+    previousRandomnessProgram: configState.randomnessProgram.toBase58(),
+    randomnessProgram: PROGRAM_ID.toBase58(),
+    randomnessAuthority: randomnessAuthority.toBase58(),
+    firstServerRoundId,
+    firstPreparationStartsAt,
+    firstOpenedAt,
+    unitsConsumed: simulation.value.unitsConsumed ?? null,
+    submitWith: `SUBMIT_MAINNET_SERVER_RANDOMNESS=${config.toBase58()}`,
+  }, null, 2));
+  process.exit(0);
+}
+
+const signature = await connection.sendRawTransaction(transaction.serialize(), {
+  maxRetries: 3,
+  preflightCommitment: 'confirmed',
+  skipPreflight: false,
+});
+const confirmation = await connection.confirmTransaction({
+  signature,
+  blockhash: latest.blockhash,
+  lastValidBlockHeight: latest.lastValidBlockHeight,
+}, 'finalized');
+assert.equal(confirmation.value.err, null, `Server-randomness switch failed: ${signature}`);
+
+let switchedConfig = null;
+for (let attempt = 0; attempt < 5; attempt += 1) {
+  switchedConfig = await program.account.protocolConfig.fetch(config, 'finalized');
+  if (switchedConfig.randomnessProgram.equals(PROGRAM_ID)) break;
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+}
+assert.equal(switchedConfig?.paused, true, 'Protocol must remain paused after provider switch');
+assert.ok(
+  switchedConfig?.randomnessProgram.equals(PROGRAM_ID),
+  `Randomness provider did not change; transaction ${signature}`,
+);
+assert.ok(
+  switchedConfig?.randomnessAuthority.equals(randomnessAuthority),
+  'Randomness authority changed during provider switch',
+);
+
 console.log(JSON.stringify({
   ok: true,
-  simulationOnly: true,
-  submissionSupported: false,
+  simulationOnly: false,
+  submitted: true,
   config: config.toBase58(),
   previousRandomnessProgram: configState.randomnessProgram.toBase58(),
   randomnessProgram: PROGRAM_ID.toBase58(),
@@ -166,4 +213,5 @@ console.log(JSON.stringify({
   firstPreparationStartsAt,
   firstOpenedAt,
   unitsConsumed: simulation.value.unitsConsumed ?? null,
+  signature,
 }, null, 2));
