@@ -41,6 +41,29 @@ export function calculateSpend({ balanceLamports, reserveLamports, maxSpendLampo
   };
 }
 
+export function isCompleteBuybackExecution(entry) {
+  return Boolean(
+    entry
+      && BigInt(String(entry.spendLamports || 0)) > 0n
+      && BigInt(String(entry.expectedOutputBaseUnits || 0)) > 0n
+      && BigInt(String(entry.burnedBaseUnits || 0)) > 0n
+      && typeof entry.swapSignature === 'string'
+      && entry.swapSignature.length > 0
+      && typeof entry.burnSignature === 'string'
+      && entry.burnSignature.length > 0,
+  );
+}
+
+export function purchasedTokenBaseUnits({ preTokenBalances = [], postTokenBalances = [], mint, owner }) {
+  const total = (balances) => balances
+    .filter((entry) => entry?.mint === mint && entry?.owner === owner)
+    .reduce((sum, entry) => sum + BigInt(entry.uiTokenAmount?.amount || 0), 0n);
+  const before = total(preTokenBalances);
+  const after = total(postTokenBalances);
+  assert.ok(after > before, 'Confirmed swap transaction has no positive MYNE balance delta');
+  return after - before;
+}
+
 /**
  * Select the oldest indexed allocation that can still require a buyback.
  * The database is only a bounded work queue; the keeper must fetch the Round

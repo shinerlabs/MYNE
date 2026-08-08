@@ -3,12 +3,14 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   calculateSpend,
+  isCompleteBuybackExecution,
   METEORA_DAMM_V2_LABEL,
   METEORA_DAMM_V2_PROGRAM_TEXT,
   METEORA_DLMM_LABEL,
   METEORA_DLMM_PROGRAM_TEXT,
   NATIVE_SOL_MINT,
   meteoraRouteForProgram,
+  purchasedTokenBaseUnits,
   selectIndexedBuybackRound,
   validateJupiterEndpoint,
   validateJupiterPriorityLevel,
@@ -43,6 +45,37 @@ test('buyback uses only Jupiter-supported priority levels', () => {
   assert.equal(validateJupiterPriorityLevel('high'), 'high');
   assert.equal(validateJupiterPriorityLevel('veryHigh'), 'veryHigh');
   assert.throws(() => validateJupiterPriorityLevel('veryLow'), /must be one of/);
+});
+
+test('buyback journal refuses incomplete burn evidence and derives exact confirmed swap output', () => {
+  assert.equal(isCompleteBuybackExecution({
+    spendLamports: '1000000',
+    expectedOutputBaseUnits: '2700000',
+    burnedBaseUnits: '2699000',
+    swapSignature: 'swap-signature',
+    burnSignature: 'burn-signature',
+  }), true);
+  assert.equal(isCompleteBuybackExecution({
+    spendLamports: '1000000',
+    expectedOutputBaseUnits: '2700000',
+    swapSignature: 'swap-signature',
+    burnSignature: null,
+  }), false);
+  assert.equal(purchasedTokenBaseUnits({
+    mint: 'MYNE',
+    owner: 'keeper',
+    preTokenBalances: [
+      { mint: 'MYNE', owner: 'keeper', uiTokenAmount: { amount: '100' } },
+      { mint: 'OTHER', owner: 'keeper', uiTokenAmount: { amount: '999' } },
+    ],
+    postTokenBalances: [
+      { mint: 'MYNE', owner: 'keeper', uiTokenAmount: { amount: '275' } },
+      { mint: 'OTHER', owner: 'keeper', uiTokenAmount: { amount: '1' } },
+    ],
+  }), 175n);
+  assert.throws(() => purchasedTokenBaseUnits({
+    mint: 'MYNE', owner: 'keeper', preTokenBalances: [], postTokenBalances: [],
+  }), /no positive MYNE balance delta/);
 });
 
 test('buyback accepts only exact HTTPS Jupiter endpoints unless explicitly overridden', () => {
@@ -168,5 +201,8 @@ test('buyback keeper re-checks the authoritative on-chain completion flag', asyn
   assert.match(source, /if \(roundState\.buybackCompleted\)/);
   assert.match(source, /round-buyback-completed-on-chain/);
   assert.match(source, /indexed-round-account-missing-reconcile-required/);
+  assert.match(source, /repairIncompleteExecution/);
+  assert.match(source, /pending-swap-output-awaiting-confirmed-token-state/);
+  assert.match(source, /pending-burn-awaiting-confirmed-token-state/);
   assert.doesNotMatch(source, /dryRun \? currentRound : 0/);
 });

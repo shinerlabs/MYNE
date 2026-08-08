@@ -17,7 +17,9 @@ import web3 from '@solana/web3.js';
 import * as splToken from '@solana/spl-token';
 import {
   calculateSpend,
+  isCompleteBuybackExecution,
   meteoraRouteForProgram,
+  purchasedTokenBaseUnits,
   selectIndexedBuybackRound,
   validateJupiterPriorityLevel,
   validateJupiterEndpoint,
@@ -348,6 +350,11 @@ async function buildBurnTransaction(mint, ata, beforeBaseUnits) {
   const account = await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID);
   const delta = account.amount - beforeBaseUnits;
   assert.ok(delta > 0n, 'Swap produced no positive MYNE balance delta');
+  return buildBurnAmountTransaction(mint, ata, delta);
+}
+
+async function buildBurnAmountTransaction(mint, ata, delta) {
+  assert.ok(delta > 0n, 'MYNE burn amount must be positive');
   const mintInfo = await splToken.getMint(provider.connection, mint, 'confirmed', TOKEN_PROGRAM_ID);
   const instruction = createBurnCheckedInstruction(
     ata, mint, payer.publicKey, delta, mintInfo.decimals, [], TOKEN_PROGRAM_ID,
@@ -378,6 +385,30 @@ async function buildBurnTransaction(mint, ata, beforeBaseUnits) {
     raw: Buffer.from(transaction.serialize()).toString('base64'),
     signature: base58Encode(transaction.signature),
   };
+}
+
+async function waitForMyneBalance(ata, predicate, { attempts = 12, delayMs = 500 } = {}) {
+  let amount = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
+  for (let attempt = 1; attempt < attempts && !predicate(amount); attempt += 1) {
+    await sleep(delayMs);
+    amount = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
+  }
+  return amount;
+}
+
+async function confirmedSwapOutputBaseUnits(signature, mint) {
+  const transaction = await provider.connection.getTransaction(signature, {
+    commitment: 'confirmed',
+    maxSupportedTransactionVersion: 0,
+  });
+  assert.ok(transaction?.meta, `Confirmed swap transaction is unavailable: ${signature}`);
+  assert.equal(transaction.meta.err, null, `Saved swap transaction failed: ${signature}`);
+  return purchasedTokenBaseUnits({
+    preTokenBalances: transaction.meta.preTokenBalances || [],
+    postTokenBalances: transaction.meta.postTokenBalances || [],
+    mint: mint.toBase58(),
+    owner: payer.publicKey.toBase58(),
+  });
 }
 
 async function sendSavedTransaction(rawBase64) {
@@ -436,6 +467,42 @@ function roundJournal(state, roundId) {
     : { processedLamports: '0', pending: null, executions: [] };
 }
 
+async function repairIncompleteExecution({ state, roundKey, journal, mint, ata }) {
+  const incompleteIndexes = journal.executions
+    .map((entry, index) => isCompleteBuybackExecution(entry) ? -1 : index)
+    .filter((index) => index >= 0);
+  if (!incompleteIndexes.length) return false;
+  assert.equal(incompleteIndexes.length, 1, 'Multiple incomplete buyback executions require manual reconciliation');
+  const index = incompleteIndexes[0];
+  assert.equal(index, journal.executions.length - 1, 'Only the latest buyback execution may be repaired');
+  assert.equal(journal.pending, null, 'Cannot repair an incomplete execution while another buyback is pending');
+  const entry = journal.executions[index];
+  assert.ok(entry?.swapSignature, 'Incomplete buyback execution is missing its swap signature');
+  const bought = await confirmedSwapOutputBaseUnits(entry.swapSignature, mint);
+  const current = await waitForMyneBalance(ata, (amount) => amount >= bought);
+  assert.ok(current >= bought, 'Purchased MYNE is not present for incomplete journal recovery');
+  const burn = await buildBurnAmountTransaction(mint, ata, bought);
+  const completeExecutions = journal.executions.slice(0, index);
+  journal.executions = completeExecutions;
+  journal.processedLamports = completeExecutions.reduce(
+    (sum, execution) => sum + BigInt(execution.spendLamports), 0n,
+  ).toString();
+  journal.pending = {
+    phase: 'burn-ready',
+    spendLamports: String(entry.spendLamports),
+    beforeBaseUnits: (current - bought).toString(),
+    expectedOutputBaseUnits: String(entry.expectedOutputBaseUnits),
+    swapRaw: null,
+    swapSignature: entry.swapSignature,
+    burnBaseUnits: burn.delta.toString(),
+    burnRaw: burn.raw,
+    burnSignature: burn.signature,
+  };
+  state.rounds[roundKey] = journal;
+  await saveState(state);
+  return true;
+}
+
 async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
   const pending = journal.pending;
   if (!pending) return null;
@@ -482,7 +549,14 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
     await saveState(state);
   }
 
-  current = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
+  current = await waitForMyneBalance(ata, (amount) => amount > before);
+  if (current <= before) {
+    return {
+      skipped: true,
+      reason: 'pending-swap-output-awaiting-confirmed-token-state',
+      swapSignature: pending.swapSignature,
+    };
+  }
   if (current > before && !pending.burnRaw) {
     const burn = await buildBurnTransaction(mint, ata, before);
     pending.burnBaseUnits = burn.delta.toString();
@@ -509,8 +583,18 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
       if (recoveredBalance > before) throw error;
     }
   }
-  const after = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
-  assert.ok(after <= before, 'Burn transaction did not remove the purchased MYNE');
+  const after = await waitForMyneBalance(ata, (amount) => amount <= before);
+  if (after > before) {
+    return {
+      skipped: true,
+      reason: 'pending-burn-awaiting-confirmed-token-state',
+      burnSignature: pending.burnSignature,
+    };
+  }
+  assert.ok(
+    pending.burnBaseUnits && pending.burnRaw && pending.burnSignature,
+    'Buyback cannot complete without durable burn evidence',
+  );
   journal.processedLamports = (BigInt(journal.processedLamports) + BigInt(pending.spendLamports)).toString();
   const completed = { ...pending };
   journal.executions.push({
@@ -629,6 +713,7 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   state.rounds[roundKey] = journal;
   const mint = configState.mint;
   const ata = getAssociatedTokenAddressSync(mint, payer.publicKey, false, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID);
+  await repairIncompleteExecution({ state, roundKey, journal, mint, ata });
   if (journal.pending) {
     assert.ok(!dryRun, 'A live pending buyback cannot be recovered in dry-run mode');
     assert.ok(await provider.connection.getAccountInfo(ata, 'confirmed'), 'Pending buyback MYNE account is missing');
