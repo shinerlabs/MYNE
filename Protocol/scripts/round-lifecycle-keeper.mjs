@@ -34,6 +34,7 @@ import {
 } from './receipt-recovery-policy.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
+const BET_RECEIPT_ACCOUNT_NAME = 'betReceipt';
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
   || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
@@ -43,7 +44,7 @@ const payer = provider.wallet.payer;
 assert.ok(payer, 'A file-backed lifecycle keeper wallet is required');
 const program = new Program(idl, provider);
 assert.equal(
-  program.coder.accounts.size('BetReceipt'),
+  program.coder.accounts.size(BET_RECEIPT_ACCOUNT_NAME),
   BET_RECEIPT_ACCOUNT_SIZE,
   'BetReceipt layout changed; review the exact recovery filter before running lifecycle',
 );
@@ -210,7 +211,7 @@ async function recoverReceiptRows(roundId, roundState) {
     expectedLiveCount,
     roundId,
     programId: PROGRAM_ID,
-    decodeReceipt: (data) => program.coder.accounts.decode('BetReceipt', data),
+    decodeReceipt: (data) => program.coder.accounts.decode(BET_RECEIPT_ACCOUNT_NAME, data),
     deriveReceiptPda: (authority, nonce) => receiptPda(roundId, authority, nonce),
   });
 }

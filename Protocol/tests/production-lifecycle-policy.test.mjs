@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import anchor from '@anchor-lang/core';
 import {
   historicalLifecycleQuery,
   mergeLifecycleRoundQueues,
   nextHistoricalLifecycleCursor,
   processLifecycleRoundQueue,
 } from '../scripts/lifecycle-queue-policy.mjs';
+
+const { BN, Program, web3 } = anchor;
 
 test('receipt and randomness cleanup require a verified canonical archive', async () => {
   const lifecycle = await readFile(
@@ -38,10 +41,54 @@ test('receipt and randomness cleanup require a verified canonical archive', asyn
     lifecycle.indexOf('async function fetchReceiptStates'),
   );
   assert.match(recovery, /getProgramAccounts\(PROGRAM_ID, scanOptions\)/);
-  assert.match(recovery, /program\.coder\.accounts\.decode\('BetReceipt', data\)/);
+  assert.match(recovery, /program\.coder\.accounts\.decode\(BET_RECEIPT_ACCOUNT_NAME, data\)/);
   assert.match(recovery, /deriveReceiptPda/);
   assert.doesNotMatch(recovery, /\brest\(/, 'confirmed recovery must not write to the projection');
   assert.match(lifecycle, /receiptSource = 'confirmed-round-scan'/);
+});
+
+test('lifecycle uses the runtime Anchor account name for receipt size and decode', async () => {
+  const runtimeIdl = JSON.parse(await readFile(
+    new URL('../../Frontend/src/generated/myne_protocol.json', import.meta.url),
+    'utf8',
+  ));
+  const authority = web3.Keypair.generate().publicKey;
+  const program = new Program(runtimeIdl, {
+    connection: {},
+    wallet: { publicKey: web3.Keypair.generate().publicKey },
+  });
+  const accountName = 'betReceipt';
+  const receipt = {
+    bump: 254,
+    roundId: new BN('42'),
+    authority,
+    nonce: new BN('7'),
+    amounts: Array.from({ length: 25 }, (_, index) => new BN(index === 6 ? '123' : '0')),
+    cumulativeStarts: Array.from({ length: 25 }, (_, index) => new BN(String(index * 10))),
+    totalLamports: new BN('123'),
+    rewardMode: 1,
+    claimed: false,
+    refunded: false,
+  };
+
+  assert.equal(program.coder.accounts.size(accountName), 468);
+  const encoded = await program.coder.accounts.encode(accountName, receipt);
+  assert.equal(encoded.byteLength, 468);
+  const decoded = program.coder.accounts.decode(accountName, encoded);
+  assert.equal(decoded.bump, 254);
+  assert.equal(decoded.roundId.toString(), '42');
+  assert.ok(decoded.authority.equals(authority));
+  assert.equal(decoded.nonce.toString(), '7');
+  assert.equal(decoded.amounts[6].toString(), '123');
+  assert.equal(decoded.totalLamports.toString(), '123');
+  assert.equal(decoded.rewardMode, 1);
+  assert.equal(decoded.claimed, false);
+  assert.equal(decoded.refunded, false);
+  assert.throws(
+    () => program.coder.accounts.size('BetReceipt'),
+    /Account not found: BetReceipt/,
+    'the committed IDL is camelized by Program before coder construction',
+  );
 });
 
 test('server-mode lifecycle loads Switchboard only for a live historical randomness close', async () => {
