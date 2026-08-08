@@ -578,26 +578,10 @@ html body[data-route="mine"] .round-summary .motherlode-secondary :is(.motherlod
   flex: 0 0 18px !important;
 }
 
-/* Deployed always keeps its selected denomination in the headline and the inverse quote beneath.
-   This is real text (not a hover-only generated value), so it is available to touch and keyboard
-   users and does not shift when the pointer crosses the card. */
+/* The inverse Deployed quote replaces the old DEPLOYED heading. Never add a
+   second denomination row beneath the selected headline. */
 html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat > .deployed-token-label {
-  display: block !important;
-  grid-column: 1 !important;
-  grid-row: 3 !important;
-  min-height: 0 !important;
-  margin: 0 !important;
-  color: #8f9198 !important;
-  font-family: var(--font-number) !important;
-  font-size: 9px !important;
-  font-weight: 650 !important;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -.02em !important;
-  line-height: 1 !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  filter: none !important;
-  white-space: nowrap !important;
+  display: none !important;
 }
 
 @media (hover: hover) {

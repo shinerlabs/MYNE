@@ -511,13 +511,15 @@ const deployedHeading = deployedStat.querySelector(':scope > span');
 const deployedTokenValue = deployedStat.querySelector('strong');
 const deployedTokenLabel = deployedStat.querySelector('small');
 deployedStat.classList.add('deployed-stat');
+deployedHeading.dataset.solLabel = '≈0.00 SOL';
 deployedHeading.dataset.usdLabel = '≈— USDC';
+deployedHeading.textContent = deployedHeading.dataset.usdLabel;
 deployedStat.setAttribute('aria-label', 'Deployed 0.00 SOL; USDC quote unavailable');
 deployedTokenValue.classList.add('deployed-token-value');
 deployedTokenValue.insertAdjacentHTML('afterend', `<strong class="deployed-usd-value" aria-hidden="true">${usdcIcon('summary-usdc')}<span>—</span></strong>`);
-deployedStat.tabIndex = 0;
-deployedTokenLabel.textContent = '≈— USDC';
-deployedTokenLabel.setAttribute('aria-hidden', 'false');
+deployedTokenLabel.textContent = '';
+deployedTokenLabel.hidden = true;
+deployedTokenLabel.setAttribute('aria-hidden', 'true');
 deployedTokenLabel.classList.add('deployed-token-label');
 const motherlodeStat = document.querySelector('.summary-stat:nth-child(2)');
 const motherlodeHeading = motherlodeStat.querySelector(':scope > span');
@@ -533,15 +535,14 @@ motherlodeTokenLabel.classList.add('motherlode-secondary');
 motherlodeStat.tabIndex = 0;
 roundSummary.classList.add('motherlode-inline');
 
-// Summary labels are the hover counterpart to the selected headline currency.
-// Keep the numbers themselves stable on hover; only the descriptor beneath the
-// card changes to the other denomination.
+// Deployed uses the former heading position for the inverse quote. It never
+// creates a second line beneath the card and the selected headline currency
+// remains fixed until the explicit SOL/USDC switch changes it.
 const syncSummaryHoverLabels = () => {
   const selectedUsd = mineDisplayCurrency === 'usd';
   const deployedQuote = selectedUsd ? deployedHeading.dataset.solLabel : deployedHeading.dataset.usdLabel;
-  if (deployedQuote) deployedTokenLabel.textContent = deployedQuote;
-  // Motherlode keeps its established label-only hover quote; the deployed card instead shows its
-  // inverse quote permanently in the subline so the primary value never changes under the cursor.
+  if (deployedQuote) deployedHeading.textContent = deployedQuote;
+  // Motherlode keeps its established label-only hover quote.
   const motherlodeQuote = selectedUsd ? motherlodeHeading.dataset.solLabel : motherlodeHeading.dataset.usdLabel;
   if (motherlodeQuote) motherlodeHeading.dataset.hoverLabel = motherlodeQuote;
 };
@@ -3967,6 +3968,7 @@ const renderChain = (state) => {
   deployedUsdcNumber.textContent = deployedUsdText;
   deployedHeading.dataset.solLabel = `≈${deployedSolText} SOL`;
   deployedHeading.dataset.usdLabel = `≈${deployedUsdText} USDC`;
+  syncSummaryHoverLabels();
   deployedStat.setAttribute('aria-label', `Deployed ${deployedSolText} SOL${deployedUsdText === '—' ? '' : `, approximately ${deployedUsdText} USDC`}`);
   const motherlodeGldText = chain.format.solIcon(state.jackpot.bullion, 2);
   const displayedMotherlodeNative = displayedMotherlodeSol(

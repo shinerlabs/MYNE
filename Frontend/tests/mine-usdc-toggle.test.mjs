@@ -32,8 +32,10 @@ test('Mine summary currency rows render one centered icon and value group', () =
   assert.match(surfaces, /mine-display-usd[^\n]*\.deployed-stat > \.deployed-token-value\.deployed-token-value\.deployed-token-value[\s\S]*display: none !important/);
   assert.match(surfaces, /mine-display-usd[^\n]*\.motherlode-secondary > \.motherlode-eth-usd[\s\S]*display: inline-flex !important/);
   assert.match(surfaces, /deployed-stat :is\(\.summary-eth, \.summary-usdc\)[\s\S]*width: 19px !important/);
-  assert.match(source, /deployedTokenLabel\.textContent = selectedUsd \? deployedHeading\.dataset\.solLabel : deployedHeading\.dataset\.usdLabel|deployedQuote = selectedUsd \? deployedHeading\.dataset\.solLabel : deployedHeading\.dataset\.usdLabel/);
-  assert.match(surfaces, /\.deployed-stat > \.deployed-token-label[\s\S]*display: block !important/);
+  assert.match(source, /deployedQuote = selectedUsd \? deployedHeading\.dataset\.solLabel : deployedHeading\.dataset\.usdLabel/);
+  assert.match(source, /deployedHeading\.textContent = deployedQuote/);
+  assert.match(source, /deployedTokenLabel\.hidden = true/);
+  assert.match(surfaces, /\.deployed-stat > \.deployed-token-label[\s\S]*display: none !important/);
   assert.match(surfaces, /\.deployed-stat:is\(:hover, :focus-visible\) > span::after[\s\S]*content: none !important/);
 });
 
