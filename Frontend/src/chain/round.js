@@ -101,6 +101,20 @@ export const roundCountdownView = ({ phase, secondsLeft, protocolPaused = false 
 };
 
 /**
+ * Round number to freeze in the timer while mining is paused.
+ *
+ * Prefer an account read for the scheduled round, then the newest finalized
+ * indexed Round PDA. A verified settlement is safer than the advancing
+ * wall-clock id when either live source is temporarily unavailable.
+ */
+export const displayedPausedRoundId = ({
+  currentRound = null, pausedRoundId = null, lastResolved = null, roundId = 0n,
+}) => (currentRound?.requestedAt > 0n ? currentRound.id : null)
+  ?? pausedRoundId
+  ?? lastResolved?.roundId
+  ?? roundId;
+
+/**
  * Result presentation is deliberately split: the grid reveals the winning tile, while the
  * control-column takeover stays disabled. Full participant details move to the previous-round
  * miners panel after rollover.

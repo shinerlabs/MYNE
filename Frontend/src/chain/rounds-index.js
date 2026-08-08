@@ -479,6 +479,31 @@ export async function loadLatestSettledRoundId(atOrBefore = null) {
 }
 
 /**
+ * Newest round account observed by the finalized index, resolved or not.
+ *
+ * The wall-clock schedule continues advancing while the protocol is paused,
+ * so it cannot identify the round on which maintenance began. This bounded
+ * read preserves the last Round PDA that actually existed without scanning
+ * program accounts in the browser.
+ */
+export async function loadLatestIndexedRoundId(atOrBefore = null) {
+  if (!(await indexAvailable())) return null;
+  try {
+    let query = supabase
+      .from('mine_rounds')
+      .select('round_id')
+      .order('round_id', { ascending: false })
+      .limit(1);
+    if (atOrBefore !== null) query = query.lte('round_id', String(atOrBefore));
+    const { data, error } = await query;
+    if (error || !data?.length) return null;
+    return BigInt(data[0].round_id);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Newest settled round that actually accepted a deployment.
  *
  * The Mine board still advances through every settled zero-bid result so each

@@ -38,7 +38,7 @@ import {
   shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
-import { displayedWinningRound, roundCountdownView } from './chain/round.js';
+import { displayedPausedRoundId, displayedWinningRound, roundCountdownView } from './chain/round.js';
 import { readSupplyStats } from './chain/supply.js';
 import { renderProtocolStats } from './about-stats.js';
 import {
@@ -3728,15 +3728,12 @@ async function renderInlineWinners(roundId, account, force = false) {
 
 const { formatClock } = chain.format;
 
-let pausedRoundId = null;
 const renderChainCountdown = (state) => {
   const view = roundCountdownView(state);
   const {
     paused, betting, showingResult,
   } = view;
-  if (paused && pausedRoundId === null) pausedRoundId = state.roundId;
-  if (!paused) pausedRoundId = null;
-  const displayedRoundId = paused ? pausedRoundId : state.roundId;
+  const displayedRoundId = paused ? displayedPausedRoundId(state) : state.roundId;
 
   bettingOpen = betting; // gates the MINE button (see updateMine)
   timeStat.dataset.phase = view.phase;

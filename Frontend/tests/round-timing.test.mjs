@@ -4,7 +4,8 @@ import test from 'node:test';
 
 import { setGenesisTime } from '../src/chain/config.js';
 import {
-  displayedWinningRound, roundCountdownView, roundPhaseLabel, roundPresentation, roundState,
+  displayedPausedRoundId, displayedWinningRound, roundCountdownView, roundPhaseLabel,
+  roundPresentation, roundState,
 } from '../src/chain/round.js';
 import { minuteApyPercent } from '../src/chain/staking-apy.js';
 
@@ -56,6 +57,30 @@ test('an authoritative protocol pause replaces the advancing countdown with a st
     label: 'TIME LEFT',
     value: '00:37',
   });
+});
+
+test('paused timer freezes the newest round that actually existed', () => {
+  assert.equal(displayedPausedRoundId({
+    roundId: 900n,
+    pausedRoundId: 408n,
+    lastResolved: { roundId: 407n },
+  }), 408n);
+  assert.equal(displayedPausedRoundId({
+    roundId: 900n,
+    pausedRoundId: 408n,
+    currentRound: { id: 409n, requestedAt: 1_000n },
+    lastResolved: { roundId: 407n },
+  }), 409n);
+  assert.equal(displayedPausedRoundId({
+    roundId: 900n,
+    pausedRoundId: 408n,
+    currentRound: { id: 900n, requestedAt: 0n },
+    lastResolved: { roundId: 407n },
+  }), 408n);
+  assert.equal(displayedPausedRoundId({
+    roundId: 900n,
+    lastResolved: { roundId: 407n },
+  }), 407n);
 });
 
 test('result highlights the winning tile without replacing the mining UI', () => {

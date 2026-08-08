@@ -18,7 +18,9 @@ import {
   burnUnclaimedMyne, claimManyEthOnly, syncRoundGenesis,
 } from './lottery.js';
 import { getProtocolConfig } from './anchor-client.js';
-import { loadLatestPlayedSettledRoundId, loadLatestSettledRoundId } from './rounds-index.js';
+import {
+  loadLatestIndexedRoundId, loadLatestPlayedSettledRoundId, loadLatestSettledRoundId,
+} from './rounds-index.js';
 import { ROUND_DURATION, BETTING_DURATION, isPremine } from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
 import { claimStakingRewards as withdrawClaimableSol } from './staking.js';
@@ -73,6 +75,9 @@ export const state = {
   // Live maintenance status, refreshed with the round. `null` means the config
   // read has not completed; only an authoritative on-chain `true` disables Mine.
   protocolPaused: null,
+  // Last Round PDA that actually existed when the authoritative pause was
+  // observed. Unlike `roundId`, this does not advance with wall-clock time.
+  pausedRoundId: null,
 };
 
 const subscribers = new Set();
@@ -121,6 +126,14 @@ async function refreshRound() {
     ]);
     if (configResult.status === 'fulfilled') {
       state.protocolPaused = Boolean(configResult.value.paused);
+      if (!state.protocolPaused) {
+        state.pausedRoundId = null;
+      } else if (roundResult.status === 'fulfilled' && roundResult.value.requestedAt > 0n) {
+        state.pausedRoundId = roundResult.value.id ?? roundId;
+      } else {
+        const indexedRoundId = await loadLatestIndexedRoundId(roundId);
+        if (indexedRoundId !== null) state.pausedRoundId = indexedRoundId;
+      }
     }
     // A paused schedule may have no current Round PDA. Preserve the separately
     // fetched pause flag so the renderer can pin the latest verified winner,
