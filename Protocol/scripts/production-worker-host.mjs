@@ -601,7 +601,7 @@ async function requireProductionIndexSchema({ supabaseUrl, serviceRole, timeoutM
   const controller = new AbortController();
   const response = await withOperationTimeout(
     () => fetch(
-      `${supabaseUrl}/rest/v1/mine_worker_schema_capabilities?select=release&release=eq.round-projection-v2&limit=1`,
+      `${supabaseUrl}/rest/v1/mine_worker_schema_capabilities?select=release&release=in.(round-projection-v2,auto-reinvest-v1)`,
       {
         headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
         signal: controller.signal,
@@ -617,9 +617,10 @@ async function requireProductionIndexSchema({ supabaseUrl, serviceRole, timeoutM
     () => response.json().catch(() => null),
     { timeoutMs, label: 'Production index schema response body' },
   );
+  const releases = new Set(Array.isArray(body) ? body.map(({ release }) => release) : []);
   assert.ok(
-    response.ok && Array.isArray(body) && body.length === 1,
-    'Production index schema is incomplete; apply every Supabase migration through 20260808134500_round_projection_completeness.sql before starting workers',
+    response.ok && releases.has('round-projection-v2') && releases.has('auto-reinvest-v1'),
+    'Production index schema is incomplete; apply every Supabase migration through 20260808140500_auto_reinvest_worker_capability.sql before starting workers',
   );
 }
 

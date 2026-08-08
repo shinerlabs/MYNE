@@ -404,6 +404,7 @@ async function settleLocalReceipts(roundId) {
 async function executeAutoPlans(roundId) {
   const round = roundPda(roundId);
   const plans = await program.account.autoPlan.all();
+  const autoPlanStakePool = await program.account.stakePool.fetch(stakePool);
   const receiptRent = BigInt(await provider.connection.getMinimumBalanceForRentExemption(
     BET_RECEIPT_ACCOUNT_BYTES,
   ));
@@ -419,6 +420,9 @@ async function executeAutoPlans(roundId) {
       rewardMode,
       balanceLamports: plan.balanceLamports,
       pendingSol: position?.pendingSol ?? 0,
+      rewardPerWeight: autoPlanStakePool.rewardPerWeight,
+      rewardWeight: position?.rewardWeight ?? 0,
+      rewardDebt: position?.rewardDebt ?? 0,
       requiredLamports: total + receiptRent,
     });
     if (!plan.active

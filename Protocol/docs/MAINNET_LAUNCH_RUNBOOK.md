@@ -218,6 +218,7 @@ supabase/migrations/20260808133000_worker_schema_capabilities.sql
 supabase/migrations/20260808134500_round_projection_completeness.sql
 supabase/migrations/20260808135000_wallet_round_history.sql
 supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql
+supabase/migrations/20260808140500_auto_reinvest_worker_capability.sql
 ```
 
 The receipt-accrual and later migrations are part of the same release as the upgraded program
@@ -230,13 +231,23 @@ and the PostgREST schema cache exposes their updated status/view contracts.
 The `20260808133000` marker records the earlier claim-vault schema and is retained in migration
 history. The later projection migration replaces that view with the final service-role-only
 `round-projection-v2` marker. The production worker host and standalone indexer refuse to report
-healthy or start until that exact final value is visible. The wallet-history migration must then
-be applied last; its service-only RPC returns display history for at most 50
-projection-complete rounds and never defines claimability. Deploy the matching
+healthy or start until that exact value is visible. The wallet-history migration follows it;
+its service-only RPC returns display history for at most 50 projection-complete rounds and never
+defines claimability. Apply the AutoPlan reinvest schema migration followed by its capability
+migration; new workers require both the `round-projection-v2` and `auto-reinvest-v1` rows, while
+old workers remain compatible during the rolling cut-over. Deploy the matching
 `wallet-round-history` Edge Function with wallet-session authentication and keep the underlying
 settlement table/RPC unavailable to browser roles.
 `keeper_lease_privileges` ensures only the service role can fence production
 workers; the Supabase security advisor must report no public execution access.
+
+AutoPlan SOL reinvestment uses a separate rolling-release gate. Apply migrations
+`20260808140000` and `20260808140500` first, pause new exposure for the program upgrade, then deploy
+the synchronized worker/IDL and canary one opted-in plan. Keep
+`VITE_AUTO_REINVEST_SOL=false` throughout those steps so ordinary Auto Mine
+continues without exposing the new mode. Set it to `true` only after the worker
+has proven an atomic `reinvest_auto_plan_rewards` + `execute_auto_plan`
+transaction and the indexed plan balance matches chain state.
 
 Before deploying the frontend, query `public.mine_burn_stats` as the anonymous
 role and require exactly one row with an integer

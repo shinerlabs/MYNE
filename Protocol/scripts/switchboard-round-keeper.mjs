@@ -368,6 +368,17 @@ console.log(JSON.stringify({
 await waitForScheduledTimestamp(openedAt);
 const receiptRent = BigInt(await connection.getMinimumBalanceForRentExemption(468));
 if ((await chainTimeSeconds()) < bettingEndsAt && asBigInt(roundState.randomnessCommitSlot) === 0n) {
+  let autoPlanStakePoolRequest = null;
+  const readAutoPlanStakePool = () => {
+    if (!autoPlanStakePoolRequest) {
+      const request = myne.account.stakePool.fetch(stakePool).catch((error) => {
+        if (autoPlanStakePoolRequest === request) autoPlanStakePoolRequest = null;
+        throw error;
+      });
+      autoPlanStakePoolRequest = request;
+    }
+    return autoPlanStakePoolRequest;
+  };
   await executeAutoPlansDuringWindow({
     bettingEndsAt,
     nowSeconds: chainTimeSeconds,
@@ -386,10 +397,14 @@ if ((await chainTimeSeconds()) < bettingEndsAt && asBigInt(roundState.randomness
         ? await myne.account.stakePosition.fetchNullable(stakePosition)
         : null;
       if (reinvestSol && (!position || !position.authority.equals(authority))) return null;
+      const autoPlanStakePool = reinvestSol ? await readAutoPlanStakePool() : null;
       const funding = autoPlanExecutionFunding({
         rewardMode,
         balanceLamports: plan.balanceLamports,
         pendingSol: position?.pendingSol ?? 0,
+        rewardPerWeight: autoPlanStakePool?.rewardPerWeight ?? 0,
+        rewardWeight: position?.rewardWeight ?? 0,
+        rewardDebt: position?.rewardDebt ?? 0,
         requiredLamports: perRound + receiptRent,
       });
       if (!plan.active

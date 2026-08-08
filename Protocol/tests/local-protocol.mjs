@@ -515,9 +515,7 @@ const [reinvestedPlan, positionAfterReinvest, stakePoolAfterReinvest, reinvested
 ]);
 const reinvestedLamports = BigInt(stakePoolAfterReinvest.totalClaimedLamports.toString())
   - BigInt(stakePoolBeforeReinvest.totalClaimedLamports.toString());
-const receiptRent = BigInt(await provider.connection.getBalance(
-  receiptFor(payer.publicKey, new BN(0)), 'confirmed',
-));
+const receiptRent = BigInt(await provider.connection.getMinimumBalanceForRentExemption(468));
 assert.ok(reinvestedLamports > 50_000_000n + receiptRent);
 assert.equal(positionAfterReinvest.pendingSol.toString(), '0');
 assert.equal(
@@ -1189,6 +1187,6 @@ console.log(JSON.stringify({
     'on-chain receipt processed/closed counters and buyback closure gate',
     'standard staking plus operator and mining-funded SOL rewards',
     '10% MYNE claim fee accounting and capped minting',
-    'atomic first-wallet Auto Mine setup, exact execution and rent-reclaiming cancellation',
+    'atomic first-wallet Auto Mine setup, SOL reward reinvestment, exact execution and rent-reclaiming cancellation',
   ],
 }, null, 2));

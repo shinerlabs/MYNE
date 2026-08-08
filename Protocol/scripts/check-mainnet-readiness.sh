@@ -261,6 +261,8 @@ grep -Fq 'grant execute on function public.mine_wallet_round_history_v1(text, bi
 test -f ../supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql
 grep -q 'mine_auto_plans_reward_mode_check' ../supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql
 grep -q 'reward_mode between 0 and 3' ../supabase/migrations/20260808140000_auto_plan_sol_reinvestment.sql
+test -f ../supabase/migrations/20260808140500_auto_reinvest_worker_capability.sql
+grep -q 'auto-reinvest-v1' ../supabase/migrations/20260808140500_auto_reinvest_worker_capability.sql
 test -f ../supabase/functions/wallet-round-history/index.ts
 grep -q 'requireSession(req)' ../supabase/functions/wallet-round-history/index.ts
 grep -q 'p_wallet: session.walletAddress' ../supabase/functions/wallet-round-history/index.ts
@@ -284,6 +286,7 @@ migrations = [
     '20260808134500_round_projection_completeness.sql',
     '20260808135000_wallet_round_history.sql',
     '20260808140000_auto_plan_sol_reinvestment.sql',
+    '20260808140500_auto_reinvest_worker_capability.sql',
 ]
 positions = [runbook.index(name) for name in migrations]
 assert positions == sorted(positions), 'Projection/wallet-history migrations are out of order'

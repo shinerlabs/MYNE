@@ -596,6 +596,21 @@ if ((await chainTimeSeconds()) < bettingEndsAt) {
     'Bet receipt rent exemption read',
     () => connection.getMinimumBalanceForRentExemption(468),
   ));
+  let autoPlanStakePoolRequest = null;
+  const readAutoPlanStakePool = () => {
+    if (!autoPlanStakePoolRequest) {
+      const request = boundedRpc(
+        'Auto-plan stake pool read',
+        () => program.account.stakePool.fetch(stakePool),
+        autoPlanOperationTimeoutMs,
+      ).catch((error) => {
+        if (autoPlanStakePoolRequest === request) autoPlanStakePoolRequest = null;
+        throw error;
+      });
+      autoPlanStakePoolRequest = request;
+    }
+    return autoPlanStakePoolRequest;
+  };
   await executeAutoPlansDuringWindow({
     bettingEndsAt,
     nowSeconds: chainTimeSeconds,
@@ -623,10 +638,14 @@ if ((await chainTimeSeconds()) < bettingEndsAt) {
         )
         : null;
       if (reinvestSol && (!position || !position.authority.equals(authority))) return null;
+      const autoPlanStakePool = reinvestSol ? await readAutoPlanStakePool() : null;
       const funding = autoPlanExecutionFunding({
         rewardMode,
         balanceLamports: plan.balanceLamports,
         pendingSol: position?.pendingSol ?? 0,
+        rewardPerWeight: autoPlanStakePool?.rewardPerWeight ?? 0,
+        rewardWeight: position?.rewardWeight ?? 0,
+        rewardDebt: position?.rewardDebt ?? 0,
         requiredLamports: perRound + receiptRent,
       });
       if (!plan.active

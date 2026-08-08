@@ -290,12 +290,12 @@ const upsert = (table, rows, conflict) => rest(
 
 async function requireIndexerSchema() {
   const rows = await rest(
-    'mine_worker_schema_capabilities?select=release&release=eq.round-projection-v2&limit=1',
+    'mine_worker_schema_capabilities?select=release&release=in.(round-projection-v2,auto-reinvest-v1)',
   );
-  assert.equal(
-    rows?.length,
-    1,
-    'Round index schema is incomplete; apply every Supabase migration through 20260808134500_round_projection_completeness.sql',
+  const releases = new Set((rows ?? []).map(({ release }) => release));
+  assert.ok(
+    releases.has('round-projection-v2') && releases.has('auto-reinvest-v1'),
+    'Round index schema is incomplete; apply every Supabase migration through 20260808140500_auto_reinvest_worker_capability.sql',
   );
 }
 

@@ -2912,7 +2912,10 @@ const updateMine = () => {
   const planRoundCost = planRunning && planReceiptRent != null
     ? existingPlan.amountPerPlay + planReceiptRent
     : null;
-  const planStalled = planRoundCost != null && existingPlan.balance < planRoundCost;
+  const planExecutableBalance = existingPlan
+    ? existingPlan.balance + (existingPlan.autoClaim ? (chain.state.claimableSol ?? 0n) : 0n)
+    : 0n;
+  const planStalled = planRoundCost != null && planExecutableBalance < planRoundCost;
   const planModeLabel = existingPlan?.rewardMode === 'burn' ? 'AUTO-BURN' : 'AUTO-MINE';
   const planOwnsAction = Boolean(existingPlan);
   const mineAvailable = Boolean(chain.state.account) && protocolReady && clockReady && !protocolPaused && !planOwnsAction;
@@ -5922,7 +5925,11 @@ const renderPlan = (state) => {
   // which reads like it ended.
   const receiptRent = typeof state.autoPlanMaxFee === 'bigint' ? state.autoPlanMaxFee : null;
   const perRoundCost = receiptRent == null ? null : plan.amountPerPlay + receiptRent;
-  const affordable = perRoundCost != null && perRoundCost > 0n ? plan.balance / perRoundCost : null;
+  const reinvestableSol = plan.autoClaim ? (state.claimableSol ?? 0n) : 0n;
+  const executableBalance = plan.balance + reinvestableSol;
+  const affordable = perRoundCost != null && perRoundCost > 0n
+    ? executableBalance / perRoundCost
+    : null;
   const stalled = affordable === 0n;
   box.dataset.planState = stalled ? 'stalled' : 'active';
   const rounds = affordable == null
@@ -5938,10 +5945,10 @@ const renderPlan = (state) => {
       <span class="auto-plan-live${stalled ? ' stalled' : ''}"><i></i>${planModeLabel} ${stalled ? 'PAUSED' : 'ACTIVE'}</span>
       <b>${affordable == null ? 'cost loading' : stalled ? 'needs top-up' : `${rounds} round${rounds === '1' ? '' : 's'} left`}</b>
     </div>
-    <p class="auto-plan-summary">${plan.tiles.length} tile${plan.tiles.length === 1 ? '' : 's'} · ${chain.format.ethSmart(plan.amountPerPlay)} SOL per round · ${chain.format.ethSmart(plan.balance)} SOL left</p>
+    <p class="auto-plan-summary">${plan.tiles.length} tile${plan.tiles.length === 1 ? '' : 's'} · ${chain.format.ethSmart(plan.amountPerPlay)} SOL per round · ${chain.format.ethSmart(plan.balance)} SOL funded${reinvestableSol > 0n ? ` · +${chain.format.ethSmart(reinvestableSol)} SOL ready to reinvest` : ''}</p>
     <p class="auto-plan-reward-mode"><b>REWARD MODE</b><span>${plan.rewardMode === 'burn' ? 'Stake + burn MYNE · 5× staking weight · 0% claim fee' : 'MYNE accumulates in-system · 10% claim fee'}</span></p>
     ${affordable == null ? '<p class="auto-plan-warn">Live receipt-rent quote unavailable. Round capacity is not estimated until the RPC returns it.</p>' : ''}
-    ${stalled ? `<p class="auto-plan-warn">Balance ${chain.format.ethSmart(plan.balance)} SOL is below the ${chain.format.ethSmart(perRoundCost)} SOL needed for one more round (exact wager + receipt rent). Top up to resume, or withdraw what's left.</p>` : ''}
+    ${stalled ? `<p class="auto-plan-warn">Available Auto-round funds ${chain.format.ethSmart(executableBalance)} SOL are below the ${chain.format.ethSmart(perRoundCost)} SOL needed for one more round (exact wager + receipt rent). Top up to resume, or withdraw what's left.</p>` : ''}
     ${plan.autoClaim
       ? '<p class="auto-plan-note">Reinvest is on: all claimable SOL (mining + staking) is moved into this Auto-round balance before the next automatic deployment.</p>'
       : '<p class="auto-plan-note">Reinvest is off: claimable SOL stays in your rewards balance until you claim it.</p>'}

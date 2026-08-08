@@ -81,16 +81,21 @@ test('Auto-round offers an exact fixed SOL deposit without weakening the live 90
 });
 
 test('SOL reinvest is an on-chain plan flag and never falls back to wallet delegation', async () => {
-  const [autoCommit, minePage, main] = await Promise.all([
+  const [autoCommit, minePage, main, appConfig] = await Promise.all([
     readFile(new URL('../src/chain/autocommit.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/chain/mine-page.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/app-config.js', import.meta.url), 'utf8'),
   ]);
   assert.match(autoCommit, /encodeAutoPlanRewardMode\(\{ rewardMode, autoClaim \}\)/);
   assert.match(autoCommit, /autoClaim: mode\.autoClaim/);
   assert.doesNotMatch(autoCommit, /ClaimDelegate|delegate/i);
   assert.doesNotMatch(minePage, /ClaimDelegate|approveAutoClaim/);
   assert.match(main, /all claimable SOL \(mining \+ staking\)/i);
+  assert.match(main, /autoReinvestAvailable[\s\S]*FEATURES\.autoReinvestSol/);
+  assert.match(main, /existingPlan\.balance \+ \(existingPlan\.autoClaim \? \(chain\.state\.claimableSol/);
+  assert.match(autoCommit, /FEATURES\.autoReinvestSol[\s\S]*protocolCapabilities\.autoReinvest/);
+  assert.match(appConfig, /VITE_AUTO_REINVEST_SOL === 'true'/);
   assert.doesNotMatch(main, /approve-delegate|needs delegate approval/i);
 });
 

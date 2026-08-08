@@ -56,9 +56,9 @@ test('historical gap watermarks can never be adopted as transaction cursors', as
 test('production indexer refuses a partially migrated round projection schema', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   assert.match(source, /async function requireIndexerSchema/);
-  assert.match(source, /mine_worker_schema_capabilities\?select=release&release=eq\.round-projection-v2/);
+  assert.match(source, /mine_worker_schema_capabilities\?select=release&release=in\.\(round-projection-v2,auto-reinvest-v1\)/);
   assert.match(source, /await requireIndexerSchema\(\)/);
-  assert.match(source, /20260808134500_round_projection_completeness\.sql/);
+  assert.match(source, /20260808140500_auto_reinvest_worker_capability\.sql/);
 });
 
 test('recent and stale Round PDAs rebuild complete canonical history before cursor advancement', async () => {

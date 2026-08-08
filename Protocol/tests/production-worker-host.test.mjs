@@ -528,17 +528,19 @@ test('worker host receives local IPC heartbeats and restarts stale children', as
   assert.match(host, /WORKER_HEARTBEAT_TIMEOUT_MS must be between 60000 and 900000/);
 });
 
-test('worker host requires the complete server claims schema marker', async () => {
-  const [source, migration] = await Promise.all([
+test('worker host requires projection and Auto-reinvest schema capabilities', async () => {
+  const [source, projectionMigration, capabilityMigration] = await Promise.all([
     readFile(new URL('../scripts/production-worker-host.mjs', import.meta.url), 'utf8'),
     readFile(new URL('../../supabase/migrations/20260808134500_round_projection_completeness.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../../supabase/migrations/20260808140500_auto_reinvest_worker_capability.sql', import.meta.url), 'utf8'),
   ]);
   assert.match(source, /mine_worker_schema_capabilities/);
-  assert.match(source, /release=eq\.round-projection-v2/);
-  assert.match(source, /20260808134500_round_projection_completeness\.sql/);
-  assert.match(migration, /round-projection-v2/);
-  assert.match(migration, /revoke all[\s\S]*from public, anon, authenticated/);
-  assert.match(migration, /grant select[\s\S]*to service_role/);
+  assert.match(source, /release=in\.\(round-projection-v2,auto-reinvest-v1\)/);
+  assert.match(source, /20260808140500_auto_reinvest_worker_capability\.sql/);
+  assert.match(projectionMigration, /round-projection-v2/);
+  assert.match(capabilityMigration, /auto-reinvest-v1/);
+  assert.match(capabilityMigration, /revoke all[\s\S]*from public, anon, authenticated/);
+  assert.match(capabilityMigration, /grant select[\s\S]*to service_role/);
 });
 
 test('transaction workers receive wallet paths but never encoded signer secrets', () => {

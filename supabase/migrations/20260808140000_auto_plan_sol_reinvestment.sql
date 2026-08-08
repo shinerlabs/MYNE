@@ -12,4 +12,3 @@ alter table public.mine_auto_plans
 create index if not exists mine_auto_plans_active_reinvest_idx
   on public.mine_auto_plans (authority)
   where active and reward_mode >= 2;
-

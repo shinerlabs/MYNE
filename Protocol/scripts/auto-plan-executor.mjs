@@ -7,6 +7,7 @@ const boundedInteger = (value, fallback, minimum, maximum) => {
 
 export const OPERATION_TIMEOUT_CODE = 'MYNE_OPERATION_TIMEOUT';
 export const AUTO_PLAN_REINVEST_SOL_FLAG = 2;
+const STAKE_REWARD_SCALE = 1_000_000_000_000_000_000n;
 
 const asBigInt = (value, name) => {
   const parsed = typeof value === 'bigint' ? value : BigInt(value?.toString?.() ?? value ?? 0);
@@ -19,12 +20,22 @@ const asBigInt = (value, name) => {
  * Claimable SOL counts only after explicit on-chain reinvest consent; the
  * frontend wallet budget must continue to exclude it until confirmation.
  */
-export function autoPlanExecutionFunding({ rewardMode, balanceLamports, pendingSol, requiredLamports }) {
+export function autoPlanExecutionFunding({
+  rewardMode,
+  balanceLamports,
+  pendingSol,
+  requiredLamports,
+  rewardPerWeight = 0,
+  rewardWeight = 0,
+  rewardDebt = 0,
+}) {
   const mode = Number(rewardMode);
   assert.ok(Number.isInteger(mode) && mode >= 0 && mode <= 3, 'Auto-plan reward mode is invalid');
   const reinvestSol = (mode & AUTO_PLAN_REINVEST_SOL_FLAG) !== 0;
   const balance = asBigInt(balanceLamports, 'Auto-plan balance');
-  const pending = reinvestSol ? asBigInt(pendingSol, 'Claimable SOL') : 0n;
+  const pending = reinvestSol ? liveAutoPlanClaimableSol({
+    pendingSol, rewardPerWeight, rewardWeight, rewardDebt,
+  }) : 0n;
   const required = asBigInt(requiredLamports, 'Auto-plan round cost');
   return {
     reinvestSol,
@@ -32,6 +43,21 @@ export function autoPlanExecutionFunding({ rewardMode, balanceLamports, pendingS
     availableLamports: balance + pending,
     executable: balance + pending >= required,
   };
+}
+
+/** Mirrors the on-chain checkpoint_stake calculation before deciding eligibility. */
+export function liveAutoPlanClaimableSol({
+  pendingSol,
+  rewardPerWeight = 0,
+  rewardWeight = 0,
+  rewardDebt = 0,
+}) {
+  const pending = asBigInt(pendingSol, 'Claimable SOL');
+  const current = asBigInt(rewardPerWeight, 'Stake reward index');
+  const weight = asBigInt(rewardWeight, 'Stake reward weight');
+  const debt = asBigInt(rewardDebt, 'Stake reward debt');
+  assert.ok(current >= debt, 'Stake reward index is behind the position checkpoint');
+  return pending + (weight * (current - debt)) / STAKE_REWARD_SCALE;
 }
 
 /**

@@ -13,16 +13,20 @@ test('release runbook applies projection and wallet-history migrations in order'
     '20260808133000_worker_schema_capabilities.sql',
     '20260808134500_round_projection_completeness.sql',
     '20260808135000_wallet_round_history.sql',
+    '20260808140000_auto_plan_sol_reinvestment.sql',
+    '20260808140500_auto_reinvest_worker_capability.sql',
   ];
   const positions = migrations.map((name) => runbook.indexOf(name));
   assert.ok(positions.every((position) => position >= 0));
   assert.deepEqual(positions, [...positions].sort((left, right) => left - right));
 
   // server-claims-v1 remains a deliberate historical migration assertion;
-  // round-projection-v2 is the final worker capability.
+  // New workers require both the projection and Auto-reinvest capability rows.
   assert.match(preflight, /20260808133000_worker_schema_capabilities\.sql[\s\S]*server-claims-v1/);
   assert.match(preflight, /20260808134500_round_projection_completeness\.sql[\s\S]*round-projection-v2/);
+  assert.match(preflight, /20260808140500_auto_reinvest_worker_capability\.sql[\s\S]*auto-reinvest/);
   assert.match(runbook, /earlier claim-vault schema[\s\S]*round-projection-v2/);
+  assert.match(runbook, /VITE_AUTO_REINVEST_SOL=false[\s\S]*atomic `reinvest_auto_plan_rewards` \+ `execute_auto_plan`/);
 });
 
 test('preflight covers projection completeness and wallet-scoped history boundaries', async () => {
