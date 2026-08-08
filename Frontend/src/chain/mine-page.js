@@ -31,6 +31,7 @@ import {
 } from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
 import { claimStakingRewards as withdrawClaimableSol } from './staking.js';
+import { mergeConfirmedTileBets } from './confirmed-tile-bets.js';
 
 const short = (address) => `${address.slice(0, 6)}...${address.slice(-4)}`;
 const eth = (value, digits = 3) => Number(formatEther(value)).toFixed(digits);
@@ -86,6 +87,37 @@ export const state = {
   // Last Round PDA that actually existed when the authoritative pause was
   // observed. Unlike `roundId`, this does not advance with wall-clock time.
   pausedRoundId: null,
+};
+
+const emptyTileBets = () => Array(25).fill(0n);
+let confirmedTileBets = { roundId: null, account: null, amounts: emptyTileBets() };
+
+const clearConfirmedTileBets = () => {
+  confirmedTileBets = { roundId: null, account: null, amounts: emptyTileBets() };
+};
+
+const rememberConfirmedTileBets = ({ roundId, account, tiles, amountPerTile }) => {
+  if (confirmedTileBets.roundId !== roundId || confirmedTileBets.account !== account) {
+    confirmedTileBets = { roundId, account, amounts: emptyTileBets() };
+  }
+  for (const tile of tiles) {
+    const index = Number(tile) - 1;
+    if (index >= 0 && index < confirmedTileBets.amounts.length) {
+      confirmedTileBets.amounts[index] += amountPerTile;
+    }
+  }
+};
+
+const reconcileConfirmedTileBets = ({ roundId, account, onChainBets }) => {
+  if (confirmedTileBets.roundId !== roundId || confirmedTileBets.account !== account) {
+    return onChainBets;
+  }
+  const merged = mergeConfirmedTileBets(onChainBets, confirmedTileBets.amounts);
+  confirmedTileBets.amounts = confirmedTileBets.amounts.map((amount, index) => (
+    BigInt(onChainBets[index] ?? 0n) >= amount ? 0n : amount
+  ));
+  if (confirmedTileBets.amounts.every((amount) => amount === 0n)) clearConfirmedTileBets();
+  return merged;
 };
 
 const subscribers = new Set();
@@ -171,7 +203,11 @@ async function refreshRound() {
     // A current-round settlement drives the final five-second winner reveal through
     // `currentRound`. It must not replace the durable result pointers yet: those advance only
     // after the next round starts and separately track the latest result and latest played result.
-    state.myBets = myBets;
+    state.myBets = reconcileConfirmedTileBets({
+      roundId: requestedRoundId,
+      account: requestedAccount,
+      onChainBets: myBets,
+    });
     emit();
   } catch (error) {
     console.warn('round refresh failed', error);
@@ -292,6 +328,7 @@ function tick() {
   state.secondsLeft = next.secondsLeft;
 
   if (rolled) {
+    clearConfirmedTileBets();
     state.roundId = next.roundId;
     syncRoundRealtime(next.roundId);
     // Use the new chain round as the anchor. If the tab was backgrounded, `state.roundId` may
@@ -555,10 +592,28 @@ export async function mine({
     });
   }
 
+  const submittedRoundId = BigInt(state.roundId);
+  const submittedAccount = getAccount();
+  const submittedAmountPerTile = parseEther(String(ethPerTile));
   await runTx(
     `Deploying to ${tiles.length} tile${tiles.length === 1 ? '' : 's'}…`,
-    () => placeBet({ roundId: state.roundId, tiles, ethPerTile, hasAccount: state.hasAccount }),
-    async () => { await Promise.all([refreshRound(), refreshMiner()]); },
+    () => placeBet({ roundId: submittedRoundId, tiles, ethPerTile, hasAccount: state.hasAccount }),
+    async () => {
+      // Solana has confirmed payment at this point. Lock the exact submitted
+      // tiles immediately instead of waiting for a separate receipt RPC read,
+      // which can briefly return the pre-transaction snapshot.
+      if (state.roundId === submittedRoundId && state.account === submittedAccount) {
+        rememberConfirmedTileBets({
+          roundId: submittedRoundId,
+          account: submittedAccount,
+          tiles,
+          amountPerTile: submittedAmountPerTile,
+        });
+        state.myBets = mergeConfirmedTileBets(state.myBets, confirmedTileBets.amounts);
+        emit();
+      }
+      await Promise.all([refreshRound(), refreshMiner()]);
+    },
   );
 }
 
@@ -835,7 +890,7 @@ export async function stakeAndBurnRewards(roundIds) {
 export function start() {
   if (!protocolReady) {
     state.roundId = roundState().roundId;
-    onAccountChange((account) => { state.account = account; emit(); });
+    onAccountChange((account) => { clearConfirmedTileBets(); state.account = account; emit(); });
     restoreConnection().catch(() => {});
     window.setInterval(tick, 1000);
     tick();
@@ -866,6 +921,7 @@ export function start() {
   startGlobalRealtime();
 
   onAccountChange((account) => {
+    clearConfirmedTileBets();
     state.account = account;
     syncWalletRealtime(account);
     // Invalidate in-flight reads and remove the previous wallet's actionable

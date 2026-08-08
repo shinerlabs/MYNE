@@ -1,12 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { mergeConfirmedTileBets } from '../src/chain/confirmed-tile-bets.js';
+
+test('a confirmed transaction remains authoritative while RPC still returns the old receipt snapshot', () => {
+  const chain = Array(25).fill(0n);
+  const confirmed = Array(25).fill(0n);
+  confirmed[6] = 50_000_000n;
+  assert.equal(mergeConfirmedTileBets(chain, confirmed)[6], 50_000_000n);
+
+  chain[6] = 50_000_000n;
+  assert.equal(mergeConfirmedTileBets(chain, confirmed)[6], 50_000_000n);
+});
 
 test('confirmed tile receipts remain selected and locked for the active betting round', async () => {
-  const source = await readFile(new URL('../src/main.js', import.meta.url), 'utf8');
+  const [source, minePage] = await Promise.all([
+    readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/chain/mine-page.js', import.meta.url), 'utf8'),
+  ]);
   assert.match(source, /const tileHasConfirmedBet = \(slotId, state = chain\.state\)/);
   assert.match(source, /const tileLocked = \(slotId\) => \([\s\S]*tileHasConfirmedBet\(slotId\)[\s\S]*classList\.contains\('has-position'\)/);
   assert.match(source, /const paid = tileHasConfirmedBet\(tile\.dataset\.slot, state\)[\s\S]*tile\.classList\.contains\('has-position'\);[\s\S]*const picked = paid \|\| selected\.has\(tile\.dataset\.slot\)/);
   assert.match(source, /already paid for and locked this round/);
   assert.match(source, /ALL\/CLEAR only affects tiles that are still available\.[\s\S]*if \(tileLocked\(id\)\) return;/);
+  assert.match(minePage, /const submittedRoundId = BigInt\(state\.roundId\)/);
+  assert.match(minePage, /rememberConfirmedTileBets\([\s\S]*state\.myBets = mergeConfirmedTileBets[\s\S]*await Promise\.all\(\[refreshRound\(\), refreshMiner\(\)\]\)/);
+  assert.match(minePage, /state\.myBets = reconcileConfirmedTileBets\(/);
+  assert.match(minePage, /if \(rolled\) \{[\s\S]*clearConfirmedTileBets\(\)/);
 });

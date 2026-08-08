@@ -160,6 +160,17 @@ const upsert = (table, rows, conflict) => rest(
   { method: 'POST', body: Array.isArray(rows) ? rows : [rows], prefer: 'resolution=merge-duplicates,return=minimal' },
 );
 
+async function requireIndexerSchema() {
+  const rows = await rest(
+    'mine_worker_schema_capabilities?select=release&release=eq.server-claims-v1&limit=1',
+  );
+  assert.equal(
+    rows?.length,
+    1,
+    'Round index schema is incomplete; apply every Supabase migration through 20260808133000_worker_schema_capabilities.sql',
+  );
+}
+
 async function ensureRound(roundId) {
   await upsert('mine_rounds', { round_id: asString(roundId), updated_at: new Date().toISOString() }, 'round_id');
 }
@@ -933,6 +944,7 @@ export async function indexerTick() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  await requireIndexerSchema();
   const replaySignatures = process.argv
     .filter((argument) => argument.startsWith('--replay-signature='))
     .map((argument) => argument.slice('--replay-signature='.length));

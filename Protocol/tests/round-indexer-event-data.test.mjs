@@ -44,6 +44,14 @@ test('production indexer acquires an atomic lease before each tick', async () =>
   assert.match(source, /if \(!\(await acquireIndexerLease\(\)\)\)/);
 });
 
+test('production indexer refuses a partially migrated server claims schema', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /async function requireIndexerSchema/);
+  assert.match(source, /mine_worker_schema_capabilities\?select=release&release=eq\.server-claims-v1/);
+  assert.match(source, /await requireIndexerSchema\(\)/);
+  assert.match(source, /20260808133000_worker_schema_capabilities\.sql/);
+});
+
 test('settled Round PDAs repair stale unresolved index rows from their canonical transaction', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   const reconciliation = source.slice(

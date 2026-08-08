@@ -152,9 +152,12 @@ function safeDataDir(env, mode) {
   return resolved.replace(/\/$/, '');
 }
 
-function publicHealth(state) {
+export function publicHealth(state) {
+  const essentialWorkersRunning = state.mode !== 'live'
+    || ['round-indexer', 'round-lifecycle', 'buyback-keeper']
+      .every((name) => state.workers.get(name)?.running === true);
   return {
-    ok: state.ready && !state.error,
+    ok: state.ready && !state.error && essentialWorkersRunning,
     mode: state.mode,
     checkedAt: state.checkedAt,
     revision: state.revision,
@@ -165,6 +168,20 @@ function publicHealth(state) {
       }]),
     ),
   };
+}
+
+async function requireProductionIndexSchema({ supabaseUrl, serviceRole }) {
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/mine_worker_schema_capabilities?select=release&release=eq.server-claims-v1&limit=1`,
+    {
+      headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
+    },
+  );
+  const body = await response.json().catch(() => null);
+  assert.ok(
+    response.ok && Array.isArray(body) && body.length === 1,
+    'Production index schema is incomplete; apply every Supabase migration through 20260808133000_worker_schema_capabilities.sql before starting workers',
+  );
 }
 
 async function writeWallet(path, keypair) {
@@ -272,10 +289,7 @@ export async function main(env = process.env) {
     assert.ok(!gate.pool.equals(PublicKey.default), 'Meteora liquidity pool is missing');
     if (mode === 'standby') assert.equal(config.paused, true, 'Standby host refuses an active protocol');
 
-    const response = await fetch(`${supabaseUrl}/rest/v1/mine_rounds?select=round_id&limit=1`, {
-      headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
-    });
-    assert.ok(response.ok, `Supabase service-role check failed (${response.status})`);
+    await requireProductionIndexSchema({ supabaseUrl, serviceRole });
     state.ready = true;
     state.error = null;
     state.checkedAt = new Date().toISOString();

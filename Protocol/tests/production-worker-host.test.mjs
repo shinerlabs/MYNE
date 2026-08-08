@@ -9,6 +9,7 @@ import {
   firstManagedRoundId,
   keypairFromBase64,
   liveWorkerSpecs,
+  publicHealth,
   workerMode,
 } from '../scripts/production-worker-host.mjs';
 
@@ -28,6 +29,33 @@ test('standby is default and live is explicit', () => {
   assert.equal(workerMode({}), 'standby');
   assert.equal(workerMode({ MYNE_WORKER_MODE: 'LIVE' }), 'live');
   assert.throws(() => workerMode({ MYNE_WORKER_MODE: 'maybe' }), /standby or live/);
+});
+
+test('live health fails closed when an essential settlement/index worker is down', () => {
+  const workers = new Map(WORKER_NAMES.map((name) => [name, { running: true, restarts: 0 }]));
+  const state = {
+    mode: 'live', ready: true, error: null, checkedAt: 'now', revision: 'test', workers,
+  };
+  assert.equal(publicHealth(state).ok, true);
+  workers.get('round-indexer').running = false;
+  assert.equal(publicHealth(state).ok, false);
+  workers.get('round-indexer').running = true;
+  workers.get('round-lifecycle').running = false;
+  assert.equal(publicHealth(state).ok, false);
+  assert.equal(publicHealth({ ...state, mode: 'standby' }).ok, true);
+});
+
+test('worker host requires the complete server claims schema marker', async () => {
+  const [source, migration] = await Promise.all([
+    readFile(new URL('../scripts/production-worker-host.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../../supabase/migrations/20260808133000_worker_schema_capabilities.sql', import.meta.url), 'utf8'),
+  ]);
+  assert.match(source, /mine_worker_schema_capabilities/);
+  assert.match(source, /release=eq\.server-claims-v1/);
+  assert.match(source, /20260808133000_worker_schema_capabilities\.sql/);
+  assert.match(migration, /with \(security_invoker = true\)/);
+  assert.match(migration, /revoke all[\s\S]*from public, anon, authenticated/);
+  assert.match(migration, /grant select[\s\S]*to service_role/);
 });
 
 test('transaction workers receive wallet paths but never encoded signer secrets', () => {

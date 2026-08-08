@@ -40,6 +40,11 @@ the event-driven frontend. Private receipt settlements, keeper leases, and
 indexer cursors remain unpublished; the existing timed reads remain a recovery
 path if Realtime is unavailable.
 
+Migration `20260808133000_worker_schema_capabilities.sql` is the final,
+service-role-only release marker. Both the worker host and standalone round
+indexer require its exact `server-claims-v1` value before they start, so an
+older database can no longer look healthy while new receipt events fail.
+
 ## Wallet-only chat
 
 Migration `20260807140000_wallet_chat_hardening.sql` is the wallet-only chat
@@ -170,8 +175,10 @@ ban enforcement.
 
 1. Back up the social tables and record the current row counts.
 2. Put chat writes into maintenance mode.
-3. Apply all pending migrations, including the wallet-only cut-over, validator cleanup, and chat
-   administrator provisioning migration in timestamp order.
+3. Apply all pending migrations, including the wallet-only cut-over, validator cleanup, chat
+   administrator provisioning, and the final `mine_worker_schema_capabilities` release marker in
+   timestamp order. The production worker host refuses to start until the marker is readable by
+   `service_role`; this prevents a healthy-looking worker from running against a partial schema.
 4. Deploy all matching Edge Functions with the MYNE origin allowlist.
 5. Provision moderators with the guarded `Protocol` command. Keep wallet addresses in ignored
    operational configuration, dry-run first, then require exact confirmation:

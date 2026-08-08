@@ -240,6 +240,9 @@ test -f ../supabase/migrations/20260808124500_keeper_lease_privileges.sql
 grep -q 'from public, anon, authenticated' ../supabase/migrations/20260808124500_keeper_lease_privileges.sql
 grep -q 'to service_role' ../supabase/migrations/20260808124500_keeper_lease_privileges.sql
 grep -q "status=in.(claimed,accrued,refunded)" scripts/round-indexer.mjs
+test -f ../supabase/migrations/20260808133000_worker_schema_capabilities.sql
+grep -q 'server-claims-v1' ../supabase/migrations/20260808133000_worker_schema_capabilities.sql
+grep -q 'mine_worker_schema_capabilities' scripts/production-worker-host.mjs
 
 if [[ -z "${MAINNET_RELEASE_MANIFEST:-}" ]]; then
   echo "Set MAINNET_RELEASE_MANIFEST to the frozen, external manifest for the candidate" >&2
