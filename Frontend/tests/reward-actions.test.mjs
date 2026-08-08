@@ -26,7 +26,7 @@ test('keeper-accrued receipts refresh both the claim index and durable SOL ledge
   assert.match(mine, /if \(state\.account\) void refreshMiner\(\);[\s\S]*\}, 5000\);/);
 });
 
-test('previous-round result resolves through the latest indexed played round', () => {
+test('previous-round result resolves through the latest indexed settled round', () => {
   assert.match(mine, /const indexedRoundId = await loadLatestSettledRoundId\(roundId\)/);
   assert.match(mine, /state\.lastResolved = \{ roundId: BigInt\(resolvedRoundId\), \.\.\.round \}/);
 });

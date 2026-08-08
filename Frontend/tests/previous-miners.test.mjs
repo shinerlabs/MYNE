@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
-  confirmedMinerRoundKey,
+  confirmedMinerRoundKey, isConfirmedEmptyRound,
   previousConfirmedRoundId,
   previousRoundMinerRoster,
   shouldRefreshConfirmedMiners,
@@ -23,6 +23,15 @@ test('only a settled previous round can replace the confirmed miners panel', () 
   assert.equal(confirmedMinerRoundKey({ roundId: 8n, resolved: true }), '8');
 });
 
+test('zero receipts make an empty settled roster authoritative', () => {
+  assert.equal(isConfirmedEmptyRound(null), false);
+  assert.equal(isConfirmedEmptyRound({ resolved: false, totalReceipts: 0n }), false);
+  assert.equal(isConfirmedEmptyRound({ resolved: true }), false);
+  assert.equal(isConfirmedEmptyRound({ resolved: true, totalReceipts: 0n }), true);
+  assert.equal(isConfirmedEmptyRound({ resolved: true, totalReceipts: '0' }), true);
+  assert.equal(isConfirmedEmptyRound({ resolved: true, totalReceipts: 1n }), false);
+});
+
 test('the same confirmed miner roster remains stable while the live round changes', () => {
   const previous = { roundId: 8n, resolved: true };
   assert.equal(shouldRefreshConfirmedMiners(previous, '', ''), true);
@@ -34,20 +43,30 @@ test('the same confirmed miner roster remains stable while the live round change
   assert.equal(shouldRefreshConfirmedMiners({ roundId: 9n, resolved: true }, '8', ''), true);
 });
 
-test('the latest played round remains eligible across empty numeric rounds', () => {
+test('the latest settled round remains authoritative across delayed reads', () => {
   const refresh = main.slice(
     main.indexOf('const scheduleRoundMinersRefresh'),
     main.indexOf('const renderPagination'),
   );
 
-  // A played round such as 341 can still be the authoritative latest result when the live clock
-  // has advanced through empty rounds. Staleness is determined by lastResolved changing, not by
-  // requiring the result id to equal currentRound - 1.
+  // Staleness is determined by lastResolved changing, not by a separate
+  // current-round arithmetic check.
   assert.doesNotMatch(refresh, /previousConfirmedRoundId\(chain\.state\.roundId\)/);
   assert.equal(
     refresh.match(/String\(chain\.state\.lastResolved\?\.roundId\) !== String\(requestedRound\)/g)?.length,
     3,
   );
+});
+
+test('confirmed zero-bid rounds replace stale rosters and report zero MYNE', () => {
+  const refresh = main.slice(
+    main.indexOf('const renderConfirmedMiners'),
+    main.indexOf('const renderPagination'),
+  );
+  assert.match(refresh, /const confirmedEmpty = isConfirmedEmptyRound\(confirmed\)/);
+  assert.match(refresh, /!result\.miners\.length && !confirmedEmpty/);
+  assert.match(refresh, /WINNING TILE #\$\{winningSquare \+ 1\} · 0 MINERS · 0 MYNE REWARDED/);
+  assert.match(refresh, /winning tile published · 0 MYNE rewarded/);
 });
 
 test('the previous-round roster includes every miner, not only winners', () => {

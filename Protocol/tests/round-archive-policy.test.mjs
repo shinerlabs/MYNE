@@ -88,6 +88,42 @@ test('archive proof changes when economic history changes', () => {
   assert.notEqual(archiveHash(first), archiveHash(changed));
 });
 
+test('zero-bid settled round archives its winning tile with no reward or participant rows', () => {
+  const emptyRound = {
+    ...round,
+    round_id: 10,
+    winning_square: 21,
+    total_wager_wei: '0',
+    winner_total_wei: '0',
+    pot_for_winners_wei: '0',
+    bullion_for_winners_wei: '0',
+    payout_mul_wad: '0',
+    total_fee_lamports: '0',
+    staking_gross_lamports: '0',
+    staking_admin_lamports: '0',
+    staking_net_lamports: '0',
+    buyback_lamports: '0',
+    motherlode_fee_lamports: '0',
+    mining_admin_lamports: '0',
+    admin_total_lamports: '0',
+    total_receipts: 0,
+    processed_receipts: 0,
+  };
+  const audit = requireRoundFeeAudit(emptyRound);
+  assert.equal(audit.total_fee_lamports, 0n);
+  const snapshot = buildArchiveSnapshot({
+    program: 'program', round: emptyRound, bets: [], settlements: [], buybacks: [],
+  });
+  assert.equal(snapshot.round.winning_square, 21);
+  assert.equal(snapshot.round.bullion_for_winners_wei, '0');
+  assert.equal(snapshot.round.total_receipts, '0');
+  assert.deepEqual(snapshot.bets, []);
+  assert.deepEqual(snapshot.settlements, []);
+  assert.equal(archiveHash(snapshot), archiveHash(buildArchiveSnapshot({
+    program: 'program', round: emptyRound, bets: [], settlements: [], buybacks: [],
+  })));
+});
+
 test('archive proof commits every round fee destination', () => {
   const first = buildArchiveSnapshot({ program: 'program', round, bets, settlements, buybacks });
   const changed = buildArchiveSnapshot({

@@ -228,13 +228,13 @@ function tick() {
  */
 async function loadResolved(roundId, attempt = 0) {
   // A suspended/background tab can skip several elapsed ids between ticks. Discard late
-  // responses for an older current-round snapshot, then resolve the newest PLAYED round at or
-  // before this target below; empty ids deliberately have no round PDA.
+  // responses for an older current-round snapshot, then resolve the newest settled round at or
+  // before this target. Zero-bid rounds are full results with a winning tile.
   if (state.roundId !== BigInt(roundId) + 1n) return;
   try {
-    // Empty numeric rounds are intentionally not created on chain. Use the
-    // production index to locate the newest resolved, played round at or before
-    // the elapsed id instead of replacing a correct result with an empty PDA.
+    // Use the production index to locate the newest resolved round at or before
+    // the elapsed id. It includes zero-bid rounds instead of skipping their
+    // verifiable winning tiles.
     const indexedRoundId = await loadLatestSettledRoundId(roundId);
     const resolvedRoundId = indexedRoundId ?? roundId;
     const round = await readRound(resolvedRoundId);

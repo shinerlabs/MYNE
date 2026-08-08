@@ -34,7 +34,8 @@ import {
   affordableAutoPlanRounds, maxAutoPlanFundingLamports, requiredDeposit,
 } from './chain/autocommit.js';
 import {
-  confirmedMinerRoundKey, previousRoundMinerRoster, shouldRefreshConfirmedMiners,
+  confirmedMinerRoundKey, isConfirmedEmptyRound, previousRoundMinerRoster,
+  shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
 import { readSupplyStats } from './chain/supply.js';
@@ -5034,13 +5035,13 @@ const paintRoundMinerIdentity = async (row, wallet) => {
   avatar.replaceChildren(img);
 };
 
-const renderConfirmedMiners = (miners, roundId, winningSquare) => {
+const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty = false } = {}) => {
   if (!roundMinersList) return;
   const confirmedMiners = miners.map((miner) => ({ ...miner, roundId, winningSquare }));
-  // A settled round should always have at least one miner. If an RPC/indexer briefly returns an
-  // empty roster, preserve the last confirmed panel instead of replacing it with a misleading
-  // empty-state message.
-  if (!confirmedMiners.length && roundMinersList.children.length) return;
+  // An empty roster is final only when the settled Round account confirms
+  // total_receipts == 0. Otherwise preserve the prior result while a late
+  // receipt-index read catches up.
+  if (!confirmedMiners.length && !confirmedEmpty && roundMinersList.children.length) return;
   confirmedMinerByWallet.clear();
   confirmedMiners.forEach((miner) => confirmedMinerByWallet.set(miner.address, miner));
   confirmedMinerRows = confirmedMiners;
@@ -5049,7 +5050,9 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
     Math.max(0, Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE) - 1),
   );
   if (roundMinersLabel) {
-    roundMinersLabel.textContent = `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · ${confirmedMiners.length} MINER${confirmedMiners.length === 1 ? '' : 'S'} · SOL DEPLOYED`;
+    roundMinersLabel.textContent = confirmedEmpty
+      ? `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · 0 MINERS · 0 MYNE REWARDED`
+      : `ROUND #${roundNo(roundId)} · WINNING TILE #${winningSquare + 1} · ${confirmedMiners.length} MINER${confirmedMiners.length === 1 ? '' : 'S'} · SOL DEPLOYED`;
   }
   roundMinersList.textContent = '';
   const pageCount = Math.max(1, Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE));
@@ -5058,12 +5061,20 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
   if (pagination && pageLabel) {
     // Keep the controls present as a stable affordance even for a single page or
     // an empty/transient roster; unavailable directions are visibly disabled.
-    pagination.hidden = false;
+    pagination.hidden = confirmedEmpty;
     pageLabel.textContent = `${confirmedMinerPage + 1} / ${pageCount}`;
     pagination.querySelector('[data-miners-page="prev"]').disabled = confirmedMinerPage === 0;
     pagination.querySelector('[data-miners-page="next"]').disabled = confirmedMinerPage >= pageCount - 1;
   }
   if (!confirmedMiners.length) {
+    if (confirmedEmpty) {
+      roundMinersList.innerHTML = '<p>No bids this round · winning tile published · 0 MYNE rewarded.</p>';
+      try {
+        localStorage.setItem('myne-previous-miners', JSON.stringify({
+          roundId: String(roundId), winningSquare, miners: [], confirmedEmpty: true,
+        }));
+      } catch { /* private storage or quota; live chain data remains authoritative */ }
+    }
     return;
   }
   const pageStart = confirmedMinerPage * CONFIRMED_MINERS_PAGE_SIZE;
@@ -5096,7 +5107,7 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
     void paintRoundMinerIdentity(row, miner.address);
   });
   try {
-    localStorage.setItem('myne-previous-miners', JSON.stringify({ roundId: String(roundId), winningSquare, miners: confirmedMiners }, (_, value) => typeof value === 'bigint' ? { __bigint: value.toString() } : value));
+    localStorage.setItem('myne-previous-miners', JSON.stringify({ roundId: String(roundId), winningSquare, miners: confirmedMiners, confirmedEmpty: false }, (_, value) => typeof value === 'bigint' ? { __bigint: value.toString() } : value));
   } catch { /* private storage or quota; live chain data remains authoritative */ }
 };
 
@@ -5104,8 +5115,10 @@ const renderConfirmedMiners = (miners, roundId, winningSquare) => {
 // This avoids an empty/loading state even though the chain read is asynchronous.
 try {
   const cached = JSON.parse(localStorage.getItem('myne-previous-miners') || 'null', (_, value) => value && value.__bigint !== undefined ? BigInt(value.__bigint) : value);
-  if (cached?.miners?.length && cached.roundId !== undefined) {
-    renderConfirmedMiners(cached.miners, cached.roundId, Number(cached.winningSquare));
+  if (cached?.roundId !== undefined && (cached?.miners?.length || cached?.confirmedEmpty === true)) {
+    renderConfirmedMiners(cached.miners || [], cached.roundId, Number(cached.winningSquare), {
+      confirmedEmpty: cached.confirmedEmpty === true,
+    });
     confirmedMinerRenderedKey = String(cached.roundId);
   }
 } catch { /* ignore malformed or unavailable cache */ }
@@ -5115,16 +5128,15 @@ const scheduleRoundMinersRefresh = (state) => {
   const confirmed = state.lastResolved;
   if (!shouldRefreshConfirmedMiners(confirmed, confirmedMinerRenderedKey, confirmedMinerRequestKey)) return;
   const key = confirmedMinerRoundKey(confirmed);
+  const confirmedEmpty = isConfirmedEmptyRound(confirmed);
   confirmedMinerRequestKey = key;
   confirmedMinerFetchAttempt = 0;
   window.clearTimeout(roundMinerFetchTimer);
   const fetchConfirmedMiners = async () => {
     const requestedRound = confirmed.roundId;
     try {
-      // Empty numeric rounds have no Round PDA, so `lastResolved` can legitimately be several
-      // ids behind the live clock. It is the latest indexed PLAYED round and is authoritative for
-      // this panel. Guard it before and after the RPC read so an older request can never repaint a
-      // newer confirmed roster.
+      // Guard the exact settled result before and after the receipt read so an
+      // older request can never repaint a newer confirmed roster.
       if (String(chain.state.lastResolved?.roundId) !== String(requestedRound)) return;
       // Receipt scans are cached for normal reads, but a new confirmed round must always start
       // from a fresh scan. Otherwise the first read can race the final deployment and preserve the
@@ -5132,12 +5144,14 @@ const scheduleRoundMinersRefresh = (state) => {
       invalidateReceiptCache();
       const result = await readRoundWinners(requestedRound);
       if (String(chain.state.lastResolved?.roundId) !== String(requestedRound)) return;
-      if (!result.miners.length && confirmedMinerFetchAttempt < 8) {
+      if (!result.miners.length && !confirmedEmpty && confirmedMinerFetchAttempt < 8) {
         confirmedMinerFetchAttempt += 1;
         roundMinerFetchTimer = window.setTimeout(fetchConfirmedMiners, 750);
         return;
       }
-      renderConfirmedMiners(previousRoundMinerRoster(result), requestedRound, result.winningSquare);
+      renderConfirmedMiners(previousRoundMinerRoster(result), requestedRound, result.winningSquare, {
+        confirmedEmpty,
+      });
       confirmedMinerRenderedKey = key;
     } catch (error) {
       // Keep the older confirmed result visible. A transient RPC failure must not replace a

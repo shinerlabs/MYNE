@@ -23,6 +23,17 @@ export function shouldRefreshConfirmedMiners(lastResolved, renderedKey, requestK
   return key !== null && key !== renderedKey && key !== requestKey;
 }
 
+/** An on-chain zero receipt count makes an empty roster authoritative, not a transient read. */
+export function isConfirmedEmptyRound(lastResolved) {
+  if (!lastResolved?.resolved || lastResolved.totalReceipts === undefined
+      || lastResolved.totalReceipts === null) return false;
+  try {
+    return BigInt(lastResolved.totalReceipts) === 0n;
+  } catch {
+    return false;
+  }
+}
+
 /** Keep every confirmed participant, even when the winning tile had no miners. */
 export function previousRoundMinerRoster(roundResult) {
   return Array.isArray(roundResult?.miners) ? roundResult.miners : [];
