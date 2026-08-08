@@ -41,6 +41,20 @@ test('one stale plan is bisected away without skipping valid neighbours', async 
   assert.ok(events.some(({ event, authority }) => event === 'auto-plan-execution-failed' && authority === 'bad'));
 });
 
+test('Auto Mine stops submitting as soon as the betting window closes', async () => {
+  let submitted = false;
+  const events = [];
+  await sendAutoPlanBatchesIsolated({
+    entries: [{ authority: 'too-late', ix: 'ix' }],
+    batchSize: 1,
+    canSend: async () => false,
+    sendBatch: async () => { submitted = true; },
+    onEvent: (event) => events.push(event),
+  });
+  assert.equal(submitted, false);
+  assert.deepEqual(events, [{ event: 'auto-plan-window-closed', skipped: 1 }]);
+});
+
 test('Auto Mine retries across the betting window and picks up a late indexed plan', async () => {
   let now = 0;
   let buildCalls = 0;

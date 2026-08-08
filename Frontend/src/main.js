@@ -288,7 +288,7 @@ document.querySelector('#app').innerHTML = `
     <a class="brand" href="#home" data-route="home" aria-label="MYNE home"><img class="gld-wordmark" src="/myne-wordmark-ui.png" alt="MYNE"/></a>
     <nav class="landing-nav" aria-label="Landing navigation"><button data-route="mine">Mine</button><button data-route="stake">Stake</button>${poolAvailable ? '<button data-route="swap">Swap</button>' : ''}</nav>
     <nav class="main-nav" aria-label="Primary navigation"><button class="nav-item" data-route="mine">Mine</button><button class="nav-item" data-route="stake">Stake</button>${poolAvailable ? '<button class="nav-item" data-route="swap">Swap</button>' : ''}<button class="nav-item" data-route="referrals">Referrals</button><button class="nav-item" data-route="rounds">Rounds</button><button class="nav-item" data-route="about">About</button><div class="menu-wrap"><button class="menu-button" id="menu-button" aria-label="Open menu" aria-expanded="false" aria-controls="site-menu">${icon('menu')}</button></div></nav>
-    <div class="header-right"><button class="market-pill header-apr" data-route="stake" aria-label="Open staking, APY loading"><span>APY</span><b id="header-staking-apr">—</b></button><div class="token-menu-host"><button class="market-pill is-menu" id="gld-price-pill" aria-label="MYNE price and token links" aria-haspopup="true" aria-expanded="false"><img src="/myne-token-icon.svg" alt=""/><b id="gld-price">—</b><i class="token-menu-caret">${icon('chevron')}</i></button><div class="token-menu" id="token-menu" hidden></div></div><div class="market-pill" id="sol-price-pill" aria-label="SOL price">${solIcon('header-sol')}<b id="sol-price">—</b></div>${communityLinks}<div class="header-account"><button class="connect-header" id="connect-wallet">Connect</button><div class="header-account-menu" id="header-account-menu" hidden></div></div></div>
+    <div class="header-right"><button class="market-pill header-apr" data-route="stake" aria-label="Open Stake and Burn, APY loading"><span>BURN APY</span><b id="header-staking-apr">—</b></button><div class="token-menu-host"><button class="market-pill is-menu" id="gld-price-pill" aria-label="MYNE price and token links" aria-haspopup="true" aria-expanded="false"><img src="/myne-token-icon.svg" alt=""/><b id="gld-price">—</b><i class="token-menu-caret">${icon('chevron')}</i></button><div class="token-menu" id="token-menu" hidden></div></div><div class="market-pill" id="sol-price-pill" aria-label="SOL price">${solIcon('header-sol')}<b id="sol-price">—</b></div>${communityLinks}<div class="header-account"><button class="connect-header" id="connect-wallet">Connect</button><div class="header-account-menu" id="header-account-menu" hidden></div></div></div>
   </header>
   <div class="site-menu" id="site-menu" hidden><span>PROTOCOL</span><button data-route="about" data-about-target="intro"><i>${icon('info')}</i><b>About MYNE</b><small>Scarcity by proof of work</small></button><button data-route="about" data-about-target="mining"><i>${icon('grid')}</i><b>How mining works</b><small>Rounds, tiles and rewards</small></button>${poolAvailable ? `<button data-route="swap"><i>${icon('swap')}</i><b>Swap SOL / MYNE</b><small>Trade on the Solana liquidity pool</small></button>` : ''}<button class="menu-stake" data-route="stake"><i>${icon('shield')}</i><b>Stake MYNE <em class="menu-hot">HOT</em></b><small>Extreme staking rewards</small></button><button data-route="rounds"><i>${icon('history')}</i><b>Round ledger</b><small>Verified historical results</small></button></div>
   <button class="chat-reopen" id="show-chat" aria-label="Show social panel" title="Social">${icon('chat')}</button>
@@ -1943,9 +1943,9 @@ const refreshStakingMetrics = async () => {
       : formatApyPercent(m.apyStandardPct);
     // Generic APY surfaces always mean the standard 1× rate. The 5× variant appears only on
     // controls explicitly labelled Stake + Burn, so two unlabeled APY figures never disagree.
-    const headerAprText = m.apyStandardPct == null
+    const headerAprText = m.apyBurnPct == null
       ? aprText
-      : formatApyPercent(m.apyStandardPct);
+      : formatApyPercent(m.apyBurnPct);
     setMetric('#metric-apr', aprText);
     setMetric('#header-staking-apr', headerAprText);
     setMetric('#stake-flex-apy', formatApyPercent(m.apyStandardPct));
@@ -1975,12 +1975,12 @@ const refreshStakingMetrics = async () => {
     const apr = document.querySelector('#metric-apr')?.closest('article');
     const headerApr = document.querySelector('.header-apr');
     if (headerApr) {
-      headerApr.setAttribute('aria-label', `Open staking, estimated standard APY ${headerAprText}`);
+      headerApr.setAttribute('aria-label', `Open Stake and Burn, estimated APY ${headerAprText}`);
       headerApr.title = headerAprText === '—'
-        ? 'Open staking'
+        ? 'Open Stake and Burn'
         : m.aprFallback
-        ? `Latest verified standard staking APY ${headerAprText}`
-        : `Estimated standard staking APY ${headerAprText}`;
+        ? `Latest verified Stake and Burn APY ${headerAprText}`
+        : `Estimated Stake and Burn APY ${headerAprText}`;
     }
     if (apr) {
       // Every null case used to show the "pool could not be read" message, including the two cases
@@ -2018,7 +2018,7 @@ const refreshStakingMetrics = async () => {
       stakingMetricsState = snapshot;
       const aprText = formatApyPercent(snapshot.apyStandardPct);
       setMetric('#metric-apr', aprText);
-      setMetric('#header-staking-apr', formatApyPercent(snapshot.apyStandardPct));
+      setMetric('#header-staking-apr', formatApyPercent(snapshot.apyBurnPct));
       setMetric('#stake-flex-apy', formatApyPercent(snapshot.apyStandardPct));
       setMetric('#stake-burn-apy', formatApyPercent(snapshot.apyBurnPct));
       const apyWindowLabel = document.querySelector('#stake-apy-window-label');

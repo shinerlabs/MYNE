@@ -38,9 +38,15 @@ async function mapConcurrent(values, limit, mapper) {
   return results;
 }
 
-export async function sendAutoPlanBatchesIsolated({ entries, batchSize, sendBatch, onEvent = () => {} }) {
+export async function sendAutoPlanBatchesIsolated({
+  entries, batchSize, sendBatch, canSend = async () => true, onEvent = () => {},
+}) {
   const size = boundedInteger(batchSize, 4, 1, 6);
   const sendIsolated = async (batch) => {
+    if (!(await canSend())) {
+      onEvent({ event: 'auto-plan-window-closed', skipped: batch.length });
+      return;
+    }
     try {
       const sent = await sendBatch(batch);
       onEvent({
@@ -103,7 +109,13 @@ export async function executeAutoPlansDuringWindow({
           });
         } else if (result) executable.push(result);
       }
-      await sendAutoPlanBatchesIsolated({ entries: executable, batchSize, sendBatch, onEvent });
+      await sendAutoPlanBatchesIsolated({
+        entries: executable,
+        batchSize,
+        sendBatch,
+        canSend: async () => await nowSeconds() < bettingEndsAt,
+        onEvent,
+      });
     } catch (error) {
       onEvent({
         event: 'auto-plan-index-unavailable',

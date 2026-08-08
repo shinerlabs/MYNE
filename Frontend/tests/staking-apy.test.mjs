@@ -200,6 +200,10 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(main, /const dailyPool = metrics\?\.aprWindowDays > 0 \? metrics\.rewardsToStakersEth : null/);
   assert.match(main, /positionApyPercent\(metrics\?\.apyStandardPct, principal, weight\)/);
   assert.match(main, /setMetric\('#header-staking-apr', headerAprText\)/);
+  assert.match(main, /<span>BURN APY<\/span><b id="header-staking-apr">/);
+  assert.match(main, /const headerAprText = m\.apyBurnPct == null[\s\S]*formatApyPercent\(m\.apyBurnPct\)/);
+  assert.match(main, /#header-staking-apr', formatApyPercent\(snapshot\.apyBurnPct\)/);
+  assert.doesNotMatch(main, /estimated standard APY/);
   assert.doesNotMatch(main, /formatApyPercent\([^\n]+compact: true/);
   assert.match(main, /setMetric\('#stake-burn-apy', formatApyPercent\(m\.apyBurnPct\)\)/);
   assert.match(main, /add\('staking\.apy', staking\.apyStandardPct, formatApyPercent\(staking\.apyStandardPct\)\)/);
