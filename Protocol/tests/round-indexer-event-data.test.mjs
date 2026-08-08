@@ -130,6 +130,30 @@ test('settlement classifies the tagged server slot without persisting it as sign
   assert.match(settledCase, /new PublicKey\(data\.randomnessAccount\)\.toBase58\(\)/);
 });
 
+test('zero-bid settlement still indexes the published winning tile and zero economics', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const settledCase = source.slice(
+    source.indexOf("case 'RoundSettled'"),
+    source.indexOf("case 'ReceiptClaimed'"),
+  );
+  assert.match(settledCase, /const winnerTotal = winners\.reduce[\s\S]*0n/);
+  assert.match(settledCase, /winnerTotal > 0n \?[\s\S]*: 0n/);
+  assert.match(settledCase, /resolved: true/);
+  assert.match(settledCase, /winning_square: winningSquare/);
+  assert.match(settledCase, /bullion_for_winners_wei: asString\(data\.baseEmission\)/);
+  assert.match(settledCase, /total_receipts: asString\(data\.totalReceipts\)/);
+  assert.doesNotMatch(settledCase, /if \(!bets\?\.length\)|if \(bets\?\.length/);
+});
+
+test('aggregate reward stats exclude empty-round Motherlode samples', async () => {
+  const migration = await readFile(
+    new URL('../../supabase/migrations/20260808123000_empty_round_stats.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(migration, /total_wager_wei > 0 and jackpot_hit/);
+  assert.match(migration, /zero-bid resolved rounds publish outcomes but never count as mining or Motherlode awards/);
+});
+
 test('archive attestation fails closed until provider-specific randomness proof is complete', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   const archiveBody = source.slice(
