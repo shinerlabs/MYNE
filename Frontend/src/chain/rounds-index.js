@@ -469,6 +469,33 @@ export async function loadLatestSettledRoundId(atOrBefore = null) {
 }
 
 /**
+ * Newest settled round that actually accepted a deployment.
+ *
+ * The Mine board still advances through every settled zero-bid result so each
+ * published winning tile remains visible and auditable. The miners panel has a
+ * different job: keep the latest real participant/reward card reachable instead
+ * of replacing it with a run of empty rounds.
+ */
+export async function loadLatestPlayedSettledRoundId(atOrBefore = null) {
+  if (!(await indexAvailable())) return null;
+  try {
+    let query = supabase
+      .from('mine_rounds')
+      .select('round_id')
+      .eq('resolved', true)
+      .gt('total_wager_wei', 0)
+      .order('round_id', { ascending: false })
+      .limit(1);
+    if (atOrBefore !== null) query = query.lte('round_id', String(atOrBefore));
+    const { data, error } = await query;
+    if (error || !data?.length) return null;
+    return BigInt(data[0].round_id);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Miners who bet on a given square in a given round, biggest stake first.
  *
  * This is the one thing the chain genuinely cannot answer: `getBettorsOnSquare` returns a COUNT,

@@ -34,7 +34,7 @@ import {
   affordableAutoPlanRounds, maxAutoPlanFundingLamports, requiredDeposit,
 } from './chain/autocommit.js';
 import {
-  confirmedMinerRoundKey, isConfirmedEmptyRound, previousRoundMinerRoster,
+  confirmedMinerRoundKey, confirmedMinerSource, isConfirmedEmptyRound, previousRoundMinerRoster,
   shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
@@ -547,10 +547,10 @@ const syncSummaryHoverLabels = () => {
 
 document.querySelector('.deploy-panel').insertAdjacentHTML('afterend', claimPanel);
 document.querySelector('.rewards-panel')?.insertAdjacentHTML('afterend', `
-  <section class="round-miners-panel panel" aria-label="Confirmed miners from the previous round">
-    <div class="round-miners-head"><span class="eyebrow miners-round-hint" tabindex="0" aria-label="All confirmed miners from the previous round" title="Previous round miners">MINERS</span><small id="round-miners-label">PREVIOUS ROUND</small></div>
+  <section class="round-miners-panel panel" aria-label="Confirmed miners from the latest played round">
+    <div class="round-miners-head"><span class="eyebrow miners-round-hint" tabindex="0" aria-label="All confirmed miners from the latest played round" title="Latest played round miners">MINERS</span><small id="round-miners-label">LATEST PLAYED ROUND</small></div>
     <div class="round-miners-list" id="round-miners-list"></div>
-    <nav class="round-miners-pagination" id="round-miners-pagination" aria-label="Previous round miners pages" hidden>
+    <nav class="round-miners-pagination" id="round-miners-pagination" aria-label="Latest played round miners pages" hidden>
       <button type="button" data-miners-page="prev" aria-label="Previous 10 miners">${icon('chevron')}</button>
       <span id="round-miners-page-label" aria-live="polite"></span>
       <button type="button" data-miners-page="next" aria-label="Next 10 miners">${icon('chevron')}</button>
@@ -2525,6 +2525,13 @@ const mineCostLabel = (solAmount) => mineDisplayCurrency === 'usd'
   ? `${solAmount == null ? '—' : (usdcValueFor(solAmount) ?? '—')} USDC`
   : `${solAmount == null ? '—' : ethNum(solAmount)} SOL`;
 
+// The one-time account deposit is intentionally much smaller than the normal
+// 0.05 SOL deployment. Two-decimal formatting would call it “0.00 SOL”, which
+// is mathematically harmless but misleading at the point of confirmation.
+const mineAccountDepositLabel = () => mineDisplayCurrency === 'usd'
+  ? mineCostLabel(ACCOUNT_DEPOSIT_ETH)
+  : `${ACCOUNT_DEPOSIT_ETH.toFixed(4)} SOL`;
+
 /** Paint a composer total without the generic hover/pseudo-element currency treatment.
  *  One fixed mark slot and one fixed value row are reused in both modes, so switching units
  *  cannot move or resize the Total deployment control. The underlying amount remains SOL. */
@@ -2642,7 +2649,7 @@ const updateMine = () => {
         minimumLabel,
         `${selected.size} tile${selected.size === 1 ? '' : 's'} — adjusted to ${mineCostLabel(perTile)} per tile`,
       ];
-      if (needsDeposit) parts.push(`first bet adds a one-time ${mineCostLabel(ACCOUNT_DEPOSIT_ETH)} account deposit`);
+      if (needsDeposit) parts.push(`first bet adds a one-time ${mineAccountDepositLabel()} account deposit`);
       minNote.textContent = parts.join(' · ');
     } else minNote.textContent = minimumLabel;
     minNote.classList.toggle('is-topped-up', toppedUp);
@@ -2656,18 +2663,22 @@ const updateMine = () => {
   }
 
   const deploy = document.querySelector('#deploy');
-  const ready = protocolReady && selected.size > 0 && entered > 0 && autoFundingReady;
+  const protocolPaused = chain.state.protocolPaused === true;
+  const ready = protocolReady && !protocolPaused && selected.size > 0 && entered > 0 && autoFundingReady;
   // A manual action during reveal becomes a one-round keeper queue for the next open round.
   deploy.classList.toggle('ready', ready);
   // Clickable even when "not ready", so mine() can explain what's missing via a toast
   // instead of the button silently doing nothing.
-  deploy.disabled = !protocolReady;
+  deploy.disabled = !protocolReady || protocolPaused;
   deploy.querySelector('span').textContent = !protocolReady
     ? 'PREVIEW ONLY'
+    : protocolPaused ? 'MINING PAUSED'
     : autoRound ? 'START AUTO'
       : bettingOpen ? 'MINE' : 'BID NEXT ROUND';
   deploy.setAttribute('aria-label', !protocolReady
     ? 'Mining becomes available after the audited Solana program is connected'
+    : protocolPaused
+      ? 'Mining is temporarily paused while maintenance is completed'
     : ready
     ? autoRound
       ? `Fund an auto-round plan with ${mineCostLabel(total)}; 10% of wallet SOL remains reserved`
@@ -4845,15 +4856,29 @@ const roundMetrics = document.querySelectorAll('[data-page="rounds"] .feature-me
 // Injected after the existing metrics so we don't touch the big page template literal.
 document.querySelector('[data-page="rounds"] .feature-metrics')?.insertAdjacentHTML('afterend',
   '<section class="feature-metrics supply-metrics">'
-  + '<article><span>MAX SUPPLY</span><strong id="sup-max">—</strong><small>hard cap</small></article>'
-  + '<article><span>TOTAL MINED</span><strong id="sup-supplied">—</strong><small>mining emissions</small></article>'
-  + '<article><span>CURRENT</span><strong id="sup-current">—</strong><small>circulating</small></article>'
+  + '<article><span>MAX SUPPLY</span><strong id="sup-max">—</strong><small data-supply-detail>hard cap</small></article>'
+  + '<article><span>TOTAL MINED</span><strong id="sup-supplied">—</strong><small data-supply-detail>mining emissions</small></article>'
+  + '<article><span>CURRENT</span><strong id="sup-current">—</strong><small data-supply-detail>circulating</small></article>'
   + '<article><span>BURNED</span><strong id="sup-burned">—</strong><small id="sup-burned-detail"></small></article>'
   + '</section>');
+const supplyMetrics = document.querySelector('[data-page="rounds"] .supply-metrics');
+const supplyMetricDetails = [...(supplyMetrics?.querySelectorAll('small') || [])];
+const supplyMetricDefaultDetails = ['hard cap', 'mining emissions', 'circulating', ''];
+const setSupplyMetricsUnavailable = () => {
+  supplyMetrics?.querySelectorAll('strong').forEach((value) => { value.textContent = '—'; });
+  supplyMetricDetails.forEach((detail) => { detail.textContent = 'temporarily unavailable'; });
+  supplyMetrics?.setAttribute('aria-label', 'Supply and burn totals temporarily unavailable');
+  if (supplyMetrics) supplyMetrics.dataset.status = 'unavailable';
+};
 const gld = (x) => `<img src="/myne-token-icon.svg" alt=""/> ${(x / 10n ** 9n).toLocaleString()}`;
 const renderSupply = async () => {
   try {
     const s = await readSupplyStats();
+    supplyMetricDetails.forEach((detail, index) => {
+      detail.textContent = supplyMetricDefaultDetails[index] ?? '';
+    });
+    supplyMetrics?.removeAttribute('aria-label');
+    if (supplyMetrics) supplyMetrics.dataset.status = 'ready';
     document.querySelector('#sup-max').innerHTML = gld(s.max);
     // Keep mined emissions separate from current supply: current includes the 100 MYNE genesis
     // mint plus every subsequent on-chain emission (and reflects any burns).
@@ -4868,7 +4893,10 @@ const renderSupply = async () => {
     document.querySelector('#sup-burned').innerHTML = gld(s.burned);
     document.querySelector('#sup-burned-detail').textContent =
       `buyback ${(s.burnedBuyback / 10n ** 9n).toLocaleString()} · staking ${(s.burnedStaking / 10n ** 9n).toLocaleString()}`;
-  } catch (err) { console.warn('supply stats failed', err); }
+  } catch (err) {
+    setSupplyMetricsUnavailable();
+    console.warn('supply stats failed', err);
+  }
 };
 const explorerContract = `${solanaNetwork.blockExplorers.default.url}/address/${addresses.MyneProgram}`;
 const explorerTx = (hash) => `${solanaNetwork.blockExplorers.default.url}/tx/${hash}`;
@@ -5125,7 +5153,7 @@ try {
 
 const scheduleRoundMinersRefresh = (state) => {
   if (!protocolReady) return;
-  const confirmed = state.lastResolved;
+  const confirmed = confirmedMinerSource(state.lastResolved, state.lastPlayedResolved);
   if (!shouldRefreshConfirmedMiners(confirmed, confirmedMinerRenderedKey, confirmedMinerRequestKey)) return;
   const key = confirmedMinerRoundKey(confirmed);
   const confirmedEmpty = isConfirmedEmptyRound(confirmed);
@@ -5137,13 +5165,13 @@ const scheduleRoundMinersRefresh = (state) => {
     try {
       // Guard the exact settled result before and after the receipt read so an
       // older request can never repaint a newer confirmed roster.
-      if (String(chain.state.lastResolved?.roundId) !== String(requestedRound)) return;
+      if (String(confirmedMinerSource(chain.state.lastResolved, chain.state.lastPlayedResolved)?.roundId) !== String(requestedRound)) return;
       // Receipt scans are cached for normal reads, but a new confirmed round must always start
       // from a fresh scan. Otherwise the first read can race the final deployment and preserve the
       // previous roster forever because an empty result is treated as a transient RPC response.
       invalidateReceiptCache();
       const result = await readRoundWinners(requestedRound);
-      if (String(chain.state.lastResolved?.roundId) !== String(requestedRound)) return;
+      if (String(confirmedMinerSource(chain.state.lastResolved, chain.state.lastPlayedResolved)?.roundId) !== String(requestedRound)) return;
       if (!result.miners.length && !confirmedEmpty && confirmedMinerFetchAttempt < 8) {
         confirmedMinerFetchAttempt += 1;
         roundMinerFetchTimer = window.setTimeout(fetchConfirmedMiners, 750);
@@ -5159,7 +5187,7 @@ const scheduleRoundMinersRefresh = (state) => {
       console.warn('confirmed miners refresh failed', error);
     } finally {
       if (confirmedMinerRequestKey === key
-        && (confirmedMinerRenderedKey === key || String(chain.state.lastResolved?.roundId) !== String(requestedRound))) {
+        && (confirmedMinerRenderedKey === key || String(confirmedMinerSource(chain.state.lastResolved, chain.state.lastPlayedResolved)?.roundId) !== String(requestedRound))) {
         confirmedMinerRequestKey = '';
       }
     }
@@ -5194,10 +5222,10 @@ const renderRoundHistory = () => {
       return `
     <div class="round-entry ${r.status}" data-round-mode="${r.mode}" data-round-id="${r.roundId}">
       <button class="round-record" aria-expanded="false">
-        <span class="round-number">#${roundNo(r.roundId)}</span><span class="winning-tile muted">—</span><span class="round-mode ${r.mode}">${empty ? 'no bets' : 'resolving'}</span><span>${solIcon()} 0</span><span class="muted">—</span><time>${relTime(r.endsAt)}</time><i>${icon('chevron')}</i>
+        <span class="round-number">#${roundNo(r.roundId)}</span><span class="winning-tile muted">—</span><span class="round-mode ${r.mode}">${empty ? 'unsettled' : 'resolving'}</span><span>${solIcon()} 0</span><span class="muted">—</span><time>${relTime(r.endsAt)}</time><i>${icon('chevron')}</i>
       </button>
       <div class="round-detail" hidden>
-        <div><span>RESULT</span><strong>${empty ? 'No bets — pot carried forward' : 'Awaiting keeper resolution'}</strong></div>
+        <div><span>RESULT</span><strong>${empty ? 'No published result — round was not settled' : 'Awaiting keeper resolution'}</strong></div>
         <a class="round-explorer" href="${explorerContract}" target="_blank" rel="noreferrer">View contract ↗</a>
       </div>
     </div>`;

@@ -53,3 +53,9 @@ test('USDC mode remains presentation-only while SOL stays canonical', () => {
   assert.match(source, /const entered = amountSolValue/);
   assert.match(source, /Transactions settle on Solana/);
 });
+
+test('the small first-bet account deposit is never rounded down to 0.00 SOL', () => {
+  assert.match(source, /const mineAccountDepositLabel = \(\) => mineDisplayCurrency === 'usd'/);
+  assert.match(source, /ACCOUNT_DEPOSIT_ETH\.toFixed\(4\)/);
+  assert.match(source, /first bet adds a one-time \$\{mineAccountDepositLabel\(\)\} account deposit/);
+});

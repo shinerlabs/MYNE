@@ -57,9 +57,10 @@ test('burn totals fail closed on unsafe or malformed quantities', () => {
 });
 
 test('frontend reads one completed-buyback aggregate instead of scanning execution history', async () => {
-  const [reader, migration] = await Promise.all([
+  const [reader, migration, ui] = await Promise.all([
     readFile(new URL('../src/chain/burn-index.js', import.meta.url), 'utf8'),
     readFile(new URL('../../supabase/migrations/20260808113000_burn_stats.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
   ]);
   assert.match(reader, /\.from\('mine_burn_stats'\)/);
   assert.match(reader, /completed_buyback_burn_base_units_text/);
@@ -68,4 +69,6 @@ test('frontend reads one completed-buyback aggregate instead of scanning executi
   assert.match(migration, /security_invoker = true/);
   assert.match(migration, /round_state\.resolved = true[\s\S]*round_state\.buyback_completed = true/);
   assert.match(migration, /grant select on public\.mine_burn_stats to anon, authenticated/);
+  assert.match(ui, /setSupplyMetricsUnavailable/);
+  assert.match(ui, /Supply and burn totals temporarily unavailable/);
 });

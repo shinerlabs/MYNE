@@ -26,9 +26,11 @@ test('keeper-accrued receipts refresh both the claim index and durable SOL ledge
   assert.match(mine, /if \(state\.account\) void refreshMiner\(\);[\s\S]*\}, 5000\);/);
 });
 
-test('previous-round result resolves through the latest indexed settled round', () => {
-  assert.match(mine, /const indexedRoundId = await loadLatestSettledRoundId\(roundId\)/);
+test('result and miners card resolve through independent bounded indexes', () => {
+  assert.match(mine, /loadLatestSettledRoundId\(roundId\)/);
+  assert.match(mine, /loadLatestPlayedSettledRoundId\(roundId\)/);
   assert.match(mine, /state\.lastResolved = \{ roundId: BigInt\(resolvedRoundId\), \.\.\.round \}/);
+  assert.match(mine, /state\.lastPlayedResolved = participantRound/);
 });
 
 test('wallet changes clear another wallet\'s actionable receipt state immediately', () => {
@@ -54,6 +56,7 @@ test('SOL-only and Stake + Burn actions explicitly withdraw the accrued owner ba
   const burn = mine.slice(mine.indexOf('export async function stakeAndBurnRewards'), mine.indexOf('// --- boot'));
   assert.match(claimSol, /await refreshMiner\(\)/);
   assert.match(claimSol, /state\.claimableSol <= 0n/);
+  assert.match(claimSol, /if \(processed > 0\)[\s\S]*Claimed SOL to your wallet[\s\S]*return true/);
   assert.match(claimSol, /withdrawClaimableSol/);
   assert.match(burn, /state\.claimableSol > 0n[\s\S]*withdrawClaimableSol[\s\S]*burnUnclaimedMyne/);
 });

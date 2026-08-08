@@ -17,6 +17,12 @@ import {
 } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 import { loadExplicitSwitchboardEnv } from './production-switchboard-env.mjs';
+import {
+  historicalLifecycleQuery,
+  mergeLifecycleRoundQueues,
+  nextHistoricalLifecycleCursor,
+  processLifecycleRoundQueue,
+} from './lifecycle-queue-policy.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -69,6 +75,7 @@ requireMatchingSolanaNetwork({
 const roundPda = (roundId) => pda('round', u64Seed(roundId));
 const minerPda = (authority) => pda('miner', new PublicKey(authority).toBuffer());
 const stakePda = (authority) => pda('stake_position', new PublicKey(authority).toBuffer());
+let historicalRoundCursor = null;
 
 async function rest(path, { method = 'GET', body } = {}) {
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
@@ -281,15 +288,29 @@ async function processRound(indexedRound) {
 }
 
 export async function lifecycleTick() {
-  const [activeRows, randomnessRows] = await Promise.all([
-    rest('mine_rounds?closed_signature=is.null&select=*&order=round_id.asc&limit=25'),
+  const [recentReceiptRows, unprocessedRows, historicalRows, randomnessRows] = await Promise.all([
+    // Keep current receipt-bearing rounds at the front of every tick even
+    // while the historical cursor is walking an older backlog.
+    rest('mine_rounds?closed_signature=is.null&total_receipts=gt.0&select=*&order=round_id.desc&limit=25'),
+    // Reward processing must not be starved by old rounds that are waiting on
+    // an unrelated buyback/archive precondition. Fully unprocessed rows are a
+    // bounded recovery queue for historical receipts.
+    rest('mine_rounds?closed_signature=is.null&total_receipts=gt.0&processed_receipts=eq.0&select=*&order=round_id.asc&limit=25'),
+    // A descending keyset cursor covers partially processed historical rounds
+    // as well as zero-receipt cleanup without an unbounded query or offset.
+    rest(historicalLifecycleQuery(historicalRoundCursor)),
     rest('mine_rounds?randomness_id=not.is.null&archive_verified=eq.true&randomness_closed_at=is.null&select=*&order=round_id.asc&limit=25'),
   ]);
-  const byRound = new Map();
-  for (const row of [...(activeRows || []), ...(randomnessRows || [])]) byRound.set(String(row.round_id), row);
-  const results = [];
-  for (const row of byRound.values()) results.push(await processRound(row));
-  return results;
+  historicalRoundCursor = nextHistoricalLifecycleCursor(historicalRows);
+  const queue = mergeLifecycleRoundQueues(
+    recentReceiptRows,
+    unprocessedRows,
+    historicalRows,
+    randomnessRows,
+  );
+  // One malformed/stale indexed row must not block unrelated users from
+  // receiving permissionless settlement or refunds in the same tick.
+  return processLifecycleRoundQueue(queue, processRound);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

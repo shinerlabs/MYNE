@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
-  confirmedMinerRoundKey, isConfirmedEmptyRound,
+  confirmedMinerRoundKey, confirmedMinerSource, isConfirmedEmptyRound,
   previousConfirmedRoundId,
   previousRoundMinerRoster,
   shouldRefreshConfirmedMiners,
@@ -49,20 +49,27 @@ test('the latest settled round remains authoritative across delayed reads', () =
     main.indexOf('const renderPagination'),
   );
 
-  // Staleness is determined by lastResolved changing, not by a separate
-  // current-round arithmetic check.
+  // Staleness is determined by the selected confirmed source changing, not by
+  // a separate current-round arithmetic check.
   assert.doesNotMatch(refresh, /previousConfirmedRoundId\(chain\.state\.roundId\)/);
   assert.equal(
-    refresh.match(/String\(chain\.state\.lastResolved\?\.roundId\) !== String\(requestedRound\)/g)?.length,
+    refresh.match(/String\(confirmedMinerSource\(chain\.state\.lastResolved, chain\.state\.lastPlayedResolved\)\?\.roundId\) !== String\(requestedRound\)/g)?.length,
     3,
   );
 });
 
-test('confirmed zero-bid rounds replace stale rosters and report zero MYNE', () => {
+test('the miners card keeps the latest played round while empty outcomes remain separate', () => {
+  const empty = { roundId: 408n, resolved: true, totalWager: 0n, totalReceipts: 0n };
+  const played = { roundId: 396n, resolved: true, totalWager: 125_000_000n, totalReceipts: 1n };
+  assert.equal(confirmedMinerSource(empty, played), played);
+  assert.equal(confirmedMinerSource(empty, null), empty);
+  assert.equal(confirmedMinerSource(empty, { ...played, resolved: false }), empty);
+
   const refresh = main.slice(
     main.indexOf('const renderConfirmedMiners'),
     main.indexOf('const renderPagination'),
   );
+  assert.match(refresh, /confirmedMinerSource\(state\.lastResolved, state\.lastPlayedResolved\)/);
   assert.match(refresh, /const confirmedEmpty = isConfirmedEmptyRound\(confirmed\)/);
   assert.match(refresh, /!result\.miners\.length && !confirmedEmpty/);
   assert.match(refresh, /WINNING TILE #\$\{winningSquare \+ 1\} · 0 MINERS · 0 MYNE REWARDED/);

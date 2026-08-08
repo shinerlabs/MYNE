@@ -8,10 +8,19 @@ export function confirmedMinerRoundKey(lastResolved) {
   return String(lastResolved.roundId);
 }
 
+/** Prefer the latest real mining round without hiding empty-round outcomes elsewhere. */
+export function confirmedMinerSource(lastResolved, lastPlayedResolved) {
+  if (lastPlayedResolved?.resolved) {
+    try {
+      if (BigInt(lastPlayedResolved.totalWager ?? 0) > 0n) return lastPlayedResolved;
+    } catch { /* malformed cached state falls back to the latest settled result */ }
+  }
+  return lastResolved;
+}
+
 /**
- * The miners panel is always the immediately preceding settled round.  Round ids are raw
- * zero-based contract ids; callers should use this helper instead of carrying the id observed
- * before a rollover (which can be several rounds stale after a sleeping tab resumes).
+ * Raw numeric previous-round helper retained for schedule calculations. The miners panel itself
+ * now prefers the latest played settlement so zero-bid rounds cannot hide a participant reward.
  */
 export function previousConfirmedRoundId(currentRoundId) {
   const id = BigInt(currentRoundId);

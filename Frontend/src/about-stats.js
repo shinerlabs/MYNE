@@ -38,10 +38,11 @@ export function renderProtocolStats(root, metrics, updatedAt = Date.now()) {
     const path = row.querySelector('[data-stat-line]');
     const dot = row.querySelector('[data-stat-last]');
     if (!metric) {
-      if (value) value.textContent = '—';
+      if (value) value.textContent = 'Unavailable';
       row.classList.add('unavailable');
       if (path) path.setAttribute('d', '');
       if (dot) dot.setAttribute('hidden', '');
+      row.setAttribute('aria-label', `${row.querySelector('b')?.textContent || key}: unavailable`);
       return;
     }
 
@@ -66,4 +67,3 @@ export function renderProtocolStats(root, metrics, updatedAt = Date.now()) {
     stamp.dateTime = new Date(updatedAt).toISOString();
   }
 }
-

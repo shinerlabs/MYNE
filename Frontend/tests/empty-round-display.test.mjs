@@ -25,6 +25,17 @@ test('zero-bid rounds publish their tile while explicitly reporting zero MYNE', 
   assert.match(render, /data-randomness=/);
 });
 
+test('an unresolved missing round is not presented as a settled no-bid result', () => {
+  const renderStart = main.indexOf('const renderRoundHistory');
+  const render = main.slice(
+    renderStart,
+    main.indexOf('const refreshRoundHistory', renderStart),
+  );
+  assert.match(render, /empty \? 'unsettled' : 'resolving'/);
+  assert.match(render, /No published result — round was not settled/);
+  assert.doesNotMatch(render, /No bets — pot carried forward/);
+});
+
 test('empty rounds do not inflate mined or Motherlode award statistics', () => {
   const summary = roundsPage.slice(roundsPage.indexOf('export function summarise'));
   assert.match(summary, /r\.status === 'settled' && r\.totalWager > 0n/);

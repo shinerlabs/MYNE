@@ -139,7 +139,12 @@ body[data-route="about"] [data-about-panel="stats"] .about-lead {
 }
 
 .protocol-stat-row.unavailable .protocol-stat-chart { opacity: .25; }
-.protocol-stat-row.unavailable .protocol-stat-value { color: #64676d; }
+.protocol-stat-row.unavailable .protocol-stat-value {
+  color: #64676d;
+  font-size: 10px;
+  letter-spacing: .025em;
+  text-transform: uppercase;
+}
 
 @media (max-width: 720px) {
   .protocol-stats-grid { grid-template-columns: 1fr; gap: 30px; }

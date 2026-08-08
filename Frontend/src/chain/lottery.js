@@ -257,6 +257,9 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
   const receipt = receiptPda(roundId, account, nonce);
   const { program } = await getWritableProgram();
   const configState = await getProtocolConfig();
+  if (configState.paused) {
+    throw new Error('Mining is temporarily paused while maintenance is completed. No bids can be placed right now.');
+  }
   const configuredRandomnessProgram = new PublicKey(configState.randomnessProgram);
   const providerRandomness = !configuredRandomnessProgram.equals(PublicKey.default);
   const configuredServerMode = isServerRandomnessProgram(configuredRandomnessProgram);

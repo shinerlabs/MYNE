@@ -17,7 +17,8 @@ import {
   verifyFeeEconomics, verifyPremine, verifyRoundTiming, waitForTx, withdrawUnrefined,
   burnUnclaimedMyne, claimManyEthOnly, syncRoundGenesis,
 } from './lottery.js';
-import { loadLatestSettledRoundId } from './rounds-index.js';
+import { getProtocolConfig } from './anchor-client.js';
+import { loadLatestPlayedSettledRoundId, loadLatestSettledRoundId } from './rounds-index.js';
 import { ROUND_DURATION, BETTING_DURATION, isPremine } from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
 import { claimStakingRewards as withdrawClaimableSol } from './staking.js';
@@ -61,9 +62,16 @@ export const state = {
   hasAccount: false,
   account: null,
   lastResolved: null,
+  // Latest settled round with a real deployment. Empty rounds still advance
+  // lastResolved and publish their winning tile, but must not erase the most
+  // recent participant/reward card.
+  lastPlayedResolved: null,
   currentRound: null, // full readRound() of state.roundId — carries its own `resolved`/winner
   plan: null, // MYNE auto-plan for the connected account (null = none configured)
   autoPlanMaxFee: null, // live rent for one BetReceipt; null means the RPC quote is unavailable
+  // Live maintenance status, refreshed with the round. `null` means the config
+  // read has not completed; only an authoritative on-chain `true` disables Mine.
+  protocolPaused: null,
 };
 
 const subscribers = new Set();
@@ -104,14 +112,20 @@ async function refreshRound() {
     const { roundId } = state;
     // One Round PDA contains both tile totals and tile participant counts. Reading it once avoids
     // two duplicate getAccountInfo calls on every five-second refresh (and during the result poll).
-    const round = await readRound(roundId);
+    const [round, config] = await Promise.all([
+      readRound(roundId),
+      // A temporary config read failure must not hide public round data. Leave
+      // the previous pause value intact and let the next five-second poll retry.
+      getProtocolConfig().catch(() => null),
+    ]);
+    if (config) state.protocolPaused = Boolean(config.paused);
     state.squareTotals = round.tileLamports ?? Array(25).fill(0n);
     state.squareMiners = round.tileReceipts ?? Array(25).fill(0n);
     state.totalWager = round.totalWager;
     state.currentRound = round;
     // A current-round settlement drives the final five-second winner reveal through
-    // `currentRound`. It must not replace `lastResolved` yet: that value backs the persistent
-    // previous-miners panel and advances only after the next round starts.
+    // `currentRound`. It must not replace the durable result pointers yet: those advance only
+    // after the next round starts and separately track the latest result and latest played result.
     if (state.account) state.myBets = await readMyBets(roundId, state.account);
     emit();
   } catch (error) {
@@ -224,7 +238,7 @@ function tick() {
 
 /**
  * At rollover the previous round should already be settled. Retry briefly if RPC confirmation
- * lags so the previous-miners panel updates atomically from its last known-good result.
+ * lags so the result tile and latest-played miners card update from known-good records.
  */
 async function loadResolved(roundId, attempt = 0) {
   // A suspended/background tab can skip several elapsed ids between ticks. Discard late
@@ -235,11 +249,26 @@ async function loadResolved(roundId, attempt = 0) {
     // Use the production index to locate the newest resolved round at or before
     // the elapsed id. It includes zero-bid rounds instead of skipping their
     // verifiable winning tiles.
-    const indexedRoundId = await loadLatestSettledRoundId(roundId);
+    const [indexedRoundId, indexedPlayedRoundId] = await Promise.all([
+      loadLatestSettledRoundId(roundId),
+      loadLatestPlayedSettledRoundId(roundId),
+    ]);
     const resolvedRoundId = indexedRoundId ?? roundId;
-    const round = await readRound(resolvedRoundId);
+    const playedRoundId = indexedPlayedRoundId ?? resolvedRoundId;
+    const [round, playedRound] = await Promise.all([
+      readRound(resolvedRoundId),
+      BigInt(playedRoundId) === BigInt(resolvedRoundId)
+        ? Promise.resolve(null)
+        : readRound(playedRoundId).catch(() => null),
+    ]);
     if (round.resolved && state.roundId === BigInt(roundId) + 1n) {
       state.lastResolved = { roundId: BigInt(resolvedRoundId), ...round };
+      const participantRound = playedRound?.resolved && playedRound.totalWager > 0n
+        ? { roundId: BigInt(playedRoundId), ...playedRound }
+        : round.totalWager > 0n
+          ? state.lastResolved
+          : null;
+      if (participantRound) state.lastPlayedResolved = participantRound;
       emit();
       // Receipt settlement is permissionless and may land just after the round
       // result. Pull the miner ledger alongside the result so newly credited
@@ -535,6 +564,16 @@ export async function claimEthOnly(roundIds) {
   await refreshMiner();
   if (state.claimableSol <= 0n) {
     if (roundIds.length && processed !== roundIds.length) return false;
+    // The original v6 Mainnet receipt processor transfers SOL directly when
+    // the owner signs claimReceipt. The later claim-vault release instead
+    // leaves the same amount in StakePosition.pendingSol for a second,
+    // owner-signed withdrawal. Support both deployed semantics without
+    // pretending a successful direct claim failed just because no pending
+    // ledger balance remains afterwards.
+    if (processed > 0) {
+      notify('Claimed SOL to your wallet');
+      return true;
+    }
     notify('No SOL available to claim');
     return false;
   }

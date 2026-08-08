@@ -8,6 +8,7 @@ const [source, styles] = await Promise.all([
   readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
   readFile(new URL('../src/about-stats.css', import.meta.url), 'utf8'),
 ]);
+const renderer = await readFile(new URL('../src/about-stats.js', import.meta.url), 'utf8');
 
 test('About exposes a dedicated Stats chapter', () => {
   assert.match(source, /data-about-section="stats">Stats</);
@@ -47,3 +48,8 @@ test('sparkline paths are finite for flat and changing histories', () => {
   assert.equal((changing.match(/L/g) || []).length, 3);
 });
 
+test('missing live metrics are labelled unavailable instead of looking like zero or broken data', () => {
+  assert.match(renderer, /value\.textContent = 'Unavailable'/);
+  assert.match(renderer, /aria-label[^\n]+unavailable/);
+  assert.match(styles, /\.protocol-stat-row\.unavailable \.protocol-stat-value[\s\S]*text-transform: uppercase/);
+});

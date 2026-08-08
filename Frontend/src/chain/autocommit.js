@@ -3,7 +3,10 @@ import { PublicKey, SystemProgram } from '@solana/web3.js';
 import { connection, getAccount } from './client.js';
 import { GRID } from './config.js';
 import { parseEther } from './units.js';
-import { asBn, derivePda, fetchProtocolAccount, getWritableProgram, protocolPdas, sendInstructions } from './anchor-client.js';
+import {
+  asBn, derivePda, fetchProtocolAccount, getProtocolConfig, getWritableProgram, protocolPdas,
+  sendInstructions,
+} from './anchor-client.js';
 
 // Kept for UI compatibility only. The Solana plan has no play-count ceiling: it executes once per
 // round until its prepaid balance can no longer cover the configured deployment.
@@ -87,6 +90,10 @@ async function assertFundingWithinWalletBudget(value, authority) {
 export async function configurePlan({ tiles, ethPerTile, deposit, rewardMode = 'accumulate' }) {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
+  const configState = await getProtocolConfig();
+  if (configState.paused) {
+    throw new Error('Mining is temporarily paused while maintenance is completed. Auto-round cannot be started right now.');
+  }
   const authority = new PublicKey(account);
   await assertFundingWithinWalletBudget(deposit, authority);
   const amounts = Array(GRID).fill(0n);
@@ -115,6 +122,10 @@ export async function configurePlan({ tiles, ethPerTile, deposit, rewardMode = '
 export async function depositToPlan(value) {
   const account = getAccount();
   const authority = new PublicKey(account);
+  const configState = await getProtocolConfig();
+  if (configState.paused) {
+    throw new Error('Mining is temporarily paused while maintenance is completed. Auto-round cannot be funded right now.');
+  }
   await assertFundingWithinWalletBudget(value, authority);
   const { program } = await getWritableProgram();
   return sendInstructions([await program.methods.fundAutoPlan(asBn(value)).accounts({

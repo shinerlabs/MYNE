@@ -70,3 +70,27 @@ test('server deploy omits the optional account and proof UI never Explorer-links
   assert.match(main, /randomnessAccount \? `<a href="\$\{explorerAddress\(randomnessAccount\)\}/);
   assert.doesNotMatch(main, /explorerAddress\(commitment\)/);
 });
+
+test('an emergency protocol pause is reported before any randomness preparation error', async () => {
+  const [lottery, autoPlan, minePage, main] = await Promise.all([
+    readFile(new URL('../src/chain/lottery.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/chain/autocommit.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/chain/mine-page.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
+  ]);
+  const pausedGuard = lottery.indexOf('if (configState.paused)');
+  const providerRead = lottery.indexOf('const configuredRandomnessProgram', pausedGuard);
+  const preparationError = lottery.indexOf('This round is being prepared by the verified-randomness keeper', pausedGuard);
+  assert.ok(pausedGuard >= 0, 'placeBet must check the authoritative protocol pause');
+  assert.ok(pausedGuard < providerRead && providerRead < preparationError,
+    'pause must win over provider preparation messaging');
+  assert.match(lottery, /Mining is temporarily paused while maintenance is completed\. No bids can be placed right now\./);
+  assert.match(autoPlan, /const configState = await getProtocolConfig\(\);[\s\S]*if \(configState\.paused\)[\s\S]*Auto-round cannot be started right now/);
+  assert.match(autoPlan, /export async function depositToPlan[\s\S]*getProtocolConfig\(\)[\s\S]*Auto-round cannot be funded right now/);
+  assert.match(minePage, /protocolPaused:\s*null/);
+  assert.match(minePage, /getProtocolConfig\(\)\.catch\(\(\) => null\)/);
+  assert.match(minePage, /state\.protocolPaused = Boolean\(config\.paused\)/);
+  assert.match(main, /const protocolPaused = chain\.state\.protocolPaused === true/);
+  assert.match(main, /deploy\.disabled = !protocolReady \|\| protocolPaused/);
+  assert.match(main, /protocolPaused \? 'MINING PAUSED'/);
+});

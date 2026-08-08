@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import {
+  historicalLifecycleQuery,
+  mergeLifecycleRoundQueues,
+  nextHistoricalLifecycleCursor,
+  processLifecycleRoundQueue,
+} from '../scripts/lifecycle-queue-policy.mjs';
 
 test('receipt and randomness cleanup require a verified canonical archive', async () => {
   const lifecycle = await readFile(
@@ -14,6 +20,54 @@ test('receipt and randomness cleanup require a verified canonical archive', asyn
   assert.match(lifecycle, /receipts\.length <= chainReceiptCount/);
   assert.match(lifecycle, /state: 'awaiting-indexed-receipts'/);
   assert.match(lifecycle, /Indexed receipt count exceeds the authoritative chain count/);
+  assert.match(lifecycle, /total_receipts=gt\.0&processed_receipts=eq\.0/);
+  assert.match(lifecycle, /order=round_id\.desc&limit=25/);
+  assert.match(lifecycle, /historicalLifecycleQuery\(historicalRoundCursor\)/);
+  assert.match(lifecycle, /processLifecycleRoundQueue\(queue, processRound\)/);
+  assert.doesNotMatch(lifecycle, /lifecycleConfig\.paused/);
+  assert.match(lifecycle, /if \(!receiptState \|\| receiptState\.claimed \|\| receiptState\.refunded\) continue/);
+  assert.match(lifecycle, /const unique = new Map\(\)/);
+});
+
+test('lifecycle queue prioritizes recent rewards, deduplicates rounds and walks history', async () => {
+  const allRows = Array.from({ length: 63 }, (_, index) => ({ round_id: String(63 - index) }));
+  let cursor = null;
+  const visited = [];
+  for (let page = 0; page < 4; page += 1) {
+    const eligible = cursor === null
+      ? allRows
+      : allRows.filter((row) => BigInt(row.round_id) < BigInt(cursor));
+    const rows = eligible.slice(0, 25);
+    visited.push(...rows.map((row) => row.round_id));
+    cursor = nextHistoricalLifecycleCursor(rows);
+  }
+  assert.equal(new Set(visited).size, 63, 'the bounded keyset walk must visit old partial rounds');
+  assert.equal(cursor, null, 'an exhausted walk must reset to the newest page');
+  assert.equal(
+    historicalLifecycleQuery('39'),
+    'mine_rounds?closed_signature=is.null&round_id=lt.39&select=*&order=round_id.desc&limit=25',
+  );
+
+  const recent = { round_id: '63', source: 'recent' };
+  const historicPartial = { round_id: '7', source: 'history' };
+  const queue = mergeLifecycleRoundQueues(
+    [recent],
+    [{ round_id: '1', source: 'unprocessed' }],
+    [historicPartial, { round_id: '63', source: 'stale-duplicate' }, null],
+  );
+  assert.deepEqual(queue, [recent, { round_id: '1', source: 'unprocessed' }, historicPartial, null]);
+
+  const processed = await processLifecycleRoundQueue(queue, async (row) => {
+    if (!row) throw new Error('malformed row');
+    if (row.round_id === '1') throw new Error('stale row');
+    return { round: row.round_id, state: 'ok' };
+  });
+  assert.deepEqual(
+    processed.map((row) => row.state),
+    ['ok', 'round-processing-error', 'ok', 'round-processing-error'],
+  );
+  assert.equal(processed[1].round, '1');
+  assert.equal(processed[3].round, 'unknown');
 });
 
 test('indexer compares canonical history to the on-chain archive attestation', async () => {
