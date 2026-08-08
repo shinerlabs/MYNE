@@ -30,7 +30,7 @@ const emptyRound = (roundId) => ({
   singleMinerWinner: null, totalWager: 0n, fee: 0n, winnerTotal: 0n,
   potForWinners: 0n, bullionForWinners: 0n, payoutMulWad: 0n,
   bullionMulWad: 0n, motherlodePayoutLamports: 0n, motherlodeEmission: 0n,
-  totalUnclaimedBullion: 0n,
+  totalUnclaimedBullion: 0n, totalReceipts: 0n,
 });
 const toBig = (value) => BigInt(value?.toString?.() ?? value ?? 0);
 const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -154,6 +154,7 @@ const roundFromAccount = (roundId, account) => {
     bullionForWinners: toBig(account.baseEmission),
     motherlodePayoutLamports: toBig(account.motherlodePayoutLamports),
     motherlodeEmission: toBig(account.motherlodeEmission),
+    totalReceipts: toBig(account.totalReceipts),
     payoutMulWad,
     bullionMulWad,
     tileLamports: account.tileLamports.map(toBig),

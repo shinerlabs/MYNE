@@ -23,6 +23,24 @@ test('production keeper binds Mainnet to Switchboard Mainnet', () => {
   }), /Mainnet must use/);
 });
 
+test('Mainnet server commit-reveal is accepted only through an explicit program marker', () => {
+  const serverProgram = 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e';
+  assert.throws(() => requireMatchingSolanaNetwork({
+    genesisHash: SOLANA_MAINNET_GENESIS_HASH,
+    randomnessProgram: serverProgram,
+  }), /Mainnet must use/);
+  assert.equal(requireMatchingSolanaNetwork({
+    genesisHash: SOLANA_MAINNET_GENESIS_HASH,
+    randomnessProgram: serverProgram,
+    serverRandomnessProgram: serverProgram,
+  }), 'mainnet-beta');
+  assert.throws(() => requireMatchingSolanaNetwork({
+    genesisHash: SOLANA_MAINNET_GENESIS_HASH,
+    randomnessProgram: serverProgram,
+    serverRandomnessProgram: '11111111111111111111111111111111',
+  }), /Mainnet must use/);
+});
+
 test('production keeper binds Devnet to Switchboard Devnet', () => {
   assert.equal(requireMatchingSolanaNetwork({
     genesisHash: SOLANA_DEVNET_GENESIS_HASH,

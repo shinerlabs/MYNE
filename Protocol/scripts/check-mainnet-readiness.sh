@@ -175,6 +175,7 @@ assert header[:8] == b'\x89PNG\r\n\x1a\n'
 assert struct.unpack('>II', header[16:24]) == (1024, 1024)
 PY
 grep -q 'fee schedule v6' scripts/switchboard-round-keeper.mjs
+grep -q 'fee schedule v6' scripts/server-round-keeper.mjs
 grep -q 'fee schedule v6' scripts/buyback-keeper.mjs
 grep -q 'fee schedule v6' scripts/round-indexer.mjs
 grep -q 'fee schedule v6' scripts/round-lifecycle-keeper.mjs
@@ -193,6 +194,14 @@ grep -q 'requireMatchingSolanaNetwork' scripts/switchboard-round-keeper.mjs
 grep -q 'recordRoundRandomnessCommit' scripts/switchboard-round-keeper.mjs
 grep -q '\[commitIx, recordIx\]' scripts/switchboard-round-keeper.mjs
 grep -q 'randomnessAccount: randomnessPubkey' scripts/switchboard-round-keeper.mjs
+grep -q 'requireMatchingSolanaNetwork' scripts/server-round-keeper.mjs
+grep -q 'loadOrCreateServerReveal' scripts/server-round-keeper.mjs
+grep -q '\[openIx, bindIx\]' scripts/server-round-keeper.mjs
+grep -q 'lockRoundServerEntropy' scripts/server-round-keeper.mjs
+grep -q 'settleRoundServer' scripts/server-round-keeper.mjs
+grep -q 'SERVER_RANDOMNESS_KEEPER_LIVE' scripts/server-round-keeper.mjs
+grep -q 'PROVIDER_PREPARATION_LEAD_SECONDS' scripts/production-worker-host.mjs
+grep -q "randomnessMode === 'server'" scripts/production-worker-host.mjs
 grep -q 'requireMatchingSolanaNetwork' scripts/buyback-keeper.mjs
 grep -q 'TransactionMessage.decompile' scripts/buyback-keeper.mjs
 grep -q 'MAX_SWAP_OVERHEAD_LAMPORTS' scripts/buyback-keeper.mjs

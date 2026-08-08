@@ -162,9 +162,13 @@ export async function loadRoundRandomnessProof(roundId) {
 function applyFilter(query, filter) {
   switch (filter) {
     case 'mined': return query.eq('resolved', true).gt('total_wager_wei', 0);
-    case 'motherlode': return query.eq('resolved', true).eq('jackpot_hit', true);
-    case 'solo': return query.eq('resolved', true).eq('jackpot_hit', false).eq('single_miner_round', true);
-    case 'split': return query.eq('resolved', true).eq('jackpot_hit', false).eq('single_miner_round', false);
+    // A cryptographic Motherlode/mode sample still exists for an empty round,
+    // but it did not pay anyone. Outcome filters describe played mining
+    // results; the unfiltered ledger continues to show every resolved round
+    // and its published winning tile.
+    case 'motherlode': return query.eq('resolved', true).gt('total_wager_wei', 0).eq('jackpot_hit', true);
+    case 'solo': return query.eq('resolved', true).gt('total_wager_wei', 0).eq('jackpot_hit', false).eq('single_miner_round', true);
+    case 'split': return query.eq('resolved', true).gt('total_wager_wei', 0).eq('jackpot_hit', false).eq('single_miner_round', false);
     default: return query;
   }
 }
@@ -442,10 +446,9 @@ export async function loadSettledRounds(address = null) {
 }
 
 /**
- * Newest resolved round that actually accepted a deployment, optionally capped
- * at an elapsed round id. This keeps the Mine result card on the latest played
- * round without scanning the entire production history when numeric rounds were
- * empty and therefore have no on-chain PDA.
+ * Newest resolved round, optionally capped at an elapsed round id. Empty
+ * scheduled rounds are real, settled results with verifiable winning tiles;
+ * they must advance the Mine result card just like played rounds.
  */
 export async function loadLatestSettledRoundId(atOrBefore = null) {
   if (!(await indexAvailable())) return null;
@@ -454,7 +457,6 @@ export async function loadLatestSettledRoundId(atOrBefore = null) {
       .from('mine_rounds')
       .select('round_id')
       .eq('resolved', true)
-      .gt('total_wager_wei', 0)
       .order('round_id', { ascending: false })
       .limit(1);
     if (atOrBefore !== null) query = query.lte('round_id', String(atOrBefore));

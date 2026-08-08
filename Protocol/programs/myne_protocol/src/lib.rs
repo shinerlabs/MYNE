@@ -2617,6 +2617,30 @@ fn motherlode_pays_round(hit: bool, gross_deployed_lamports: u64) -> bool {
     hit && gross_deployed_lamports > 0
 }
 
+/// Reserve MYNE only for rounds that actually accepted a deployment. Empty
+/// scheduled rounds still settle and publish their verifiable winning tile,
+/// but they must not advance issued-supply accounting or create a reward that
+/// a future participant can capture.
+fn round_emissions(
+    remaining_emission: u64,
+    gross_deployed_lamports: u64,
+    winning_total_lamports: u64,
+) -> Result<(u64, u64)> {
+    if gross_deployed_lamports == 0 {
+        return Ok((0, 0));
+    }
+    let motherlode_emission = remaining_emission.min(MOTHERLODE_ROUND_EMISSION);
+    let remaining_after_motherlode = remaining_emission
+        .checked_sub(motherlode_emission)
+        .ok_or(MyneError::ArithmeticOverflow)?;
+    let base_emission = if winning_total_lamports > 0 {
+        remaining_after_motherlode.min(BASE_ROUND_EMISSION)
+    } else {
+        0
+    };
+    Ok((motherlode_emission, base_emission))
+}
+
 fn assert_liquidity_pool(
     gate: &LiquidityGate,
     pool: &AccountInfo<'_>,
@@ -2941,8 +2965,8 @@ mod motherlode_tests {
         liquidity_gate_required, max_supply_base_units, mining_share_value,
         mining_shares_for_credit, motherlode_hit, motherlode_pays_round, mul_div, mul_div_u64_u128,
         parse_meteora_damm_v2_pool, parse_meteora_lb_pair, proportional_interval_share,
-        round_can_open_after_emission, select_slot_hash_at_or_after, server_randomness_commitment,
-        server_randomness_output, stake_reward_increment_and_remainder,
+        round_can_open_after_emission, round_emissions, select_slot_hash_at_or_after,
+        server_randomness_commitment, server_randomness_output, stake_reward_increment_and_remainder,
         switchboard_randomness_is_uncommitted, BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER,
         METEORA_DAMM_ACTIVATION_POINT_OFFSET, METEORA_DAMM_ACTIVATION_TYPE_OFFSET,
         METEORA_DAMM_POOL_STATUS_OFFSET, METEORA_DAMM_POOL_TYPE_OFFSET,
@@ -3375,6 +3399,26 @@ mod motherlode_tests {
     }
 
     #[test]
+    fn empty_scheduled_round_issues_exactly_zero_myne() {
+        let remaining = BASE_ROUND_EMISSION + super::MOTHERLODE_ROUND_EMISSION;
+        assert_eq!(round_emissions(remaining, 0, 0).unwrap(), (0, 0));
+        assert_eq!(round_emissions(remaining, 0, 1).unwrap(), (0, 0));
+    }
+
+    #[test]
+    fn played_round_preserves_motherlode_and_winning_tile_emissions() {
+        let remaining = BASE_ROUND_EMISSION + super::MOTHERLODE_ROUND_EMISSION;
+        assert_eq!(
+            round_emissions(remaining, 1, 1).unwrap(),
+            (super::MOTHERLODE_ROUND_EMISSION, BASE_ROUND_EMISSION)
+        );
+        assert_eq!(
+            round_emissions(remaining, 1, 0).unwrap(),
+            (super::MOTHERLODE_ROUND_EMISSION, 0)
+        );
+    }
+
+    #[test]
     fn motherlode_shares_sol_and_myne_by_total_deployment() {
         let sol = proportional_interval_share(13_000, 0, 25, 100).unwrap();
         let myne = proportional_interval_share(200, 0, 25, 100).unwrap();
@@ -3586,15 +3630,12 @@ fn settle_round_core(
     let remaining_emission = max_supply_base_units()?
         .checked_sub(config.total_emitted_base_units)
         .ok_or(MyneError::ArithmeticOverflow)?;
-    let motherlode_emission = remaining_emission.min(MOTHERLODE_ROUND_EMISSION);
-    let remaining_after_motherlode = remaining_emission
-        .checked_sub(motherlode_emission)
-        .ok_or(MyneError::ArithmeticOverflow)?;
-    round.base_emission = if winning_total > 0 {
-        remaining_after_motherlode.min(BASE_ROUND_EMISSION)
-    } else {
-        0
-    };
+    let (motherlode_emission, base_emission) = round_emissions(
+        remaining_emission,
+        round.gross_deployed_lamports,
+        winning_total,
+    )?;
+    round.base_emission = base_emission;
     config.motherlode_base_units = checked_add(config.motherlode_base_units, motherlode_emission)?;
     config.total_emitted_base_units = checked_add(
         config.total_emitted_base_units,

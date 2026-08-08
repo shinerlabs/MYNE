@@ -99,7 +99,7 @@ test('manual and demo clients supply the deploy randomness account explicitly', 
     readFile(new URL('../scripts/local-keeper.mjs', import.meta.url), 'utf8'),
     readFile(new URL('./local-protocol.mjs', import.meta.url), 'utf8'),
   ]);
-  assert.match(lottery, /providerRandomness[\s\S]*roundState\?\.randomnessAccount/);
+  assert.match(lottery, /providerRandomness[\s\S]*roundState\.randomnessAccount/);
   assert.match(lottery, /\.deploy\([\s\S]*randomnessAccount, authority/);
   assert.match(capabilities, /mining: \[[^\]]*'record_round_randomness_commit'/);
   assert.match(localKeeper, /roundState\.randomnessAccount\.equals\(PublicKey\.default\)[\s\S]*\.deploy\([\s\S]*randomnessAccount,/);

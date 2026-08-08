@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const productionServices = [
+  '../scripts/server-round-keeper.mjs',
   '../scripts/switchboard-round-keeper.mjs',
   '../scripts/round-lifecycle-keeper.mjs',
   '../scripts/buyback-keeper.mjs',
