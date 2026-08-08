@@ -27,6 +27,8 @@ test('receipt and randomness cleanup require a verified canonical archive', asyn
   assert.doesNotMatch(lifecycle, /lifecycleConfig\.paused/);
   assert.match(lifecycle, /if \(!receiptState \|\| receiptState\.claimed \|\| receiptState\.refunded\) continue/);
   assert.match(lifecycle, /const unique = new Map\(\)/);
+  assert.match(lifecycle, /LIFECYCLE_RECOVERY_CLOSE_ONLY/);
+  assert.match(lifecycle, /if \(!recoveryCloseOnly[\s\S]*settleOrRefund/);
 });
 
 test('lifecycle queue prioritizes recent rewards, deduplicates rounds and walks history', async () => {
@@ -76,6 +78,9 @@ test('indexer compares canonical history to the on-chain archive attestation', a
   assert.match(indexer, /archive_verified: true/);
   assert.match(indexer, /Mainnet indexer requires ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1/);
   assert.match(indexer, /createHash\('sha256'\)/);
+  assert.match(indexer, /resolved=eq\.true&buyback_completed=eq\.true/);
+  assert.match(indexer, /resolved=eq\.false&select=\*/);
+  assert.doesNotMatch(indexer, /archive_verified=eq\.false&closed_signature=is\.null&select=\*&order=round_id\.asc&limit=20/);
   assert.doesNotMatch(indexer, /INDEXER_ID = `\$\{PROGRAM_ID\.toBase58\(\)\}:\$\{provider\.connection\.rpcEndpoint\}`/);
 });
 

@@ -806,6 +806,9 @@
         },
         {
           "name": "beneficiary",
+          "docs": [
+            "instruction account list; reward SOL accrues to `stake_position`."
+          ],
           "writable": true
         },
         {
@@ -3676,6 +3679,9 @@
         },
         {
           "name": "beneficiary",
+          "docs": [
+            "constraint; reward SOL accrues to `stake_position`, never this account."
+          ],
           "writable": true
         },
         {

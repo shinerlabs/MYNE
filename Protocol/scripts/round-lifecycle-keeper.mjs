@@ -51,6 +51,11 @@ const randomnessRetentionSeconds = Math.max(
   3600,
   Number(process.env.RANDOMNESS_RETENTION_SECONDS || 86_400),
 );
+// Recovery mode is intentionally narrower than the normal worker: it may
+// close only receipts/rounds already proven processed and archived. This lets
+// operators reclaim protocol rent during an upgrade without running an older
+// receipt processor that could pay or mutate outstanding player rewards.
+const recoveryCloseOnly = process.env.LIFECYCLE_RECOVERY_CLOSE_ONLY === '1';
 const commitment = 'confirmed';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const asBig = (value) => BigInt(value?.toString?.() ?? value ?? 0);
@@ -252,7 +257,8 @@ async function processRound(indexedRound) {
   }
   const now = Math.floor(Date.now() / 1000);
   let processed = [];
-  if (asBig(roundState.processedReceipts) < asBig(roundState.totalReceipts)
+  if (!recoveryCloseOnly
+      && asBig(roundState.processedReceipts) < asBig(roundState.totalReceipts)
       && (roundState.settled || now >= Number(roundState.refundAt.toString()))) {
     processed = await settleOrRefund(address, roundState, receipts);
     roundState = await program.account.round.fetch(address);
@@ -284,6 +290,7 @@ async function processRound(indexedRound) {
     closedReceipts,
     closedRound,
     randomness,
+    recoveryCloseOnly,
   };
 }
 

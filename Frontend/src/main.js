@@ -38,7 +38,7 @@ import {
   shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
 import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
-import { displayedWinningRound } from './chain/round.js';
+import { displayedWinningRound, roundCountdownView } from './chain/round.js';
 import { readSupplyStats } from './chain/supply.js';
 import { renderProtocolStats } from './about-stats.js';
 import {
@@ -3726,27 +3726,38 @@ async function renderInlineWinners(roundId, account, force = false) {
 
 const { formatClock } = chain.format;
 
+let pausedRoundId = null;
 const renderChainCountdown = (state) => {
-  const betting = state.phase === 'betting';
-  const showingResult = state.phase === 'result';
+  const view = roundCountdownView(state);
+  const {
+    paused, betting, showingResult,
+  } = view;
+  if (paused && pausedRoundId === null) pausedRoundId = state.roundId;
+  if (!paused) pausedRoundId = null;
+  const displayedRoundId = paused ? pausedRoundId : state.roundId;
+
   bettingOpen = betting; // gates the MINE button (see updateMine)
-  timeStat.dataset.phase = state.phase;
-  countdownValue.textContent = formatClock(state.secondsLeft);
-  roundNumberLabel.textContent = `Round #${roundNo(state.roundId)}`;
+  timeStat.dataset.phase = view.phase;
+  countdownValue.textContent = view.value;
+  roundNumberLabel.textContent = `Round #${roundNo(displayedRoundId)}`;
   // During bidding the countdown + draining bar carry the state. At zero the compact label
   // changes directly to RESULT for the five-second winner display.
-  timeStatLabel.textContent = chain.format.roundPhaseLabel(state.phase);
+  timeStatLabel.textContent = view.label;
   const phaseSeconds = betting ? BETTING_SECONDS : WINNER_DISPLAY_SECONDS;
-  timeStat.style.setProperty('--round-progress', `${(state.secondsLeft / phaseSeconds) * 100}%`);
-  timeStat.classList.toggle('settling', !betting);
+  const progress = paused ? 0 : (state.secondsLeft / phaseSeconds) * 100;
+  timeStat.style.setProperty('--round-progress', `${progress}%`);
+  timeStat.classList.toggle('paused', paused);
+  timeStat.classList.toggle('settling', !paused && !betting);
   // Deliberately NOT toggling `round-settled` on the control column. That CSS fades the
   // deploy panel to 12% opacity with pointer-events:none. Miners need to configure tiles/amount
   // during the five-second result window so they're ready when the next round opens.
   // "Betting closed" is already signalled by the countdown
   // label and the OPEN/CLOSED stat, and mine() rejects bets outside the window anyway.
-  timeStat.setAttribute('aria-label', showingResult
-    ? `Round ${roundNo(state.roundId)} result displayed, ${formatClock(state.secondsLeft)} until next round`
-    : `Round ${roundNo(state.roundId)} bidding, ${formatClock(state.secondsLeft)} left to deploy`);
+  timeStat.setAttribute('aria-label', paused
+    ? `Mining paused. Round ${roundNo(displayedRoundId)} countdown is stopped until mining resumes`
+    : showingResult
+      ? `Round ${roundNo(state.roundId)} result displayed, ${formatClock(state.secondsLeft)} until next round`
+      : `Round ${roundNo(state.roundId)} bidding, ${formatClock(state.secondsLeft)} left to deploy`);
 };
 
 const renderChainResult = (state) => {
@@ -4179,7 +4190,7 @@ let offRouteRenderKey = '';
 chain.subscribe((state) => {
   // The local clock emits every second. Only Mine needs a 25-tile DOM traversal at that cadence;
   // other routes redraw on meaningful account/round/phase/result changes and on re-entry.
-  const key = `${state.account || ''}:${state.roundId}:${state.phase}:${state.lastResolved?.roundId || ''}`;
+  const key = `${state.account || ''}:${state.roundId}:${state.phase}:${state.protocolPaused}:${state.lastResolved?.roundId || ''}`;
   if (document.body.dataset.route === 'mine' || key !== offRouteRenderKey) {
     offRouteRenderKey = key;
     renderChain(state);

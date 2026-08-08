@@ -40,11 +40,31 @@ test('wallet changes clear another wallet\'s actionable receipt state immediatel
   assert.match(main, /requestId !== roundHistoryRefreshId \|\| requestedAccount !== chain\.state\.account/);
 });
 
+test('reward ledger reads and actions stay bound to the connected wallet', () => {
+  assert.match(mine, /const requestId = \+\+minerRefreshId/);
+  assert.match(mine, /const requestedAccount = state\.account/);
+  assert.match(mine, /if \(requestedAccount !== state\.account\) return null/);
+  assert.match(mine, /if \(requestId !== minerRefreshId\) return miner/);
+  assert.match(mine, /minerRefreshId \+= 1;[\s\S]*clearMinerState\(\);[\s\S]*void refreshMiner\(\)/);
+  const accountCheck = mine.slice(mine.indexOf('async function freshRewardAccount'), mine.indexOf('/** Settle every selected receipt'));
+  assert.match(accountCheck, /getAccount\(\) !== account \|\| state\.account !== account/);
+  assert.match(accountCheck, /if \(!miner\)/);
+
+  const claimAll = mine.slice(mine.indexOf('export async function claimAll'), mine.indexOf('/** Settle every selected receipt, then convert'));
+  const burn = mine.slice(mine.indexOf('export async function stakeAndBurnRewards'), mine.indexOf('// --- boot'));
+  for (const action of [claimAll, burn]) {
+    assert.match(action, /const account = getAccount\(\)/);
+    assert.match(action, /await freshRewardAccount\(account\)/);
+    assert.match(action, /!initialMiner\.hasAccount \|\| !initialMiner\.hasPosition/);
+  }
+  assert.match(burn, /if \(!miner\.hasPosition\)/);
+});
+
 test('Claim All settles receipts before withdrawing MYNE and never aliases SOL-only', () => {
   const claimAll = mine.slice(mine.indexOf('export async function claimAll'), mine.indexOf('/** Settle every selected receipt, then convert'));
   assert.match(claimAll, /await claimMany\(roundIds\)/);
   assert.match(claimAll, /runTx\('Claiming SOL…', withdrawClaimableSol, refreshMiner\)/);
-  assert.match(claimAll, /if \(state\.unclaimed > 0n\) return refine\(\)/);
+  assert.match(claimAll, /if \(miner\.rewardsBullion > 0n\) return refine\(\)/);
   assert.match(claimAll, /return refine\(\)/);
   assert.doesNotMatch(claimAll, /claimEthOnly/);
   assert.match(main, /rewardAction === 'sol'[\s\S]*claimEthOnly\(ids\)/);
@@ -58,7 +78,7 @@ test('SOL-only and Stake + Burn actions explicitly withdraw the accrued owner ba
   assert.match(claimSol, /state\.claimableSol <= 0n/);
   assert.match(claimSol, /if \(processed > 0\)[\s\S]*Claimed SOL to your wallet[\s\S]*return true/);
   assert.match(claimSol, /withdrawClaimableSol/);
-  assert.match(burn, /state\.claimableSol > 0n[\s\S]*withdrawClaimableSol[\s\S]*burnUnclaimedMyne/);
+  assert.match(burn, /miner\.claimableSol > 0n[\s\S]*withdrawClaimableSol[\s\S]*burnUnclaimedMyne/);
 });
 
 test('fee-free reward burn is a dedicated simulated on-chain instruction', () => {

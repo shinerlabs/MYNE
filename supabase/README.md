@@ -17,6 +17,18 @@ fails closed and leaves burn totals unavailable when the view is absent. The
 UI adds this indexed total to the on-chain `StakePool.total_burn`, which covers
 manual Stake + Burn, Auto-burn, and Motherlode burn-stake principal.
 
+Migration `20260808120000_receipt_reward_accrual.sql` adds the `accrued`
+receipt status used by the claim-vault release. Historical `claimed` rows keep
+their original meaning: SOL was already paid directly. New `accrued` rows mean
+the receipt is processed and its SOL is held in the on-chain StakePool claim
+vault until the wallet owner signs Claim SOL or Claim All. Apply this migration
+before starting an indexer that handles `ReceiptRewardAccruedV1`.
+
+Migration `20260808123000_empty_round_stats.sql` keeps resolved zero-bid rounds
+and their published winning tiles in the ledger while excluding them from
+mined-round and Motherlode-award counts. Apply it with the claim-vault release
+before deploying the matching frontend.
+
 ## Wallet-only chat
 
 Migration `20260807140000_wallet_chat_hardening.sql` is the wallet-only chat

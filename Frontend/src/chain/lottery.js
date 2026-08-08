@@ -208,12 +208,14 @@ export async function readMiner(address) {
   const claimableSol = toBig(stakePosition?.pendingSol)
     + (rewardWeight * (rewardIndex - rewardDebt)) / 1_000_000_000_000_000_000n;
   return {
+    account: address,
     balance: BigInt(balance),
     bullionBalance: await tokenBalance(address, config.mint),
     rewardsBullion: effectiveRewards,
     claimableSol,
     refinedAccrued: 0n,
     hasAccount: Boolean(miner),
+    hasPosition: Boolean(stakePosition),
     totalUnclaimed: toBig(miningPool?.totalUnclaimed),
     hasReferrer: Boolean(miner && !miner.referrer.equals(PublicKey.default)),
     minerIndex: toBig(miningPool?.rewardPerUnclaimed),
@@ -402,11 +404,13 @@ export async function withdrawUnrefined() {
 export async function burnUnclaimedMyne() {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
-  const [miner, miningPool] = await Promise.all([
+  const [miner, miningPool, stakePosition] = await Promise.all([
     fetchProtocolAccount('Miner', minerPda(account)),
     fetchProtocolAccount('MiningPool', protocolPdas.miningPool),
+    fetchProtocolAccount('StakePosition', stakePositionPda(account)),
   ]);
   if (effectiveUnclaimedMyne(miner, miningPool) === 0n) throw new Error('Nothing to stake and burn');
+  if (!stakePosition) throw new Error('This wallet has no staking reward account');
   const authority = new PublicKey(account);
   const { program } = await getWritableProgram();
   const instruction = await program.methods.burnUnclaimedMyne().accounts({

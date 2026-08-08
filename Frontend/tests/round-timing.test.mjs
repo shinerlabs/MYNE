@@ -4,7 +4,7 @@ import test from 'node:test';
 
 import { setGenesisTime } from '../src/chain/config.js';
 import {
-  displayedWinningRound, roundPhaseLabel, roundPresentation, roundState,
+  displayedWinningRound, roundCountdownView, roundPhaseLabel, roundPresentation, roundState,
 } from '../src/chain/round.js';
 import { minuteApyPercent } from '../src/chain/staking-apy.js';
 
@@ -32,6 +32,30 @@ test('round timing is 60 seconds betting followed directly by 5 showing the winn
 test('the countdown bar carries bidding before text identifies the result', () => {
   assert.equal(roundPhaseLabel('betting'), 'TIME LEFT');
   assert.equal(roundPhaseLabel('result'), 'RESULT');
+});
+
+test('an authoritative protocol pause replaces the advancing countdown with a stopped state', () => {
+  assert.deepEqual(roundCountdownView({
+    phase: 'betting', secondsLeft: 37, protocolPaused: true,
+  }), {
+    paused: true,
+    phase: 'paused',
+    betting: false,
+    showingResult: false,
+    label: 'STATUS',
+    value: 'PAUSED',
+  });
+
+  assert.deepEqual(roundCountdownView({
+    phase: 'betting', secondsLeft: 37, protocolPaused: false,
+  }), {
+    paused: false,
+    phase: 'betting',
+    betting: true,
+    showingResult: false,
+    label: 'TIME LEFT',
+    value: '00:37',
+  });
 });
 
 test('result highlights the winning tile without replacing the mining UI', () => {

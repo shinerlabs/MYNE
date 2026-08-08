@@ -65,6 +65,7 @@ events = {entry['name'] for entry in target.get('events', [])}
 assert 'RoundFeesDistributed' in events, 'IDL is missing RoundFeesDistributed'
 assert 'ClaimFeeRoutedV2' in events, 'IDL is missing ClaimFeeRoutedV2'
 assert 'PrelaunchMintMigrated' in events, 'IDL is missing PrelaunchMintMigrated'
+assert 'ReceiptRewardAccruedV1' in events, 'IDL is missing ReceiptRewardAccruedV1'
 accounts = {entry['name'] for entry in target.get('accounts', [])}
 assert 'PrelaunchMintMigration' in accounts, 'IDL is missing PrelaunchMintMigration'
 types = {entry['name']: entry for entry in target.get('types', [])}
@@ -224,6 +225,17 @@ test -f ../supabase/migrations/20260807141000_wallet_validator_lint_cleanup.sql
 test -f ../supabase/migrations/20260807142000_chat_admin_provisioning.sql
 grep -q 'set_chat_admin' ../supabase/migrations/20260807142000_chat_admin_provisioning.sql
 grep -q 'grant execute on function public.set_chat_admin' ../supabase/migrations/20260807142000_chat_admin_provisioning.sql
+test -f ../supabase/migrations/20260808090000_server_randomness_proofs.sql
+grep -q 'randomness_provider' ../supabase/migrations/20260808090000_server_randomness_proofs.sql
+test -f ../supabase/migrations/20260808113000_burn_stats.sql
+grep -q 'mine_burn_stats' ../supabase/migrations/20260808113000_burn_stats.sql
+test -f ../supabase/migrations/20260808120000_receipt_reward_accrual.sql
+grep -q "status in ('claimed', 'accrued', 'refunded', 'closed')" ../supabase/migrations/20260808120000_receipt_reward_accrual.sql
+grep -q "case 'ReceiptRewardAccruedV1'" scripts/round-indexer.mjs
+grep -q "status: eventName === 'ReceiptRewardAccruedV1'" scripts/round-indexer.mjs
+test -f ../supabase/migrations/20260808123000_empty_round_stats.sql
+grep -q 'total_wager_wei > 0' ../supabase/migrations/20260808123000_empty_round_stats.sql
+grep -q "status=in.(claimed,accrued,refunded)" scripts/round-indexer.mjs
 
 if [[ -z "${MAINNET_RELEASE_MANIFEST:-}" ]]; then
   echo "Set MAINNET_RELEASE_MANIFEST to the frozen, external manifest for the candidate" >&2

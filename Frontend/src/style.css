@@ -1941,6 +1941,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .time-stat[data-phase="betting"] > span { color: #78ddb0; }
 .time-stat[data-phase="resolving"] > span { color: #f0bc62; }
 .time-stat[data-phase="result"] > span { color: #d890ff; }
+.time-stat[data-phase="paused"] > span { color: #a5a5a5; }
+.time-stat.paused > strong { color: #f3f3f3; text-shadow: none; }
+.time-stat.paused .round-progress span { transition: none !important; box-shadow: none !important; }
 .round-progress { grid-column: 1; width: min(86px,82%); height: 2px; overflow: hidden; display: block; margin-top: 6px; border-radius: 99px; background: rgba(255,255,255,0.0935); }
 .round-progress span { width: var(--round-progress,58%); height: 100%; display: block; border-radius: inherit; background: var(--gld-spectrum); box-shadow: 0 0 10px rgba(174, 205, 255, .25), 0 0 7px rgba(255, 176, 218, .18); transition: width .9s linear,background .3s ease,box-shadow .3s ease !important; }
 .time-stat.settling .round-progress span { background: var(--gld-spectrum); box-shadow: 0 0 13px rgba(174, 205, 255, .3), 0 0 9px rgba(255, 176, 218, .22); }
@@ -4093,6 +4096,7 @@ body[data-route="mine"] .slot.round-winner .winner-state { display: none !import
 body[data-route="mine"] .time-stat[data-phase="betting"] > span { color: #a5a5a5 !important; }
 body[data-route="mine"] .time-stat[data-phase="resolving"] > span { color: #f0bc62 !important; }
 body[data-route="mine"] .time-stat[data-phase="result"] > span { color: #d890ff !important; }
+body[data-route="mine"] .time-stat[data-phase="paused"] > span { color: #a5a5a5 !important; }
 body[data-route="mine"] .time-stat[data-phase="betting"] > span::before { display: none; }
 body[data-route="mine"] .time-stat[data-phase="betting"] .round-progress span {
   background: var(--gld-spectrum) !important;

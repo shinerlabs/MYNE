@@ -71,6 +71,36 @@ export function roundState(time = nowSeconds()) {
 export const roundPhaseLabel = (phase) => (phase === 'result' ? 'RESULT' : 'TIME LEFT');
 
 /**
+ * Convert the chain round state into the timer's visible state.
+ *
+ * A protocol pause stops every mining action, so continuing to present the wall-clock
+ * countdown makes it look as though rounds are still running. Keep the underlying schedule
+ * untouched for transaction safety, but replace the visible countdown with an explicit,
+ * non-advancing maintenance state until the authoritative on-chain pause is lifted.
+ */
+export const roundCountdownView = ({ phase, secondsLeft, protocolPaused = false }) => {
+  if (protocolPaused) {
+    return {
+      paused: true,
+      phase: 'paused',
+      betting: false,
+      showingResult: false,
+      label: 'STATUS',
+      value: 'PAUSED',
+    };
+  }
+
+  return {
+    paused: false,
+    phase,
+    betting: phase === 'betting',
+    showingResult: phase === 'result',
+    label: roundPhaseLabel(phase),
+    value: formatClock(secondsLeft),
+  };
+};
+
+/**
  * Result presentation is deliberately split: the grid reveals the winning tile, while the
  * control-column takeover stays disabled. Full participant details move to the previous-round
  * miners panel after rollover.

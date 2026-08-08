@@ -204,7 +204,17 @@ supabase/migrations/20260807141000_wallet_validator_lint_cleanup.sql
 supabase/migrations/20260807142000_chat_admin_provisioning.sql
 supabase/migrations/20260808090000_server_randomness_proofs.sql
 supabase/migrations/20260808113000_burn_stats.sql
+supabase/migrations/20260808120000_receipt_reward_accrual.sql
+supabase/migrations/20260808123000_empty_round_stats.sql
 ```
+
+The final two migrations are part of the same release as the upgraded program
+and indexer. `receipt_reward_accrual` distinguishes historical direct wallet
+payments from rewards safely processed into the owner claim vault. The
+`empty_round_stats` migration keeps every settled zero-bid winning tile in the
+public ledger while excluding it from mined and Motherlode award totals. Do
+not deploy the upgraded workers or frontend until both migrations are present
+and the PostgREST schema cache exposes their updated status/view contracts.
 
 Before deploying the frontend, query `public.mine_burn_stats` as the anonymous
 role and require exactly one row with an integer

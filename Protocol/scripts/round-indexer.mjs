@@ -727,7 +727,17 @@ async function indexReferralTransactions() {
 }
 
 async function archiveReadyRounds() {
-  const rounds = await rest('mine_rounds?archive_verified=eq.false&closed_signature=is.null&select=*&order=round_id.asc&limit=20');
+  // Do not let old settled rounds awaiting buyback evidence starve newer
+  // zero-volume or refund-only rounds that are already archival-ready. Each
+  // queue is independently bounded; on-chain state remains authoritative.
+  const [settledCandidates, refundCandidates] = await Promise.all([
+    rest('mine_rounds?archive_verified=eq.false&closed_signature=is.null&resolved=eq.true&buyback_completed=eq.true&select=*&order=round_id.desc&limit=20'),
+    rest('mine_rounds?archive_verified=eq.false&closed_signature=is.null&resolved=eq.false&select=*&order=round_id.desc&limit=20'),
+  ]);
+  const rounds = [...new Map(
+    [...(settledCandidates || []), ...(refundCandidates || [])]
+      .map((round) => [String(round.round_id), round]),
+  ).values()];
   const chainNow = await finalizedChainTimeSeconds();
   let archived = 0;
   for (const round of rounds || []) {

@@ -60,6 +60,7 @@ export const state = {
   totalUnclaimed: 0n,
   hasReferrer: false,
   hasAccount: false,
+  hasPosition: false,
   account: null,
   lastResolved: null,
   // Latest settled round with a real deployment. Empty rounds still advance
@@ -176,21 +177,37 @@ async function refreshPlan() {
   }
 }
 
-export async function refreshMiner() {
-  if (!state.account) {
+let minerRefreshId = 0;
+
+const clearMinerState = () => {
     // Clear refinedAccrued / totalUnclaimed / hasReferrer too: they are per-ACCOUNT, and leaving
     // them behind on disconnect showed the previous wallet's passive balance to whoever connected
     // next. Harmless while the figure was folded into a net total; now that it has its own row it
     // would be read as the new wallet's earnings.
     Object.assign(state, {
-      balance: 0n, bullionBalance: 0n, unclaimed: 0n, claimableSol: 0n, hasAccount: false,
+      balance: 0n, bullionBalance: 0n, unclaimed: 0n, claimableSol: 0n,
+      hasAccount: false, hasPosition: false,
       refinedAccrued: 0n, minerIndex: 0n, totalUnclaimed: 0n, hasReferrer: false,
       myBets: Array(25).fill(0n),
     });
+};
+
+export async function refreshMiner() {
+  const requestId = ++minerRefreshId;
+  const requestedAccount = state.account;
+  if (!requestedAccount) {
+    clearMinerState();
     return emit();
   }
   try {
-    const miner = await readMiner(state.account);
+    const miner = await readMiner(requestedAccount);
+    // Wallet reads can resolve out of order when the user changes account or
+    // reconnects while an RPC request is in flight. Never publish wallet A's
+    // rewards into wallet B's action state.
+    if (requestedAccount !== state.account) return null;
+    // A newer refresh for the same wallet owns publication, but this caller
+    // can still use its own verified snapshot for an in-progress action.
+    if (requestId !== minerRefreshId) return miner;
     state.balance = miner.balance;
     state.bullionBalance = miner.bullionBalance;
     state.unclaimed = miner.rewardsBullion;
@@ -200,9 +217,14 @@ export async function refreshMiner() {
     state.totalUnclaimed = miner.totalUnclaimed ?? 0n;
     state.hasReferrer = Boolean(miner.hasReferrer);
     state.hasAccount = miner.hasAccount;
+    state.hasPosition = miner.hasPosition;
     emit();
+    return miner;
   } catch (error) {
-    console.warn('miner refresh failed', error);
+    if (requestId === minerRefreshId && requestedAccount === state.account) {
+      console.warn('miner refresh failed', error);
+    }
+    return null;
   }
 }
 
@@ -600,9 +622,29 @@ export async function refine() {
   return runTx('Claiming MYNE…', withdrawUnrefined, refreshMiner);
 }
 
+async function freshRewardAccount(account) {
+  const miner = await refreshMiner();
+  if (getAccount() !== account || state.account !== account) {
+    notify('Wallet changed — review the current rewards and try again');
+    return null;
+  }
+  if (!miner) {
+    notify('Could not verify this wallet’s reward accounts — please try again');
+    return null;
+  }
+  return miner;
+}
+
 /** Settle every selected receipt, then complete the liquid MYNE claim with its 10% fee. */
 export async function claimAll(roundIds) {
-  if (!getAccount()) return connectWallet();
+  const account = getAccount();
+  if (!account) return connectWallet();
+  const initialMiner = await freshRewardAccount(account);
+  if (!initialMiner) return false;
+  if (roundIds.length > 0 && (!initialMiner.hasAccount || !initialMiner.hasPosition)) {
+    notify('This wallet has no complete mining reward account — no transaction was submitted');
+    return false;
+  }
   let handled = false;
   if (roundIds.length > 0) {
     const claimed = await claimMany(roundIds);
@@ -611,13 +653,14 @@ export async function claimAll(roundIds) {
     if (claimed !== roundIds.length) return false;
     handled = true;
   }
-  await refreshMiner();
-  if (state.claimableSol > 0n) {
+  const miner = roundIds.length > 0 ? await freshRewardAccount(account) : initialMiner;
+  if (!miner) return false;
+  if (miner.claimableSol > 0n) {
     const withdrawn = await runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
     if (!withdrawn) return false;
     handled = true;
   }
-  if (state.unclaimed > 0n) return refine();
+  if (miner.rewardsBullion > 0n) return refine();
   if (handled) return true;
   notify('Nothing available to claim');
   return false;
@@ -625,20 +668,32 @@ export async function claimAll(roundIds) {
 
 /** Settle every selected receipt, then convert all accumulated MYNE into permanent 5x weight. */
 export async function stakeAndBurnRewards(roundIds) {
-  if (!getAccount()) return connectWallet();
+  const account = getAccount();
+  if (!account) return connectWallet();
+  const initialMiner = await freshRewardAccount(account);
+  if (!initialMiner) return false;
+  if (!initialMiner.hasAccount || !initialMiner.hasPosition) {
+    notify('This wallet has no complete mining reward account — no transaction was submitted');
+    return false;
+  }
   if (roundIds.length > 0) {
     const claimed = await claimMany(roundIds);
     if (claimed !== roundIds.length) return false;
   }
-  await refreshMiner();
+  const miner = roundIds.length > 0 ? await freshRewardAccount(account) : initialMiner;
+  if (!miner) return false;
   // Before receipt accrual, this action implicitly received SOL because the
   // receipt processor paid it directly. Preserve that product behavior while
   // requiring the owner signature explicitly under the claim-vault model.
-  if (state.claimableSol > 0n) {
+  if (miner.claimableSol > 0n) {
     const withdrawn = await runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
     if (!withdrawn) return false;
   }
-  if (state.unclaimed === 0n) return notify('No MYNE available to stake and burn');
+  if (miner.rewardsBullion === 0n) return notify('No MYNE available to stake and burn');
+  if (!miner.hasPosition) {
+    notify('This wallet’s staking reward account is unavailable — no transaction was submitted');
+    return false;
+  }
   return runTx('Staking + burning MYNE…', burnUnclaimedMyne, refreshMiner);
 }
 
@@ -676,7 +731,11 @@ export function start() {
 
   onAccountChange((account) => {
     state.account = account;
-    refreshMiner();
+    // Invalidate in-flight reads and remove the previous wallet's actionable
+    // balances synchronously, before the replacement RPC read completes.
+    minerRefreshId += 1;
+    clearMinerState();
+    void refreshMiner();
     refreshPlan();
     if (account && live) refreshRound();
     emit();
