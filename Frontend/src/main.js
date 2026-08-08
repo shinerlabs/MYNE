@@ -2928,7 +2928,13 @@ const randomizeSelectedTiles = () => {
     [tiles[index], tiles[swap]] = [tiles[swap], tiles[index]];
   }
   selected.clear();
-  document.querySelectorAll('.slot').forEach((tile) => { tile.classList.remove('selected'); tile.setAttribute('aria-pressed', 'false'); });
+  // Keep paid tiles visibly selected while changing only the not-yet-paid
+  // configuration. They are excluded from the new random selection below.
+  document.querySelectorAll('.slot').forEach((tile) => {
+    const paid = tileLocked(tile.dataset.slot);
+    tile.classList.toggle('selected', paid);
+    tile.setAttribute('aria-pressed', String(paid));
+  });
   tiles.filter((tile) => !tileLocked(tile.dataset.slot)).slice(0, count)
     .forEach((tile) => { selected.add(tile.dataset.slot); tile.classList.add('selected'); tile.setAttribute('aria-pressed', 'true'); });
   updateMine();
@@ -3207,7 +3213,9 @@ const setRoute = (route, { updateHash = true, aboutTarget } = {}) => {
   if (target === 'about') setAboutSection(aboutTarget || 'intro');
   if (target === 'rounds') {
     void refreshRoundStats();
-    if (protocolReady) refreshRoundHistory({ force: true });
+    // Historical rows are served by the public, chain-derived index. They must remain available
+    // while the live RPC is reconnecting, rate-limited or the protocol is intentionally paused.
+    refreshRoundHistory({ force: true });
   }
   if (protocolReady && target === 'referrals') { refreshReferral(); renderLeaderboard(); renderMyReferrals(); }
   if (protocolReady && target === 'stake') refreshStaking();
@@ -3221,7 +3229,7 @@ const setRoute = (route, { updateHash = true, aboutTarget } = {}) => {
 document.querySelectorAll('[data-route]').forEach((button) => button.addEventListener('click', () => { setRoute(button.dataset.route, { aboutTarget: button.dataset.aboutTarget }); setMenu(false); }));
 document.querySelectorAll('[data-about-section]').forEach((button) => button.addEventListener('click', () => setAboutSection(button.dataset.aboutSection)));
 
-document.querySelectorAll('.slot').forEach((tile) => tile.addEventListener('click', () => { const id = tile.dataset.slot; if (tileLocked(id)) return notify(`Tile #${id} is already mined this round`); setRandomMode(false); const active = !selected.has(id); active ? selected.add(id) : selected.delete(id); tile.classList.toggle('selected', active); tile.setAttribute('aria-pressed', String(active)); updateMine(); }));
+document.querySelectorAll('.slot').forEach((tile) => tile.addEventListener('click', () => { const id = tile.dataset.slot; if (tileLocked(id)) return notify(`Tile #${id} is already paid for and locked this round`); setRandomMode(false); const active = !selected.has(id); active ? selected.add(id) : selected.delete(id); tile.classList.toggle('selected', active); tile.setAttribute('aria-pressed', String(active)); updateMine(); }));
 // 4dp, not 2: the increments go down to 0.0001, and rounding to 2 would swallow the two smallest
 // buttons entirely (0 + 0.0001 -> "0.00"). Number() then drops trailing zeros, so +0.01 reads
 // "0.01" rather than "0.0100", while toFixed first absorbs float noise like 0.30000000000000004.
@@ -3253,7 +3261,10 @@ window.addEventListener('solpricechange', () => {
  * grid is 25 individual taps, or the − stepper 25 times.
  */
 const allTilesButton = document.querySelector('#all');
-const allTilesSelected = () => selected.size === document.querySelectorAll('.slot').length;
+const allTilesSelected = () => (
+  selected.size + [...document.querySelectorAll('.slot')].filter((tile) => tileLocked(tile.dataset.slot)).length
+  === document.querySelectorAll('.slot').length
+);
 
 const syncAllButton = () => {
   const clearing = allTilesSelected();
@@ -3266,8 +3277,9 @@ allTilesButton.addEventListener('click', () => {
   const clearing = allTilesSelected();
   document.querySelectorAll('.slot').forEach((tile) => {
     const id = tile.dataset.slot;
-    // ALL means "every tile still available to me", not every tile — a locked one would be staged
-    // for a second bet the panel will not place.
+    // ALL/CLEAR only affects tiles that are still available. A confirmed
+    // position remains selected and cannot be cleared during its live round.
+    if (tileLocked(id)) return;
     const pick = !clearing && !tileLocked(id);
     if (pick) selected.add(id); else selected.delete(id);
     tile.classList.toggle('selected', pick);
@@ -4041,11 +4053,9 @@ const renderChainResult = (state) => {
   column?.classList.remove('results-open');
 };
 
-// Every verified result receives a full five-second display window. Provider/RPC confirmation can
-// arrive near the next scheduled boundary, so this window is anchored to when the client first sees
-// the settled account rather than disappearing with the fixed wall-clock result phase. Tiles remain
-// interactive for the live round underneath the unmistakable previous-round winner overlay.
-// During a protocol pause, pin the newest verified result until mining resumes.
+// The winning tile belongs only to the exact round currently in its scheduled result phase.
+// Never carry a late or previous result onto the next round's live betting board. During a protocol
+// pause no bids can be accepted, so the newest verified result may remain pinned for transparency.
 const renderGridWinner = (state) => {
   const visibleWinner = displayedWinningRound(state);
   const inResult = state.phase === 'result';
@@ -4057,7 +4067,8 @@ const renderGridWinner = (state) => {
     // Result is also the setup window for the NEXT round. Keep every tile interactive while the
     // confirmed winner overlay takes visual priority over selection.
     tile.disabled = false;
-    const picked = selected.has(tile.dataset.slot);
+    const paid = state.phase === 'betting' && tileHasConfirmedBet(tile.dataset.slot, state);
+    const picked = paid || selected.has(tile.dataset.slot);
     tile.classList.toggle('selected', picked);
     tile.setAttribute('aria-pressed', String(picked));
     const label = (tile.getAttribute('aria-label') || '').replace(/, winning tile$/, '');
@@ -4177,8 +4188,11 @@ let netReceivable = 0n;
  * simply tops up, which the contract handles correctly (betOf accumulates, the miner count does
  * not double-count).
  */
-const tileLocked = (slotId) => chain.state.phase === 'betting'
-  && Boolean(document.querySelector(`.slot[data-slot="${slotId}"]`)?.classList.contains('has-position'));
+const tileHasConfirmedBet = (slotId, state = chain.state) => (
+  (state.myBets?.[Number(slotId) - 1] ?? 0n) > 0n
+);
+
+const tileLocked = (slotId) => chain.state.phase === 'betting' && tileHasConfirmedBet(slotId);
 
 const renderTiles = (state) => {
   document.querySelectorAll('.slot').forEach((tile) => {
@@ -4196,14 +4210,10 @@ const renderTiles = (state) => {
     setClass(tile, 'is-long-value', amount.length >= 7);
     setClass(tile, 'is-very-long-value', amount.length >= 9);
     setClass(tile, 'has-position', mine > 0n);
-    // A bet that lands mid-selection must not stay staged for a second one. The lock itself is
-    // read straight off `has-position` (see tileLocked) rather than mirrored into a second Set —
-    // one source of truth, and it clears by itself when the next round zeroes the position.
-    const slotId = tile.dataset.slot;
-    if (state.phase === 'betting' && mine > 0n && selected.delete(slotId)) {
-      tile.classList.remove('selected');
-      tile.setAttribute('aria-pressed', 'false');
-    }
+    // A confirmed bet is permanently lit and locked for this round. `selected`
+    // remains the pending configuration set, so it is deliberately not used
+    // to infer whether SOL has already been paid.
+    if (state.phase === 'betting' && mine > 0n) selected.delete(tile.dataset.slot);
     setClass(tile, 'is-mined', mine > 0n);
     setAttr(tile, 'aria-label', `Tile ${tile.dataset.slot}, ${chain.format.solIcon(total)} SOL deployed${mine > 0n ? `, your position ${chain.format.solIcon(mine)} SOL` : ''}`);
     // Miners on this tile — the real on-chain count from `getBettorsOnSquare`, not a wager.
@@ -4597,7 +4607,7 @@ window.setInterval(() => {
 window.setInterval(() => {
   if (document.hidden || document.body.dataset.route !== 'rounds') return;
   void refreshRoundStats();
-  if (protocolReady && !document.querySelector('.round-entry.expanded')) {
+  if (!document.querySelector('.round-entry.expanded')) {
     refreshRoundHistory({ force: true });
   }
 }, ROUNDS_POLL_MS);
@@ -4608,7 +4618,7 @@ document.addEventListener('visibilitychange', () => {
   const route = document.body.dataset.route;
   if (route === 'rounds') {
     void refreshRoundStats();
-    if (protocolReady) refreshRoundHistory({ force: true });
+    refreshRoundHistory({ force: true });
     return;
   }
   if (!protocolReady) return;
@@ -5596,15 +5606,18 @@ const renderRoundHistory = () => {
     // the true count from the payout mode.
     const soloWinner = r.singleMinerRound && r.singleMinerWinner
       && r.singleMinerWinner !== DEFAULT_SOLANA_ADDRESS;
-    const winnerCount = r.winners === 0n ? 0n
+    const winnerCountKnown = typeof r.winners === 'bigint';
+    const winnerCount = !winnerCountKnown ? null
+      : r.winners === 0n ? 0n
       : r.singleMinerRound ? (soloWinner ? 1n : 0n)
         : r.winners;
     // Split pays every bettor on the tile; a solo round pays exactly one (bet-weighted), even
     // if several bet it; zero winners rolls forward. RESULT mirrors this.
     const result = emptyRound ? `Winning tile #${tile} · no bids · 0 MYNE rewarded`
+      : winnerCount === null ? 'Winner count temporarily unavailable'
       : winnerCount === 0n ? 'No winners — rolled forward'
       : r.singleMinerRound
-        ? `Solo winner · ${chain.format.short(r.singleMinerWinner)}${r.winners > 1n ? ` (1 of ${r.winners})` : ''}`
+        ? `Solo winner · ${chain.format.short(r.singleMinerWinner)}${winnerCountKnown && r.winners > 1n ? ` (1 of ${r.winners})` : ''}`
         : `${winnerCount} miner${winnerCount === 1n ? '' : 's'}`;
     const claimable = r.myBet > 0n && !r.claimed;
     const myLine = r.myBet > 0n
@@ -5617,7 +5630,7 @@ const renderRoundHistory = () => {
     return `
     <div class="round-entry${claimable ? ' claimable' : ''}" data-round-mode="${r.mode}" data-round-id="${r.roundId}">
       <button class="round-record" aria-expanded="false">
-        <span class="round-number">#${roundNo(r.roundId)}</span><span class="winning-tile">${icon('grid')} Tile ${tile}</span><span class="round-mode ${r.mode}">${label}</span><span>${solIcon()} ${chain.format.ethSmart(r.totalWager)}</span><span>${winnerCount}</span><time>${relTime(r.endsAt)}</time><i>${icon('chevron')}</i>
+        <span class="round-number">#${roundNo(r.roundId)}</span><span class="winning-tile">${icon('grid')} Tile ${tile}</span><span class="round-mode ${r.mode}">${label}</span><span>${solIcon()} ${chain.format.ethSmart(r.totalWager)}</span><span>${winnerCount ?? '—'}</span><time>${relTime(r.endsAt)}</time><i>${icon('chevron')}</i>
       </button>
       <div class="round-detail" hidden data-round-id="${r.roundId}" data-square="${r.winningSquare}" data-prize="${r.potForWinners}" data-winner-total="${r.winnerTotal}" data-solo="${r.singleMinerRound ? '1' : ''}" data-winner="${r.singleMinerWinner || ''}" data-randomness="${r.randomnessValue == null ? '' : randomnessHex(r.randomnessValue)}" data-randomness-mode="${r.randomnessMode ?? 'switchboard'}" data-randomness-state="${r.randomnessState ?? 'settled'}" data-randomness-account="${r.randomnessId ?? ''}" data-randomness-commitment="${r.randomnessCommitment ?? ''}" data-randomness-commit-slot="${r.randomnessCommitSlot ?? ''}" data-wager="${r.totalWager}">
         <div><span>RESULT</span><strong>${result}</strong></div>

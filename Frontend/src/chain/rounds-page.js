@@ -4,7 +4,9 @@ import {
 } from './lottery.js';
 import { settledSolReward } from './round-rewards.js';
 import { roundIdAt, roundEnd, roundState } from './round.js';
-import { loadIndexedRounds, loadSettledRounds } from './rounds-index.js';
+import {
+  loadIndexedRounds, loadIndexedWinnerCounts, loadSettledRounds,
+} from './rounds-index.js';
 import { NETWORK } from '../app-config.js';
 
 /**
@@ -146,10 +148,13 @@ async function loadFromIndex({ page, pageSize, account, filter, current, liveRou
       excludeRoundId: hasLive ? current : null,
     });
   };
-  const indexed = await loadPage(page);
+  const [indexed, settled] = await Promise.all([
+    loadPage(page),
+    // A disconnected history viewer has no personal claim state to discover. Loading every
+    // settled round here made the public ledger wait on an ever-growing, entirely unused query.
+    account ? loadSettledRounds(account) : Promise.resolve([]),
+  ]);
   if (!indexed) return null;
-  // Scoped to this account's own bets when the index can say — otherwise every settled round.
-  const settled = await loadSettledRounds(account);
   if (!settled) return null; // half the data would mean a wrong claimable panel — bail to chain
 
   const filteredTotal = indexed.filteredTotal + (hasLive ? 1 : 0);
@@ -193,13 +198,21 @@ export async function loadRoundHistory({
   if (viaIndex) {
     const { indexed, settled, pages, safePage, slice } = viaIndex;
     const pageSettled = slice.filter((r) => r.status === 'settled');
-    const [counts, mine] = await Promise.all([
-      readWinnerCounts(pageSettled),
+    const [indexedCounts, mine] = await Promise.all([
+      loadIndexedWinnerCounts(pageSettled),
       readMyClaimStatus(settled, account),
     ]);
+    // Mainnet history is an indexed read surface. Never turn a temporary bet-index problem into
+    // fifty sequential public-RPC calls; the row remains visible and its count can reconcile on
+    // the next Realtime/poll refresh. Local/Devnet retain the direct-chain fallback for testing.
+    const counts = indexedCounts ?? (NETWORK.cluster === 'mainnet-beta'
+      ? null
+      : await readWinnerCounts(pageSettled));
     const rows = slice.map((r) => ({
       ...r,
-      winners: counts.get(String(r.roundId)) ?? 0n,
+      // null is deliberately distinct from zero: if the public bet index is temporarily
+      // unavailable the result remains visible, but the UI must not invent "0 winners".
+      winners: counts ? (counts.get(String(r.roundId)) ?? 0n) : null,
       myBet: mine.get(String(r.roundId))?.myBet ?? r.myBet ?? 0n,
       claimed: mine.get(String(r.roundId))?.claimed ?? false,
     }));

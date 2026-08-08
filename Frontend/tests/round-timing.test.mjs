@@ -90,27 +90,34 @@ test('result highlights the winning tile without replacing the mining UI', () =>
   });
 });
 
-test('a protocol pause pins the latest verified winner and late confirmations still get five seconds', () => {
-  const current = { resolved: true, winningSquare: 7 };
+test('winner is restricted to the exact round result phase and never carries into the next board', () => {
+  const current = { id: 51n, resolved: true, winningSquare: 7 };
   const unresolved = { resolved: false, winningSquare: 255 };
-  const previous = { resolved: true, winningSquare: 20 };
+  const previous = { id: 50n, resolved: true, winningSquare: 20 };
 
   assert.equal(displayedWinningRound({
-    phase: 'betting', protocolPaused: false, currentRound: null, lastResolved: previous,
-    winnerDisplayUntil: 1_005n, currentTime: 1_000n,
-  }), previous);
-  assert.equal(displayedWinningRound({
-    phase: 'betting', protocolPaused: false, currentRound: null, lastResolved: previous,
-    winnerDisplayUntil: 1_005n, currentTime: 1_005n,
+    phase: 'betting', protocolPaused: false, roundId: 51n,
+    currentRound: null, lastResolved: previous,
   }), null);
   assert.equal(displayedWinningRound({
-    phase: 'result', protocolPaused: false, currentRound: current, lastResolved: previous,
+    phase: 'result', protocolPaused: false, roundId: 51n,
+    currentRound: current, lastResolved: previous,
   }), current);
   assert.equal(displayedWinningRound({
-    phase: 'betting', protocolPaused: true, currentRound: unresolved, lastResolved: previous,
+    phase: 'result', protocolPaused: false, roundId: 52n,
+    currentRound: current, lastResolved: previous,
+  }), null);
+  assert.equal(displayedWinningRound({
+    phase: 'betting', protocolPaused: false, roundId: 52n,
+    currentRound: current, lastResolved: previous,
+  }), null);
+  assert.equal(displayedWinningRound({
+    phase: 'betting', protocolPaused: true, roundId: 51n,
+    currentRound: unresolved, lastResolved: previous,
   }), previous);
   assert.equal(displayedWinningRound({
-    phase: 'betting', protocolPaused: true, currentRound: current, lastResolved: previous,
+    phase: 'betting', protocolPaused: true, roundId: 51n,
+    currentRound: current, lastResolved: previous,
   }), current);
 });
 

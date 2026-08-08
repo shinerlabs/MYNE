@@ -27,7 +27,7 @@ import {
   loadLatestIndexedRoundId, loadLatestPlayedSettledRoundId, loadLatestSettledRoundId,
 } from './rounds-index.js';
 import {
-  ROUND_DURATION, BETTING_DURATION, WINNER_DISPLAY_DURATION, isPremine,
+  ROUND_DURATION, BETTING_DURATION, isPremine,
 } from './config.js';
 import { formatClock, nowSeconds, roundPhaseLabel, roundPresentation, roundState } from './round.js';
 import { claimStakingRewards as withdrawClaimableSol } from './staking.js';
@@ -76,10 +76,6 @@ export const state = {
   // lastResolved and publish their winning tile, but must not erase the most
   // recent participant/reward card.
   lastPlayedResolved: null,
-  // A provider result can finalize near (or just after) the next round boundary.
-  // Give every newly verified winner its own full five-second display window
-  // instead of tying visibility only to the fixed schedule's result phase.
-  winnerDisplayUntil: 0n,
   currentRound: null, // full readRound() of state.roundId — carries its own `resolved`/winner
   plan: null, // MYNE auto-plan for the connected account (null = none configured)
   autoPlanMaxFee: null, // live rent for one BetReceipt; null means the RPC quote is unavailable
@@ -124,26 +120,33 @@ export const setLive = (next) => {
  */
 let roundRefreshRequest = null;
 async function refreshRound() {
-  if (roundRefreshRequest) return roundRefreshRequest;
-  roundRefreshRequest = (async () => {
+  const requestedRoundId = BigInt(state.roundId);
+  if (roundRefreshRequest?.roundId === requestedRoundId) return roundRefreshRequest.promise;
+
+  const request = { roundId: requestedRoundId, promise: null };
+  request.promise = (async () => {
   try {
-    const { roundId } = state;
     // One Round PDA contains both tile totals and tile participant counts. Reading it once avoids
     // two duplicate getAccountInfo calls on every five-second refresh (and during the result poll).
     const [roundResult, configResult] = await Promise.allSettled([
-      readRound(roundId),
+      readRound(requestedRoundId),
       // A temporary config read failure must not hide public round data. Leave
       // the previous pause value intact and let the next five-second poll retry.
       getProtocolConfig(),
     ]);
+    // A read started before the 65-second boundary belongs to the old board. Never let it
+    // overwrite the newly rolled round, even if the RPC response arrives after tick() clears it.
+    if (state.roundId !== requestedRoundId) return;
+
     if (configResult.status === 'fulfilled') {
       state.protocolPaused = Boolean(configResult.value.paused);
       if (!state.protocolPaused) {
         state.pausedRoundId = null;
       } else if (roundResult.status === 'fulfilled' && roundResult.value.requestedAt > 0n) {
-        state.pausedRoundId = roundResult.value.id ?? roundId;
+        state.pausedRoundId = roundResult.value.id ?? requestedRoundId;
       } else {
-        const indexedRoundId = await loadLatestIndexedRoundId(roundId);
+        const indexedRoundId = await loadLatestIndexedRoundId(requestedRoundId);
+        if (state.roundId !== requestedRoundId) return;
         if (indexedRoundId !== null) state.pausedRoundId = indexedRoundId;
       }
     }
@@ -155,6 +158,12 @@ async function refreshRound() {
       throw roundResult.reason;
     }
     const round = roundResult.value;
+    const requestedAccount = state.account;
+    const myBets = requestedAccount
+      ? await readMyBets(requestedRoundId, requestedAccount)
+      : Array(25).fill(0n);
+    if (state.roundId !== requestedRoundId || state.account !== requestedAccount) return;
+
     state.squareTotals = round.tileLamports ?? Array(25).fill(0n);
     state.squareMiners = round.tileReceipts ?? Array(25).fill(0n);
     state.totalWager = round.totalWager;
@@ -162,13 +171,16 @@ async function refreshRound() {
     // A current-round settlement drives the final five-second winner reveal through
     // `currentRound`. It must not replace the durable result pointers yet: those advance only
     // after the next round starts and separately track the latest result and latest played result.
-    if (state.account) state.myBets = await readMyBets(roundId, state.account);
+    state.myBets = myBets;
     emit();
   } catch (error) {
     console.warn('round refresh failed', error);
   }
-  })().finally(() => { roundRefreshRequest = null; });
-  return roundRefreshRequest;
+  })().finally(() => {
+    if (roundRefreshRequest === request) roundRefreshRequest = null;
+  });
+  roundRefreshRequest = request;
+  return request.promise;
 }
 
 async function refreshJackpot() {
@@ -329,7 +341,13 @@ const syncWalletRealtime = (account) => {
     subscribeAccountActivity(minerPda(authority), onRewardAccountChange),
     subscribeAccountActivity(stakePositionPda(authority), onRewardAccountChange),
     subscribeAccountActivity(derivePda('auto_plan', authority), () => {
-      if (!document.hidden) void refreshPlan();
+      if (document.hidden) return;
+      // execute_auto_plan mutates the plan and creates this wallet's receipt in
+      // the same confirmed transaction. Refreshing only the plan made a
+      // successful Auto Mine look as though no tile had been bid until the
+      // next background poll. Keep the plan, board and wallet ledger aligned
+      // with that single on-chain state change.
+      void Promise.all([refreshPlan(), refreshRound(), refreshMiner()]);
     }),
   ];
 };
@@ -392,11 +410,7 @@ async function loadResolved(roundId, attempt = 0) {
     ]);
     if (round.resolved && state.roundId === BigInt(roundId) + 1n) {
       const resolvedId = BigInt(resolvedRoundId);
-      const isNewResult = state.lastResolved?.roundId !== resolvedId;
       state.lastResolved = { roundId: resolvedId, ...round };
-      if (isNewResult) {
-        state.winnerDisplayUntil = nowSeconds() + WINNER_DISPLAY_DURATION;
-      }
       const participantRound = playedRound?.resolved && playedRound.totalWager > 0n
         ? { roundId: BigInt(playedRoundId), ...playedRound }
         : round.totalWager > 0n

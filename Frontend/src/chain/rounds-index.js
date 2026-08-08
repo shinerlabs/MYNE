@@ -280,6 +280,53 @@ export async function loadIndexedRounds({
 }
 
 /**
+ * Winner counts for a visible history page, derived from the public bet index in one bounded
+ * request instead of issuing one receipt-index query plus one Solana RPC read per round.
+ *
+ * The raw count is the number of eligible wallets. The row renderer reduces a Solo result to
+ * one paid winner while retaining this raw number for the "1 of N" explanation. Motherlode
+ * counts every participant in the round; Split/Solo count wallets on the winning tile only.
+ */
+export function winnerCountsFromIndexedBets(rounds, bets) {
+  const participants = new Map(rounds.map((round) => [String(round.roundId), new Set()]));
+  const byId = new Map(rounds.map((round) => [String(round.roundId), round]));
+  for (const bet of bets) {
+    const key = String(bet.round_id);
+    const round = byId.get(key);
+    if (!round || !round.resolved || round.totalWager <= 0n) continue;
+    if (!round.jackpotHit && Number(bet.square) !== Number(round.winningSquare)) continue;
+    participants.get(key)?.add(String(bet.bettor));
+  }
+  return new Map(rounds.map((round) => [
+    String(round.roundId),
+    BigInt(participants.get(String(round.roundId))?.size ?? 0),
+  ]));
+}
+
+export async function loadIndexedWinnerCounts(rounds) {
+  if (!rounds.length) return new Map();
+  if (!(await indexAvailable())) return null;
+  try {
+    const ids = rounds.map((round) => String(round.roundId));
+    const bets = [];
+    for (let offset = 0; ; offset += PAGE) {
+      const { data: chunk, error } = await supabase
+        .from('mine_round_bets')
+        .select('round_id,bettor,square')
+        .in('round_id', ids)
+        .order('round_id', { ascending: false })
+        .range(offset, offset + PAGE - 1);
+      if (error) return null;
+      bets.push(...(chunk ?? []));
+      if (!chunk || chunk.length < PAGE) break;
+    }
+    return winnerCountsFromIndexedBets(rounds, bets);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Every settled round as `{roundId, winningSquare}` — the shape `readMyClaimStatus` wants.
  *
  * Claim status is inherently per-account on-chain state, so it still costs a multicall. What

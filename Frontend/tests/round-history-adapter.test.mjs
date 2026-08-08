@@ -36,8 +36,13 @@ test('paused round history counts indexed records instead of advancing with wall
 });
 
 test('Rounds headline stats refresh while paused or reconnecting after an upgrade', () => {
-  assert.match(main, /if \(target === 'rounds'\) \{\s*void refreshRoundStats\(\);\s*if \(protocolReady\) refreshRoundHistory/);
-  assert.match(main, /document\.body\.dataset\.route !== 'rounds'\) return;\s*void refreshRoundStats\(\);\s*if \(protocolReady/);
-  assert.match(main, /if \(route === 'rounds'\) \{\s*void refreshRoundStats\(\);\s*if \(protocolReady\) refreshRoundHistory/);
+  assert.match(main, /if \(target === 'rounds'\) \{[\s\S]*?void refreshRoundStats\(\);[\s\S]*?refreshRoundHistory\(\{ force: true \}\);/);
+  assert.match(main, /document\.body\.dataset\.route !== 'rounds'\) return;\s*void refreshRoundStats\(\);\s*if \(!document\.querySelector/);
+  assert.match(main, /if \(route === 'rounds'\) \{\s*void refreshRoundStats\(\);\s*refreshRoundHistory\(\{ force: true \}\);/);
   assert.match(main, /const refreshRoundStats = async \(\) => \{[\s\S]*loadIndexedRoundStats\(\)[\s\S]*renderRoundMetrics\(\)/);
+});
+
+test('visible history winner counts use one indexed batch instead of per-round RPC reads', () => {
+  assert.match(indexedReader, /export async function loadIndexedWinnerCounts/);
+  assert.match(indexedReader, /from\('mine_round_bets'\)[\s\S]*\.in\('round_id', ids\)/);
 });

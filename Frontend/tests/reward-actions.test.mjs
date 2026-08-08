@@ -31,8 +31,16 @@ test('result and miners card resolve through independent bounded indexes', () =>
   assert.match(mine, /loadLatestPlayedSettledRoundId\(roundId\)/);
   assert.match(mine, /const resolvedId = BigInt\(resolvedRoundId\)/);
   assert.match(mine, /state\.lastResolved = \{ roundId: resolvedId, \.\.\.round \}/);
-  assert.match(mine, /state\.winnerDisplayUntil = nowSeconds\(\) \+ WINNER_DISPLAY_DURATION/);
+  assert.doesNotMatch(mine, /winnerDisplayUntil/);
   assert.match(mine, /state\.lastPlayedResolved = participantRound/);
+});
+
+test('round refreshes cannot publish an old board after the schedule rolls', () => {
+  assert.match(mine, /const requestedRoundId = BigInt\(state\.roundId\)/);
+  assert.match(mine, /roundRefreshRequest\?\.roundId === requestedRoundId/);
+  assert.match(mine, /if \(state\.roundId !== requestedRoundId\) return/);
+  assert.match(mine, /state\.roundId !== requestedRoundId \|\| state\.account !== requestedAccount/);
+  assert.match(mine, /if \(roundRefreshRequest === request\) roundRefreshRequest = null/);
 });
 
 test('wallet changes clear another wallet\'s actionable receipt state immediately', () => {

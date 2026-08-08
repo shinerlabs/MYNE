@@ -136,18 +136,21 @@ export const roundPresentation = (phase) => ({
 export const displayedWinningRound = ({
   phase,
   protocolPaused = false,
+  roundId = null,
   currentRound = null,
   lastResolved = null,
-  winnerDisplayUntil = 0n,
-  currentTime = nowSeconds(),
 }) => {
   if (protocolPaused) {
     if (currentRound?.resolved) return currentRound;
     if (lastResolved?.resolved) return lastResolved;
     return null;
   }
-  if (roundPresentation(phase).showWinningTile && currentRound?.resolved) return currentRound;
-  return lastResolved?.resolved && currentTime < winnerDisplayUntil ? lastResolved : null;
+  const isExactCurrentRound = currentRound?.resolved
+    && roundId !== null
+    && currentRound.id !== null
+    && currentRound.id !== undefined
+    && BigInt(currentRound.id) === BigInt(roundId);
+  return roundPresentation(phase).showWinningTile && isExactCurrentRound ? currentRound : null;
 };
 
 if (BETTING_DURATION + RESOLUTION_COUNTDOWN_DURATION + WINNER_DISPLAY_DURATION !== ROUND_DURATION) {
