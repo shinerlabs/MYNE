@@ -3433,6 +3433,46 @@ body[data-route="stake"] .staking-dashboard .stake-estimate-values .stake-estima
   transition: opacity .16s ease, transform .16s ease;
 }
 
+/* A connected miner should never have to hunt for the primary action. Availability is distinct
+   from a complete wager: connected + active turns the button white, while `.ready` continues to
+   mean the tile and amount inputs are valid. Paused and disconnected states retain the quiet
+   neutral surface. */
+html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled),
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) {
+  background: #f3f3f4 !important;
+  color: #09090b !important;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, .9),
+    0 10px 26px rgba(0, 0, 0, .28) !important;
+}
+
+html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled) > span,
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) > span {
+  color: #09090b !important;
+  font-weight: 850 !important;
+}
+
+html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled) .mine-button-mark,
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) .mine-button-mark {
+  background: rgba(0, 0, 0, .075) !important;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .09) !important;
+  opacity: 1 !important;
+}
+
+html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled) .mine-button-mark img,
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled) .mine-button-mark img {
+  filter: none !important;
+}
+
+html body[data-route="mine"] .deploy-panel > #deploy.mine-available:not(:disabled):is(:hover, :focus-visible),
+html body[data-route="mine"] .deploy-panel > #deploy.ready:not(:disabled):is(:hover, :focus-visible) {
+  background: #fff !important;
+  box-shadow:
+    inset 0 1px #fff,
+    0 0 0 2px rgba(255, 255, 255, .18),
+    0 13px 30px rgba(0, 0, 0, .34) !important;
+}
+
 body[data-route="stake"] .staking-dashboard .stake-estimate-card:is(:hover, :focus-visible) .stake-estimate-usd {
   opacity: 1;
   transform: translateY(0);

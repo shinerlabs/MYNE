@@ -206,6 +206,14 @@ test('collapsing Social preserves Mine board and control tracks', () => {
   assert.match(fitStyles, /\.workspace\.page-view\.active\.chat-hidden > \.chat-panel \{[\s\S]*display:\s*flex !important;[\s\S]*visibility:\s*hidden !important/);
 });
 
+test('connected miners get an unmistakable primary Mine action', () => {
+  assert.match(source, /const mineAvailable = Boolean\(chain\.state\.account\) && protocolReady && !protocolPaused/);
+  assert.match(source, /const ready = mineAvailable && selected\.size > 0 && entered > 0 && autoFundingReady/);
+  assert.match(source, /deploy\.classList\.toggle\('mine-available', mineAvailable\)/);
+  assert.match(fitStyles, /#deploy\.mine-available:not\(:disabled\)[\s\S]*background:\s*#f3f3f4 !important;[\s\S]*color:\s*#09090b !important/);
+  assert.match(fitStyles, /#deploy\.mine-available:not\(:disabled\)[\s\S]*\.mine-button-mark img[\s\S]*filter:\s*none !important/);
+});
+
 test('Rounds and About reserve the fixed footer and own their internal overflow', () => {
   assert.match(fitStyles, /\.feature-shell\[data-page="rounds"\]\.page-view\.active \{[\s\S]*grid-template-rows:[\s\S]*minmax\(0, 1fr\) !important/);
   assert.match(fitStyles, /body\[data-route="rounds"\] \.feature-shell\[data-page="rounds"\]\.page-view\.active \{[\s\S]*clamp\(64px, 9dvh, 78px\)[\s\S]*row-gap:\s*12px !important/);

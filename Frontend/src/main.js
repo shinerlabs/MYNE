@@ -2795,8 +2795,10 @@ const updateMine = () => {
 
   const deploy = document.querySelector('#deploy');
   const protocolPaused = chain.state.protocolPaused === true;
-  const ready = protocolReady && !protocolPaused && selected.size > 0 && entered > 0 && autoFundingReady;
+  const mineAvailable = Boolean(chain.state.account) && protocolReady && !protocolPaused;
+  const ready = mineAvailable && selected.size > 0 && entered > 0 && autoFundingReady;
   // A manual action during reveal becomes a one-round keeper queue for the next open round.
+  deploy.classList.toggle('mine-available', mineAvailable);
   deploy.classList.toggle('ready', ready);
   // Clickable even when "not ready", so mine() can explain what's missing via a toast
   // instead of the button silently doing nothing.
