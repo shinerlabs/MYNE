@@ -585,14 +585,31 @@ html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat >
 }
 
 @media (hover: hover) {
-  html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat:is(:hover, :focus-visible) > span {
+  html body[data-route="mine"] .round-summary.motherlode-inline > :is(.deployed-stat, .motherlode-stat) > span {
+    position: relative !important;
     font-size: 9px !important;
     letter-spacing: .15em !important;
   }
 
-  html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat:is(:hover, :focus-visible) > span::after {
-    content: none !important;
-    display: none !important;
+  html body[data-route="mine"] .round-summary.motherlode-inline > :is(.deployed-stat, .motherlode-stat):is(:hover, :focus-visible) > span {
+    color: transparent !important;
+    font-size: 9px !important;
+    letter-spacing: .15em !important;
+  }
+
+  html body[data-route="mine"] .round-summary.motherlode-inline > :is(.deployed-stat, .motherlode-stat):is(:hover, :focus-visible) > span::after {
+    content: attr(data-hover-label) !important;
+    display: block !important;
+    position: absolute !important;
+    inset: 0 auto auto 50% !important;
+    transform: translateX(-50%) !important;
+    color: #8f9198 !important;
+    font: inherit !important;
+    font-size: 9px !important;
+    font-weight: inherit !important;
+    letter-spacing: .15em !important;
+    line-height: inherit !important;
+    white-space: nowrap !important;
   }
 }
 

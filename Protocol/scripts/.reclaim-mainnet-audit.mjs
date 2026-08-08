@@ -21,6 +21,8 @@ const pda = (seed, ...extra) => PublicKey.findProgramAddressSync(
   PROGRAM_ID,
 )[0];
 const configAddress = pda('config');
+const miningPoolAddress = pda('mining_pool');
+const stakePoolAddress = pda('stake_pool');
 const config = await program.account.protocolConfig.fetch(configAddress);
 const genesisHash = await connection.getGenesisHash();
 assert.equal(genesisHash, '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d');
@@ -110,6 +112,7 @@ for (let index = 0; index < receiptInfos.length; index += 1) {
 
 const beneficiaries = [...new Set(uniqueReceipts.map((row) => row.bettor))].map((value) => new PublicKey(value));
 const stakeAddresses = beneficiaries.map((authority) => pda('stake_position', authority.toBuffer()));
+const minerAddresses = beneficiaries.map((authority) => pda('miner', authority.toBuffer()));
 const stakeStates = await program.account.stakePosition.fetchMultiple(stakeAddresses);
 const stakes = beneficiaries.flatMap((authority, index) => stakeStates[index] ? [{
   authority: authority.toBase58(),
@@ -152,6 +155,30 @@ const excessRounds = rounds.filter((round) => round.excess > 0).map((round) => (
   prizeLamports: round.prizeLamports,
   motherlodePayoutLamports: round.motherlodePayoutLamports,
 }));
+const unprocessedReceiptAddresses = unprocessed.map((receipt) => receipt.address);
+const unprocessedRoundIds = [...new Set(unprocessed.map((receipt) => receipt.roundId))];
+const unprocessedAuthorities = [...new Set(unprocessed.map((receipt) => receipt.authority))];
+const authorityIndexes = unprocessedAuthorities.map((value) => (
+  beneficiaries.findIndex((authority) => authority.toBase58() === value)
+));
+const upgradeForkCloneAddresses = [...new Set([
+  configAddress.toBase58(),
+  miningPoolAddress.toBase58(),
+  stakePoolAddress.toBase58(),
+  ...unprocessedRoundIds.map((id) => addresses[id].toBase58()),
+  ...unprocessedReceiptAddresses,
+  ...unprocessedAuthorities,
+  ...authorityIndexes.map((index) => minerAddresses[index].toBase58()),
+  ...authorityIndexes.map((index) => stakeAddresses[index].toBase58()),
+])];
+
+if (process.env.RECLAIM_AUDIT_ADDRESSES_ONLY === '1') {
+  console.log(JSON.stringify({
+    unprocessedReceiptAddresses,
+    upgradeForkCloneAddresses,
+  }));
+  process.exit(0);
+}
 
 console.log(JSON.stringify({
   genesisHash,
@@ -175,6 +202,8 @@ console.log(JSON.stringify({
   receiptRentLamports: sum(receipts, 'rent').toString(),
   processedReceiptRentLamports: sum(processedOpen, 'rent').toString(),
   unprocessedReceiptRounds: [...new Set(unprocessed.map((receipt) => receipt.roundId))].sort((a, b) => a - b),
+  unprocessedReceiptAddresses,
+  upgradeForkCloneAddresses,
   onchainReceiptDeficits: onchainReceiptDeficits.map((round) => ({
     id: round.id,
     total: round.totalReceipts,

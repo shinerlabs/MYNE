@@ -513,10 +513,11 @@ const deployedTokenLabel = deployedStat.querySelector('small');
 deployedStat.classList.add('deployed-stat');
 deployedHeading.dataset.solLabel = '≈0.00 SOL';
 deployedHeading.dataset.usdLabel = '≈— USDC';
-deployedHeading.textContent = deployedHeading.dataset.usdLabel;
+deployedHeading.textContent = 'DEPLOYED';
 deployedStat.setAttribute('aria-label', 'Deployed 0.00 SOL; USDC quote unavailable');
 deployedTokenValue.classList.add('deployed-token-value');
 deployedTokenValue.insertAdjacentHTML('afterend', `<strong class="deployed-usd-value" aria-hidden="true">${usdcIcon('summary-usdc')}<span>—</span></strong>`);
+deployedStat.tabIndex = 0;
 deployedTokenLabel.textContent = '';
 deployedTokenLabel.hidden = true;
 deployedTokenLabel.setAttribute('aria-hidden', 'true');
@@ -535,13 +536,13 @@ motherlodeTokenLabel.classList.add('motherlode-secondary');
 motherlodeStat.tabIndex = 0;
 roundSummary.classList.add('motherlode-inline');
 
-// Deployed uses the former heading position for the inverse quote. It never
-// creates a second line beneath the card and the selected headline currency
-// remains fixed until the explicit SOL/USDC switch changes it.
+// Hover/focus replaces the heading text with the inverse quote in the exact
+// same typographic box. The selected headline currency never changes under
+// the pointer and no second quote row is rendered beneath it.
 const syncSummaryHoverLabels = () => {
   const selectedUsd = mineDisplayCurrency === 'usd';
   const deployedQuote = selectedUsd ? deployedHeading.dataset.solLabel : deployedHeading.dataset.usdLabel;
-  if (deployedQuote) deployedHeading.textContent = deployedQuote;
+  if (deployedQuote) deployedHeading.dataset.hoverLabel = deployedQuote;
   // Motherlode keeps its established label-only hover quote.
   const motherlodeQuote = selectedUsd ? motherlodeHeading.dataset.solLabel : motherlodeHeading.dataset.usdLabel;
   if (motherlodeQuote) motherlodeHeading.dataset.hoverLabel = motherlodeQuote;

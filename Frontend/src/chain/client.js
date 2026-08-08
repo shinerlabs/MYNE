@@ -224,5 +224,8 @@ export function readableError(error) {
   if (/extension-created tab.*blocked|popup|pop-up|user activation|user gesture|notallowederror|window.*(?:blocked|open)/i.test(detail)) {
     return 'Wallet popup was blocked — click Connect and choose your wallet again';
   }
+  if (/\b0x177c\b|ProtocolPaused|protocol is paused/i.test(detail)) {
+    return 'Mining is paused for maintenance. Your rewards remain recorded; Claim SOL is available, while MYNE claim and burn require the claim-safe program release.';
+  }
   return (error?.message || 'Transaction failed').split('\n')[0];
 }

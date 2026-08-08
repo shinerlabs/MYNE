@@ -2246,9 +2246,9 @@ pub mod myne_protocol {
     /// The MYNE represented by `miner.unclaimed_myne` has not been minted yet, so this path
     /// records the same permanent virtual burn used by Auto-burn instead of minting tokens only
     /// to burn them in a second instruction. No claim fee is taken: no liquid MYNE leaves the
-    /// protocol, and the authority can only increase its own canonical stake position.
+    /// protocol, and the authority can only increase its own canonical stake position. This is
+    /// an earned-reward exit, so an emergency mining pause must not trap it.
     pub fn burn_unclaimed_myne(ctx: Context<BurnUnclaimedMyne>) -> Result<()> {
-        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         require_eq!(
             ctx.accounts.config.version,
             CURRENT_VERSION,
@@ -2282,8 +2282,10 @@ pub mod myne_protocol {
         Ok(())
     }
 
+    /// Withdraws already-earned mining MYNE. The pause switch blocks new protocol exposure, not
+    /// owner-authorized reward exits; all canonical PDA, mint, token-account and fee constraints
+    /// remain enforced by `ClaimMyne` and this handler.
     pub fn claim_myne(ctx: Context<ClaimMyne>) -> Result<()> {
-        require!(!ctx.accounts.config.paused, MyneError::ProtocolPaused);
         require_eq!(
             ctx.accounts.config.version,
             CURRENT_VERSION,

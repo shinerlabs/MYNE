@@ -766,6 +766,22 @@ const poolBeforeReferredClaim = await program.account.miningPool.fetch(miningPoo
 const payerGross = miningShareValue(poolBeforeReferredClaim, minerState);
 const payerReferral = (payerGross * 1_000n) / 10_000n - (payerGross * 900n) / 10_000n;
 const adminBalanceBeforeReferredClaim = (await splToken.getAccount(provider.connection, adminFeeAccount)).amount;
+// Emergency pause stops new mining exposure but must never trap rewards that
+// were already earned. Exercise both liquid Claim All and permanent Stake +
+// Burn while the protocol is paused; their canonical signer/PDA constraints
+// remain unchanged.
+await program.methods
+  .setPaused(true)
+  .accounts({
+    config,
+    liquidityGate: null,
+    liquidityPool: null,
+    baseVault: null,
+    quoteVault: null,
+    admin: upgradeAuthority.publicKey,
+  })
+  .signers(upgradeAuthoritySigners)
+  .rpc();
 await program.methods
   .claimMyne()
   .accounts({
@@ -843,6 +859,18 @@ assert.equal(
   supplyBeforeRewardBurn,
   'The fee-free virtual burn path never mints liquid MYNE',
 );
+await program.methods
+  .setPaused(false)
+  .accounts({
+    config,
+    liquidityGate,
+    liquidityPool: localPool,
+    baseVault: null,
+    quoteVault: null,
+    admin: upgradeAuthority.publicKey,
+  })
+  .signers(upgradeAuthoritySigners)
+  .rpc();
 
 const adminBalanceBeforeFallback = (await splToken.getAccount(provider.connection, adminFeeAccount)).amount;
 const rogueTokens = await getOrCreateAssociatedTokenAccount(provider.connection, payer, mint, rogue.publicKey);

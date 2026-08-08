@@ -39,3 +39,10 @@ test('wallet popup failures are readable even when an adapter wraps the cause', 
   );
   assert.equal(readableError(new Error('User rejected request')), 'Transaction rejected');
 });
+
+test('paused-program errors explain the claim-safe maintenance boundary', () => {
+  assert.equal(
+    readableError(new Error('Transaction simulation failed: custom program error: 0x177c')),
+    'Mining is paused for maintenance. Your rewards remain recorded; Claim SOL is available, while MYNE claim and burn require the claim-safe program release.',
+  );
+});
