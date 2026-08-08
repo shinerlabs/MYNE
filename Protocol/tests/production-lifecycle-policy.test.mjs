@@ -17,8 +17,8 @@ test('receipt and randomness cleanup require a verified canonical archive', asyn
   assert.match(lifecycle, /archive_verified=eq\.true/);
   assert.match(lifecycle, /program\.methods\.closeReceipt/);
   assert.match(lifecycle, /program\.methods\.closeRound/);
-  assert.match(lifecycle, /receipts\.length <= chainReceiptCount/);
-  assert.match(lifecycle, /state: 'awaiting-indexed-receipts'/);
+  assert.match(lifecycle, /BigInt\(receipts\.length\) <= chainReceiptCount/);
+  assert.doesNotMatch(lifecycle, /state: 'awaiting-indexed-receipts'/);
   assert.match(lifecycle, /Indexed receipt count exceeds the authoritative chain count/);
   assert.match(lifecycle, /total_receipts=gt\.0&processed_receipts=eq\.0/);
   assert.match(lifecycle, /order=round_id\.desc&limit=25/);
@@ -29,6 +29,40 @@ test('receipt and randomness cleanup require a verified canonical archive', asyn
   assert.match(lifecycle, /const unique = new Map\(\)/);
   assert.match(lifecycle, /LIFECYCLE_RECOVERY_CLOSE_ONLY/);
   assert.match(lifecycle, /if \(!recoveryCloseOnly[\s\S]*settleOrRefund/);
+  assert.match(lifecycle, /ROUND_ACCOUNT_RETENTION_SECONDS \|\| 130/);
+  assert.match(lifecycle, /resultRetentionElapsed[\s\S]*closeReceipts/);
+  assert.match(lifecycle, /resultRetentionElapsed[\s\S]*program\.methods\.closeRound/);
+
+  const recovery = lifecycle.slice(
+    lifecycle.indexOf('async function recoverReceiptRows'),
+    lifecycle.indexOf('async function fetchReceiptStates'),
+  );
+  assert.match(recovery, /getProgramAccounts\(PROGRAM_ID, scanOptions\)/);
+  assert.match(recovery, /program\.coder\.accounts\.decode\('BetReceipt', data\)/);
+  assert.match(recovery, /deriveReceiptPda/);
+  assert.doesNotMatch(recovery, /\brest\(/, 'confirmed recovery must not write to the projection');
+  assert.match(lifecycle, /receiptSource = 'confirmed-round-scan'/);
+});
+
+test('server-mode lifecycle loads Switchboard only for a live historical randomness close', async () => {
+  const lifecycle = await readFile(
+    new URL('../scripts/round-lifecycle-keeper.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.doesNotMatch(lifecycle, /^import .*@switchboard-xyz\/on-demand/m);
+  assert.doesNotMatch(lifecycle, /^import .*production-switchboard-env/m);
+  assert.match(lifecycle, /import\('@switchboard-xyz\/on-demand'\)/);
+  assert.match(lifecycle, /import\('\.\/production-switchboard-env\.mjs'\)/);
+
+  const closeRandomness = lifecycle.slice(
+    lifecycle.indexOf('async function maybeCloseRandomness'),
+    lifecycle.indexOf('async function processRound'),
+  );
+  assert.ok(
+    closeRandomness.indexOf('getAccountInfo(randomness, commitment)')
+      < closeRandomness.indexOf('loadSwitchboardCloseContext()'),
+    'missing or ineligible historical randomness must not initialize Switchboard',
+  );
 });
 
 test('lifecycle queue prioritizes recent rewards, deduplicates rounds and walks history', async () => {
@@ -77,7 +111,9 @@ test('indexer compares canonical history to the on-chain archive attestation', a
   assert.match(indexer, /Buffer\.from\(attestedState\.archiveHash\)\.toString\('hex'\)/);
   assert.match(indexer, /archive_verified: true/);
   assert.match(indexer, /Mainnet indexer requires ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1/);
-  assert.match(indexer, /createHash\('sha256'\)/);
+  assert.match(indexer, /INDEXER_ID = `\$\{PROGRAM_ID\.toBase58\(\)\}:rounds:v2`/);
+  assert.match(indexer, /p_lease_name: `round-indexer:\$\{PROGRAM_ID\.toBase58\(\)\}:rounds:v2`/);
+  assert.match(indexer, /One-time endpoint-keyed cursor adoption/);
   assert.match(indexer, /resolved=eq\.true&buyback_completed=eq\.true/);
   assert.match(indexer, /resolved=eq\.false&select=\*/);
   assert.doesNotMatch(indexer, /archive_verified=eq\.false&closed_signature=is\.null&select=\*&order=round_id\.asc&limit=20/);
@@ -104,6 +140,9 @@ test('buyback inspects the serialized swap transaction before signing', async ()
   assert.match(keeper, /CONFIRM_ABANDONED_BUYBACK/);
   assert.match(keeper, /acquire_mine_keeper_lease/);
   assert.match(keeper, /buyback-lease-held-by-another-instance/);
+  assert.match(keeper, /BUYBACK_LEASE_HOLDER/);
+  assert.match(keeper, /runWorkerTick\(\{[\s\S]*worker: 'buyback-keeper'/);
+  assert.match(keeper, /BUYBACK_TICK_TIMEOUT_MS must be between 15000 and 600000/);
 });
 
 test('buyback singleton fencing is atomic and service-role only', async () => {

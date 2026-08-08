@@ -41,7 +41,18 @@ evidence only after the final clean artifact is built, hashed and exercised by t
 - Per-round `total_receipts`, `processed_receipts` and `closed_receipts` counters. Processed receipts close only after archival, and rent returns to the immutable user beneficiary.
 - A round can close only after every receipt is processed and closed, the 1% buyback is complete, and `claimed_lamports` exactly equals the prize plus any Motherlode SOL payout. Round rent returns only to its recorded payer.
 - A production event index stores round, receipt, settlement, randomness and buyback transaction evidence. The randomness authority commits a deterministic SHA-256 snapshot on-chain before cleanup.
-- The lifecycle keeper uses indexed receipt addresses, batched exact-account reads and measured transactions. It closes Switchboard randomness accounts only after the configured verification window (24 hours by default, never below one hour).
+- The finalized round projection is rebuildable from canonical transaction histories. It publishes
+  `projection_complete=true` only after a database-side digest matches all 25 on-chain tile SOL
+  totals, all 25 receipt counts and the total/processed/closed counters. Stable program/schema
+  cursors survive RPC failover, and a persistent bounded historical-gap cursor eventually repairs
+  wholly missing old rows.
+- The lifecycle keeper uses indexed receipt addresses, batched exact-account reads and measured
+  transactions. When the on-chain provider is Switchboard, it closes those randomness accounts
+  only after the configured verification window (24 hours by default, never below one hour); this
+  external-account cleanup is not part of current server commit-reveal mode.
+- Settlement and reward accrual are immediate, while the default 130-second Round-account retention
+  preserves the direct-chain winner/miner recovery window across at least two round cycles before
+  receipt/Round rent cleanup.
 - The buyback keeper is dry-run by default, accepts only a direct Jupiter route through the exact
   registered official Meteora DAMM v2 or DLMM pool, simulates swaps/burns, persists crash-recovery
   state and indexes each swap/burn signature before round archival.
@@ -62,7 +73,9 @@ evidence only after the final clean artifact is built, hashed and exercised by t
   inspect the compiled SBF marker rather than trusting a source grep.
 - The zero-byte Agave 3.1.10 syscall metadata was repaired from a version-locked repository file. A clean Anchor SBF build now emits neither the syscall warning nor the earlier stack-overflow warning.
 - The operational model uses three distinct continuously funded roles: (1) admin-fee/fallback,
-  (2) Switchboard/round/indexer/lifecycle and (3) buyback. The deployer/upgrade/admin key is a
+  (2) the configured randomness provider/round/indexer/lifecycle role and (3) buyback. The
+  current provider is server commit-reveal; Switchboard remains supported only when selected
+  on-chain. The deployer/upgrade/admin key is a
   separate offline authority funded only for reviewed administrative transactions. Temporary-account
   closure and batching provide the savings; revenue and keeper roles are not aliased.
 - Canonical PDAs are derived offline and created by their initialization instructions; they are
@@ -124,21 +137,36 @@ is tied to a clean public commit and external release manifest:
    `20260807142000_chat_admin_provisioning.sql`,
    `20260808090000_server_randomness_proofs.sql`,
    `20260808113000_burn_stats.sql`,
-   `20260808120000_receipt_reward_accrual.sql` and
-   `20260808123000_empty_round_stats.sql`, and
-   `20260808124500_keeper_lease_privileges.sql`. Deploy the indexer and all three supervised
-   keepers with durable storage, alerts and restricted service-role credentials. Set
+   `20260808120000_receipt_reward_accrual.sql`,
+   `20260808123000_empty_round_stats.sql`,
+   `20260808124500_keeper_lease_privileges.sql`,
+   `20260808130000_round_realtime.sql`,
+   `20260808133000_worker_schema_capabilities.sql`,
+   `20260808134500_round_projection_completeness.sql` and
+   `20260808135000_wallet_round_history.sql`, in that order. Require the final service-only
+   capability value `round-projection-v2`; `server-claims-v1` is only the historical marker installed
+   by the earlier `20260808133000` migration. Deploy the wallet-authenticated
+   `wallet-round-history` Edge Function, then deploy the indexer and all three supervised keepers
+   with durable storage, alerts and restricted service-role credentials. Set
    `ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1` and set
-   `REFERRAL_INDEXER_START_SLOT` to the program deployment slot in production.
-   Use the managed standby-to-live procedure in `WORKER_HOSTING.md`; a healthy standby deployment
-   is required evidence but is not permission to unpause.
+   `REFERRAL_INDEXER_START_SLOT` to the program deployment slot in production, and retain settled
+   Round accounts for `ROUND_ACCOUNT_RETENTION_SECONDS=130`.
+   Use the managed standby → observe → live procedure in `WORKER_HOSTING.md`. Observe mode requires
+   `MYNE_WORKER_HOST_OBSERVE` to equal the program ID, starts only the project-only indexer and must
+   finish the forward/referral backfill plus a full historical-gap pass while paused. Health must
+   show a fresh successful projection tick, both stable cursors caught up, no reconciliation
+   failure and complete recovery-window projections. Standby/observe evidence is not permission to
+   unpause.
 4. **Server-randomness/Meteora canary.** While the protocol remains paused, switch only after the
    legacy queue is drained and the exact first managed round is recorded. Start the reviewed
    worker and verify commitment binding before opening the public betting interval. Exercise a
-   small bid, post-close future-slot lock, reveal/settle, winning-tile display, claim-vault receipt
-   processing, owner-signed SOL/MYNE claims, archive/cleanup, a direct-pool quote, tiny buyback swap
-   and verified burn using the exact production configuration. Re-pause immediately on any missed
-   preparation or proof.
+   played round through a small bid, post-close future-slot lock, reveal/settle, winning-tile
+   display, claim-vault receipt processing, owner-signed SOL/MYNE claims, archive/cleanup, a
+   direct-pool quote, tiny buyback swap and verified burn. Then run one empty round, which must
+   publish a winning tile and award zero MYNE. Both rows must become projection-complete, history
+   pagination must remain gap/duplicate free and `/healthz`, worker deadlines, stable cursors and
+   reconciliation must remain green through the following round. Re-pause immediately on any
+   missed preparation, proof, payout, display or projection invariant.
 5. **Independent review.** An unaffiliated Solana/Anchor security reviewer must assess the exact artifact and the scope in `INDEPENDENT_SECURITY_REVIEW_SCOPE.md`. The project team’s own review cannot satisfy this gate.
 6. **Legal review.** Paid chance-based mining and token rewards require jurisdiction-specific advice before public funds are accepted.
 7. **Canonical mint identity.** Deploy the checked-in token metadata JSON, SVG master and 1024px PNG
@@ -146,10 +174,11 @@ is tied to a clean public commit and external release manifest:
    confirmation before transferring SPL mint authority to the config PDA. Read back and record the
    metadata PDA, name, symbol, URI, token standard, update authority and transaction signature.
 
-Switchboard randomness accounts are closed by the implemented lifecycle keeper after the
-verification window. Its auxiliary lookup-table rent is a separate residual operational item:
-post-cooldown closure needs the ephemeral request signer retained in a production secret manager.
-That secret-manager integration must be reviewed before public activation; private request keys
-must not be placed in source control or a plain local journal.
+If a future reviewed configuration selects Switchboard, its randomness accounts are closed by the
+implemented lifecycle keeper after the verification window. Its auxiliary lookup-table rent is a
+separate residual operational item: post-cooldown closure needs the ephemeral request signer
+retained in a production secret manager. This does not apply to the current server commit-reveal
+provider. Any future Switchboard secret-manager integration must be reviewed before activation;
+private request keys must not be placed in source control or a plain local journal.
 
 Follow `MAINNET_LAUNCH_RUNBOOK.md`. “Deployment candidate” is not a guarantee of safety and is not approval to unpause Mainnet.

@@ -1,4 +1,7 @@
-import { supabase, isSocialConfigured } from '../social/config.js';
+import {
+  FUNCTIONS_URL, fetchJson, supabase, isSocialConfigured,
+} from '../social/config.js';
+import { getSession } from '../social/session.js';
 import { ROUND_DURATION } from './config.js';
 import { nowSeconds as chainNowSeconds } from './round.js';
 import { selectLatestVerifiedStakingRewardWindow } from './staking-apy.js';
@@ -33,11 +36,16 @@ import { intervalReward } from './round-rewards.js';
  */
 const ROUND_COLUMNS = [
   'round_id', 'resolved', 'winning_square', 'jackpot_hit', 'single_miner_round', 'winner',
+  'opened_at', 'betting_ends_at', 'settles_at', 'refund_at',
   'total_wager_wei::text', 'winner_total_wei::text', 'pot_for_winners_wei::text',
   'bullion_for_winners_wei::text', 'payout_mul_wad::text', 'solo_sample::text',
-  'total_receipts',
+  'total_receipts', 'processed_receipts', 'closed_receipts', 'buyback_completed',
+  'projection_complete', 'projection_version', 'source_slot',
+  'archive_verified', 'archive_hash', 'archived_at', 'closed_signature',
+  'settlement_signature', 'settlement_slot',
   // The randomness that decided the round — what the fairness row displays.
   'randomness_id', 'randomness_value::text', 'randomness_hex', 'randomness_commit_slot',
+  'randomness_provider_kind', 'randomness_commitment_hex',
 ].join(', ');
 
 /** One probe per session decides whether the table exists; no point retrying on every page. */
@@ -46,7 +54,7 @@ let available = null;
 const unwrap = (n) => (n === null || n === undefined ? 0n : BigInt(n));
 
 /** Postgres `numeric(78,0)` arrives as a string — BigInt keeps wei exact. */
-function fromRow(r) {
+export function indexedRoundFromRow(r) {
   const randomnessCommitSlotEncoded = r.randomness_commit_slot == null
     ? 0n
     : unwrap(r.randomness_commit_slot);
@@ -54,13 +62,25 @@ function fromRow(r) {
     commitSlot: randomnessCommitSlotEncoded,
     resolved: r.resolved,
   });
+  const indexedProvider = String(r.randomness_provider_kind ?? '').toLowerCase();
+  const serverRound = randomnessMeta.mode === 'server' || indexedProvider.includes('server');
+  const randomnessCommitment = serverRound
+    ? (normalizeProofHex(r.randomness_commitment_hex)
+      || commitmentHexFromAccount(r.randomness_id))
+    : null;
   return {
     roundId: BigInt(r.round_id),
     resolved: r.resolved,
     winningSquare: r.winning_square === null ? 0 : Number(r.winning_square),
     jackpotHit: r.jackpot_hit,
     singleMinerRound: r.single_miner_round,
-    singleMinerWinner: r.winner || '11111111111111111111111111111111',
+    singleMinerWinner: r.projection_complete === true && r.winner
+      ? r.winner
+      : '11111111111111111111111111111111',
+    openedAt: unwrap(r.opened_at),
+    bettingEndsAt: unwrap(r.betting_ends_at),
+    settlesAt: unwrap(r.settles_at),
+    refundAt: unwrap(r.refund_at),
     totalWager: unwrap(r.total_wager_wei),
     winnerTotal: unwrap(r.winner_total_wei),
     potForWinners: unwrap(r.pot_for_winners_wei),
@@ -68,12 +88,28 @@ function fromRow(r) {
     payoutMulWad: unwrap(r.payout_mul_wad),
     soloSample: unwrap(r.solo_sample),
     totalReceipts: unwrap(r.total_receipts),
-    randomnessId: randomnessMeta.mode === 'server' ? null : (r.randomness_id || null),
-    randomnessMode: randomnessMeta.mode,
-    randomnessState: randomnessMeta.state,
-    randomnessCommitment: randomnessMeta.mode === 'server'
-      ? commitmentHexFromAccount(r.randomness_id)
-      : null,
+    processedReceipts: unwrap(r.processed_receipts),
+    closedReceipts: unwrap(r.closed_receipts),
+    buybackCompleted: Boolean(r.buyback_completed),
+    projectionComplete: r.projection_complete === true,
+    projectionVersion: Number(r.projection_version ?? 0),
+    sourceSlot: r.source_slot == null ? null : unwrap(r.source_slot),
+    archiveVerified: Boolean(r.archive_verified),
+    archiveHash: r.archive_hash || null,
+    archivedAt: r.archived_at || null,
+    closedSignature: r.closed_signature || null,
+    settlementSignature: r.settlement_signature || null,
+    settlementSlot: r.settlement_slot == null ? null : unwrap(r.settlement_slot),
+    randomnessId: serverRound ? null : (r.randomness_id || null),
+    randomnessMode: serverRound ? 'server' : randomnessMeta.mode,
+    randomnessState: serverRound
+      ? (r.resolved
+        ? 'settled'
+        : randomnessMeta.mode === 'server'
+          ? randomnessMeta.state
+          : randomnessCommitment ? 'commitment-bound' : 'commitment-pending')
+      : randomnessMeta.state,
+    randomnessCommitment,
     // Prefer the byte-preserving hex form. Decimal remains compatible with rows indexed before
     // randomness_hex was added and is normalized by chain/randomness-proof.js.
     randomnessValue: r.randomness_hex || (r.randomness_value ? unwrap(r.randomness_value) : null),
@@ -104,17 +140,24 @@ function randomnessProofFromRow(row) {
   const meta = describeRandomnessRound({ commitSlot: encodedSlot, resolved: row.resolved });
   const indexedProvider = String(row.randomness_provider_kind ?? row.randomness_provider ?? '').toLowerCase();
   const mode = meta.mode === 'server' || indexedProvider.includes('server') ? 'server' : 'switchboard';
+  const commitmentHex = mode === 'server'
+    ? (normalizeProofHex(row.randomness_commitment_hex ?? row.commitment_hex)
+      || commitmentHexFromAccount(row.randomness_id))
+    : null;
   const entropySlot = optionalBig(row.randomness_entropy_slot ?? row.entropy_slot)
     ?? (mode === 'server' ? meta.slot : null);
   return {
     roundId: BigInt(row.round_id),
     mode,
-    state: mode === 'server' ? meta.state : (row.resolved ? 'settled' : meta.state),
+    state: mode === 'server'
+      ? (row.resolved
+        ? 'settled'
+        : meta.mode === 'server'
+          ? meta.state
+          : commitmentHex ? 'commitment-bound' : 'commitment-pending')
+      : (row.resolved ? 'settled' : meta.state),
     randomnessAccount: mode === 'switchboard' ? (row.randomness_id || null) : null,
-    commitmentHex: mode === 'server'
-      ? (normalizeProofHex(row.randomness_commitment_hex ?? row.commitment_hex)
-        || commitmentHexFromAccount(row.randomness_id))
-      : null,
+    commitmentHex,
     revealHex: normalizeProofHex(row.randomness_reveal_hex ?? row.reveal_hex),
     targetSlot: optionalBig(row.randomness_target_slot ?? row.target_slot),
     entropySlot,
@@ -253,31 +296,78 @@ export async function loadIndexedRoundStats() {
  * @returns {Promise<null|{rows, total, filteredTotal, summary}>} null → caller should use chain
  */
 export async function loadIndexedRounds({
-  page, pageSize, filter, currentRoundId = null, offset = null, excludeRoundId = null,
+  page, pageSize, filter, currentRoundId = null, offset = null,
+  excludeRoundId = null, excludeRoundIds = [],
 }) {
   if (!(await indexAvailable())) return null;
   try {
     const from = offset ?? page * pageSize;
+    const excluded = [...new Set([
+      ...(excludeRoundIds || []),
+      ...(excludeRoundId === null ? [] : [excludeRoundId]),
+    ].map(String))];
 
-    let listQuery = applyFilter(
+    const applyBounds = (query) => {
+      let bounded = query;
+      if (currentRoundId !== null) bounded = bounded.lte('round_id', String(currentRoundId));
+      // Recent direct-chain rows are a replacement surface, not extra rows. Exclude every
+      // authoritative id before SQL filtering/counting so a stale indexed state cannot survive
+      // a filter merely because its replacement no longer matches that filter.
+      for (const roundId of excluded) bounded = bounded.neq('round_id', roundId);
+      return bounded;
+    };
+
+    let listQuery = applyBounds(applyFilter(
       supabase.from('mine_rounds').select(ROUND_COLUMNS, { count: 'exact' }),
       filter,
-    );
-    if (currentRoundId !== null) listQuery = listQuery.lte('round_id', String(currentRoundId));
-    if (excludeRoundId !== null) listQuery = listQuery.neq('round_id', String(excludeRoundId));
+    ));
     listQuery = listQuery
       .order('round_id', { ascending: false })
       .range(from, from + pageSize - 1);
 
-    const [list, stats] = await Promise.all([listQuery, loadIndexedRoundStats()]);
-    if (list.error || !stats) return null;
+    // `filteredTotal` and `total` must describe the same bounded/excluded virtual dataset as
+    // the rows. The lifetime stats table cannot provide that count when a recent chain row is
+    // replacing (or removing) its stale indexed counterpart.
+    const totalQuery = filter === 'all'
+      ? null
+      : applyBounds(supabase.from('mine_rounds').select('round_id', { count: 'exact' }))
+        .range(0, 0);
+    const [list, stats, allRows] = await Promise.all([
+      listQuery,
+      loadIndexedRoundStats(),
+      totalQuery ?? Promise.resolve(null),
+    ]);
+    if (list.error || !stats || allRows?.error) return null;
+    const total = filter === 'all' ? (list.count ?? 0) : (allRows?.count ?? 0);
 
     return {
-      rows: (list.data ?? []).map(fromRow),
+      rows: (list.data ?? []).map(indexedRoundFromRow),
       filteredTotal: list.count ?? 0,
-      total: stats.count,
-      summary: stats,
+      total,
+      summary: { ...stats, count: total },
     };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bounded index metadata for the direct-chain overlay. Those recent ids are
+ * deliberately excluded from the paged query, but their participant health
+ * and derived solo winner still belong to the finalized projection.
+ */
+export async function loadIndexedRoundProjectionRows(roundIds) {
+  const ids = [...new Set((roundIds || []).map(String))];
+  if (!ids.length) return [];
+  if (!(await indexAvailable())) return null;
+  try {
+    const { data, error } = await supabase
+      .from('mine_rounds')
+      .select(ROUND_COLUMNS)
+      .in('round_id', ids)
+      .order('round_id', { ascending: false });
+    if (error) return null;
+    return (data ?? []).map(indexedRoundFromRow);
   } catch {
     return null;
   }
@@ -292,8 +382,9 @@ export async function loadIndexedRounds({
  * counts every participant in the round; Split/Solo count wallets on the winning tile only.
  */
 export function winnerCountsFromIndexedBets(rounds, bets) {
-  const participants = new Map(rounds.map((round) => [String(round.roundId), new Set()]));
-  const byId = new Map(rounds.map((round) => [String(round.roundId), round]));
+  const completeRounds = rounds.filter((round) => round.projectionComplete === true);
+  const participants = new Map(completeRounds.map((round) => [String(round.roundId), new Set()]));
+  const byId = new Map(completeRounds.map((round) => [String(round.roundId), round]));
   for (const bet of bets) {
     const key = String(bet.round_id);
     const round = byId.get(key);
@@ -303,7 +394,9 @@ export function winnerCountsFromIndexedBets(rounds, bets) {
   }
   return new Map(rounds.map((round) => [
     String(round.roundId),
-    BigInt(participants.get(String(round.roundId))?.size ?? 0),
+    round.projectionComplete === true
+      ? BigInt(participants.get(String(round.roundId))?.size ?? 0)
+      : null,
   ]));
 }
 
@@ -311,14 +404,19 @@ export async function loadIndexedWinnerCounts(rounds) {
   if (!rounds.length) return new Map();
   if (!(await indexAvailable())) return null;
   try {
-    const ids = rounds.map((round) => String(round.roundId));
+    const ids = rounds
+      .filter((round) => round.projectionComplete === true)
+      .map((round) => String(round.roundId));
+    if (!ids.length) return winnerCountsFromIndexedBets(rounds, []);
     const bets = [];
     for (let offset = 0; ; offset += PAGE) {
       const { data: chunk, error } = await supabase
         .from('mine_round_bets')
-        .select('round_id,bettor,square')
+        .select('round_id,receipt,bettor,square')
         .in('round_id', ids)
         .order('round_id', { ascending: false })
+        .order('receipt', { ascending: true })
+        .order('square', { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) return null;
       bets.push(...(chunk ?? []));
@@ -328,6 +426,98 @@ export async function loadIndexedWinnerCounts(rounds) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Parse the wallet-owned, display-only history response without allowing the
+ * endpoint to decorate any round outside the caller's exact visible window.
+ */
+export function walletRoundHistoryFromRows(rows, requestedRoundIds) {
+  if (!Array.isArray(rows)) return null;
+  const requested = new Set((requestedRoundIds || []).map(String));
+  if (requested.size > 50) return null;
+  const result = new Map();
+  for (const row of rows) {
+    const roundId = String(row?.roundId ?? '');
+    const position = String(row?.positionLamports ?? '');
+    const winningReceipts = String(row?.winningReceipts ?? '');
+    const processedWinningReceipts = String(row?.processedWinningReceipts ?? '');
+    if (!requested.has(roundId) || result.has(roundId)
+      || !/^(?:0|[1-9][0-9]*)$/.test(position)
+      || !/^(?:0|[1-9][0-9]*)$/.test(winningReceipts)
+      || !/^(?:0|[1-9][0-9]*)$/.test(processedWinningReceipts)
+      || typeof row.claimed !== 'boolean') return null;
+    const myBet = BigInt(position);
+    const receipts = BigInt(winningReceipts);
+    const processed = BigInt(processedWinningReceipts);
+    if (myBet <= 0n || receipts <= 0n || processed > receipts
+      || row.claimed !== (processed === receipts)) return null;
+    result.set(roundId, {
+      myBet,
+      claimed: row.claimed,
+      winningReceipts: receipts,
+      processedWinningReceipts: processed,
+      historical: true,
+    });
+  }
+  return result;
+}
+
+let walletHistoryRequest = null;
+
+/**
+ * Wallet decoration for one visible Rounds page only.
+ *
+ * This signed-session endpoint reads archived index rows after BetReceipt PDAs
+ * close. It is presentation state only: claim discovery and transaction
+ * construction continue to use authority-filtered open PDAs and StakePosition.
+ */
+export async function loadIndexedWalletRoundHistory(rounds, address) {
+  if (!address || !Array.isArray(rounds)) return new Map();
+  const visibleIds = [...new Set(rounds.map((round) => String(round.roundId)))];
+  if (visibleIds.length > 50) return null;
+  const ids = [...new Set(rounds
+    .filter((round) => round.projectionComplete === true)
+    .map((round) => String(round.roundId)))]
+    .sort((left, right) => {
+      const a = BigInt(left);
+      const b = BigInt(right);
+      return a === b ? 0 : a > b ? -1 : 1;
+    });
+  if (!ids.length) return new Map();
+  const wallet = String(address);
+  const key = `${wallet}:${ids.join(',')}`;
+  if (walletHistoryRequest?.key === key) return walletHistoryRequest.promise;
+  const stored = getSession();
+  // Public round history never requires wallet authentication. If the user
+  // has not already established a signed wallet session (for example through
+  // chat), leave this optional decoration unknown and never open a signature
+  // prompt merely to render the ledger.
+  if (!stored?.token || stored.walletAddress !== wallet
+    || new Date(stored.expiresAt).getTime() < Date.now()) return null;
+  const promise = (async () => {
+    try {
+      const { res, data } = await fetchJson(
+        `${FUNCTIONS_URL}/wallet-round-history`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${stored.token}`,
+          },
+          body: JSON.stringify({ roundIds: ids }),
+        },
+      );
+      if (!res.ok || getSession()?.walletAddress !== wallet) return null;
+      return walletRoundHistoryFromRows(data?.rows, ids);
+    } catch {
+      return null;
+    }
+  })();
+  walletHistoryRequest = { key, promise };
+  const result = await promise;
+  if (walletHistoryRequest?.key === key) walletHistoryRequest = null;
+  return result;
 }
 
 /**
@@ -353,9 +543,11 @@ export async function loadMyBetRounds(address) {
     for (let offset = 0; ; offset += PAGE) {
       const { data: chunk, error } = await supabase
         .from('mine_round_bets')
-        .select('round_id')
+        .select('round_id,receipt,square')
         .eq('bettor', String(address))
         .order('round_id', { ascending: false })
+        .order('receipt', { ascending: true })
+        .order('square', { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (error) return null;
       for (const row of chunk ?? []) ids.add(String(row.round_id));
@@ -386,6 +578,11 @@ const STAKING_WINDOW_CACHE_MS = 5_000;
 const ROUND_CADENCE_SECONDS = Number(ROUND_DURATION);
 const STAKING_WINDOW_FALLBACK_LOOKBACK_SECONDS = 6 * 60 * 60;
 let stakingWindowCache = null;
+
+/** Invalidate the realised APY sample after a finalized round-index event. */
+export const invalidateStakingRewardWindowCache = () => {
+  stakingWindowCache = null;
+};
 
 /**
  * Durable realised staking rewards for an exact recent window.
@@ -461,12 +658,22 @@ export async function loadStakingRewardWindow(
 export async function loadReceiptIndex({ roundId = null, address = null } = {}) {
   if (!(await indexAvailable())) return null;
   try {
+    if (roundId !== null) {
+      const { data: health, error: healthError } = await supabase
+        .from('mine_rounds')
+        .select('projection_complete')
+        .eq('round_id', String(roundId))
+        .limit(1);
+      if (healthError || health?.[0]?.projection_complete !== true) return null;
+    }
     const unique = new Map();
     for (let offset = 0; ; offset += PAGE) {
       let query = supabase
         .from('mine_round_bets')
-        .select('receipt,round_id,bettor')
+        .select('receipt,round_id,bettor,square')
         .order('round_id', { ascending: false })
+        .order('receipt', { ascending: true })
+        .order('square', { ascending: true })
         .range(offset, offset + PAGE - 1);
       if (roundId !== null) query = query.eq('round_id', String(roundId));
       if (address) query = query.eq('bettor', String(address));
@@ -554,6 +761,25 @@ export async function loadLatestSettledRoundId(atOrBefore = null) {
   }
 }
 
+/** Latest settlement with enough exact fields to render a winner after its PDA is closed. */
+export async function loadLatestSettledRound(atOrBefore = null) {
+  if (!(await indexAvailable())) return null;
+  try {
+    let query = supabase
+      .from('mine_rounds')
+      .select(ROUND_COLUMNS)
+      .eq('resolved', true)
+      .order('round_id', { ascending: false })
+      .limit(1);
+    if (atOrBefore !== null) query = query.lte('round_id', String(atOrBefore));
+    const { data, error } = await query;
+    if (error || !data?.length) return null;
+    return indexedRoundFromRow(data[0]);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Newest round account observed by the finalized index, resolved or not.
  *
@@ -620,7 +846,7 @@ export async function loadLatestPlayedSettledRound(atOrBefore = null) {
     if (atOrBefore !== null) query = query.lte('round_id', String(atOrBefore));
     const { data, error } = await query;
     if (error || !data?.length) return null;
-    return fromRow(data[0]);
+    return indexedRoundFromRow(data[0]);
   } catch {
     return null;
   }
@@ -732,7 +958,7 @@ export function indexedMinerRoster(round, rows) {
 }
 
 export async function loadIndexedMinerRoster(round) {
-  if (!round?.resolved || !(await indexAvailable())) return null;
+  if (!round?.resolved || round.projectionComplete !== true || !(await indexAvailable())) return null;
   try {
     const rows = [];
     for (let offset = 0; ; offset += PAGE) {
@@ -772,6 +998,12 @@ export async function loadIndexedMinerRoster(round) {
 export async function loadRoundBets(roundId, square) {
   if (!(await indexAvailable())) return null;
   try {
+    const { data: health, error: healthError } = await supabase
+      .from('mine_rounds')
+      .select('projection_complete')
+      .eq('round_id', String(roundId))
+      .limit(1);
+    if (healthError || health?.[0]?.projection_complete !== true) return null;
     const data = [];
     for (let offset = 0; ; offset += PAGE) {
       const { data: chunk, error } = await supabase
@@ -779,7 +1011,7 @@ export async function loadRoundBets(roundId, square) {
         // ::text for the same reason as everywhere else — wei past 2^53 loses precision as a
         // bare JSON number. Page instead of imposing a silent participant ceiling.
         .select('bettor, square, amount_wei::text')
-        .eq('round_id', Number(roundId))
+        .eq('round_id', String(roundId))
         .order('receipt', { ascending: true })
         .order('square', { ascending: true })
         .range(offset, offset + PAGE - 1);

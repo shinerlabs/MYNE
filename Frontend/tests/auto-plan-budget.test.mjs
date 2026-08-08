@@ -59,7 +59,7 @@ test('an existing auto plan replaces the primary Mine action', async () => {
     readFile(new URL('../src/viewport-fit.css', import.meta.url), 'utf8'),
   ]);
   assert.match(main, /const planOwnsAction = Boolean\(existingPlan\)/);
-  assert.match(main, /deploy\.disabled = !protocolReady \|\| protocolPaused \|\| planOwnsAction/);
+  assert.match(main, /deploy\.disabled = !protocolReady \|\| !clockReady \|\| protocolPaused \|\| planOwnsAction/);
   assert.match(main, /deploy\.hidden = planOwnsAction/);
   assert.match(styles, /\.deploy-panel > #deploy\[hidden\] \{[\s\S]*display:\s*none !important/);
   assert.match(main, /id="auto-plan-topup-amount"[\s\S]*id="topup-plan">Top up<[\s\S]*id="cancel-plan">Cancel &amp; withdraw/);

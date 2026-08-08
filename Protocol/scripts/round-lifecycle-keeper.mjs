@@ -8,7 +8,6 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import anchor from '@anchor-lang/core';
-import * as sb from '@switchboard-xyz/on-demand';
 import {
   ComputeBudgetProgram,
   PublicKey,
@@ -16,14 +15,23 @@ import {
   VersionedTransaction,
 } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
-import { loadExplicitSwitchboardEnv } from './production-switchboard-env.mjs';
 import {
   historicalLifecycleQuery,
   nextHistoricalLifecycleCursor,
   processLifecycleRoundQueue,
   selectLifecycleRoundBatch,
 } from './lifecycle-queue-policy.mjs';
-import { attachProgramWake, createWakeSignal, runWorkerTick } from './event-driven-loop.mjs';
+import {
+  attachProgramWake,
+  createWakeSignal,
+  emitWorkerHeartbeat,
+  runWorkerTick,
+} from './event-driven-loop.mjs';
+import {
+  BET_RECEIPT_ACCOUNT_SIZE,
+  exactReceiptRecoveryScanOptions,
+  validateRecoveredReceiptAccounts,
+} from './receipt-recovery-policy.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -34,11 +42,10 @@ setProvider(provider);
 const payer = provider.wallet.payer;
 assert.ok(payer, 'A file-backed lifecycle keeper wallet is required');
 const program = new Program(idl, provider);
-const { program: switchboardProgram } = await loadExplicitSwitchboardEnv();
 assert.equal(
-  switchboardProgram.provider.wallet.publicKey.toBase58(),
-  payer.publicKey.toBase58(),
-  'Lifecycle keeper and Switchboard close authority must use the same wallet',
+  program.coder.accounts.size('BetReceipt'),
+  BET_RECEIPT_ACCOUNT_SIZE,
+  'BetReceipt layout changed; review the exact recovery filter before running lifecycle',
 );
 const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -49,6 +56,9 @@ const intervalMs = Math.max(1000, Number(process.env.LIFECYCLE_KEEPER_INTERVAL_M
 const tickTimeoutMs = Number(process.env.LIFECYCLE_TICK_TIMEOUT_MS || 120_000);
 const realtimeDebounceMs = Number(process.env.LIFECYCLE_REALTIME_DEBOUNCE_MS || 750);
 const roundBatchSize = Number(process.env.LIFECYCLE_ROUND_BATCH_SIZE || 12);
+const receiptRecoveryMaxAccounts = Number(
+  process.env.LIFECYCLE_RECEIPT_RECOVERY_MAX_ACCOUNTS || 2048,
+);
 assert.ok(
   Number.isInteger(tickTimeoutMs) && tickTimeoutMs >= 15_000 && tickTimeoutMs <= 600_000,
   'LIFECYCLE_TICK_TIMEOUT_MS must be between 15000 and 600000',
@@ -61,11 +71,25 @@ assert.ok(
   Number.isInteger(roundBatchSize) && roundBatchSize >= 4 && roundBatchSize <= 50,
   'LIFECYCLE_ROUND_BATCH_SIZE must be between 4 and 50',
 );
+assert.ok(
+  Number.isInteger(receiptRecoveryMaxAccounts)
+    && receiptRecoveryMaxAccounts >= 1
+    && receiptRecoveryMaxAccounts <= 10_000,
+  'LIFECYCLE_RECEIPT_RECOVERY_MAX_ACCOUNTS must be between 1 and 10000',
+);
 const settleBatchSize = Math.max(1, Math.min(5, Number(process.env.RECEIPT_SETTLE_BATCH_SIZE || 3)));
 const closeBatchSize = Math.max(1, Math.min(8, Number(process.env.RECEIPT_CLOSE_BATCH_SIZE || 6)));
 const randomnessRetentionSeconds = Math.max(
   3600,
   Number(process.env.RANDOMNESS_RETENTION_SECONDS || 86_400),
+);
+// Keep the authoritative Round and receipt accounts readable beyond the result
+// window. Settlement/reward accrual remains immediate; only rent cleanup waits.
+// Two 65-second cycles lets a freshly opened or briefly disconnected client
+// reconstruct the winner and participant card directly from confirmed PDAs.
+const roundAccountRetentionSeconds = Math.max(
+  65,
+  Number(process.env.ROUND_ACCOUNT_RETENTION_SECONDS || 130),
 );
 // Recovery mode is intentionally narrower than the normal worker: it may
 // close only receipts/rounds already proven processed and archived. This lets
@@ -97,6 +121,10 @@ requireMatchingSolanaNetwork({
     : null,
 });
 const roundPda = (roundId) => pda('round', u64Seed(roundId));
+const receiptPda = (roundId, authority, nonce) => PublicKey.findProgramAddressSync(
+  [Buffer.from('bet'), u64Seed(roundId), authority.toBuffer(), u64Seed(nonce)],
+  PROGRAM_ID,
+);
 const minerPda = (authority) => pda('miner', new PublicKey(authority).toBuffer());
 const stakePda = (authority) => pda('stake_position', new PublicKey(authority).toBuffer());
 let historicalRoundCursor = null;
@@ -165,6 +193,28 @@ async function indexedReceipts(roundId) {
   return [...unique.values()];
 }
 
+async function recoverReceiptRows(roundId, roundState) {
+  const totalReceipts = asBig(roundState.totalReceipts);
+  const closedReceipts = asBig(roundState.closedReceipts);
+  assert.ok(closedReceipts <= totalReceipts, 'Round closed-receipt count exceeds its total');
+  const expectedLiveCount = totalReceipts - closedReceipts;
+  const scanOptions = exactReceiptRecoveryScanOptions({
+    roundId,
+    expectedLiveCount,
+    maxAccounts: receiptRecoveryMaxAccounts,
+  });
+  if (expectedLiveCount === 0n) return [];
+  const accounts = await provider.connection.getProgramAccounts(PROGRAM_ID, scanOptions);
+  return validateRecoveredReceiptAccounts({
+    accounts,
+    expectedLiveCount,
+    roundId,
+    programId: PROGRAM_ID,
+    decodeReceipt: (data) => program.coder.accounts.decode('BetReceipt', data),
+    deriveReceiptPda: (authority, nonce) => receiptPda(roundId, authority, nonce),
+  });
+}
+
 async function fetchReceiptStates(rows) {
   const entries = [];
   for (let offset = 0; offset < rows.length; offset += 100) {
@@ -181,7 +231,7 @@ async function settleOrRefund(roundAddress, roundState, rows) {
   for (const { row, receipt, state: receiptState } of await fetchReceiptStates(rows)) {
     if (!receiptState || receiptState.claimed || receiptState.refunded) continue;
     const beneficiary = receiptState.authority;
-    assert.equal(beneficiary.toBase58(), row.bettor, 'Indexed bettor does not match on-chain receipt');
+    assert.equal(beneficiary.toBase58(), row.bettor, 'Discovered bettor does not match on-chain receipt');
     const method = roundState.settled
       ? program.methods.settleReceipt().accounts({
         config,
@@ -213,7 +263,7 @@ async function closeReceipts(roundAddress, rows) {
   const instructions = [];
   for (const { receipt, state: receiptState } of await fetchReceiptStates(rows)) {
     if (!receiptState) continue;
-    assert.ok(receiptState.claimed || receiptState.refunded, 'Indexer exposed an unprocessed receipt for closure');
+    assert.ok(receiptState.claimed || receiptState.refunded, 'Discovered receipt is unprocessed and cannot close');
     instructions.push(await program.methods.closeReceipt().accounts({
       round: roundAddress,
       receipt,
@@ -240,7 +290,8 @@ async function maybeCloseRandomness(indexedRound) {
     });
     return { alreadyClosed: true };
   }
-  const client = new sb.Randomness(switchboardProgram, randomness);
+  const { Randomness, switchboardProgram } = await loadSwitchboardCloseContext();
+  const client = new Randomness(switchboardProgram, randomness);
   const instruction = await client.closeIx();
   const sent = await sendMeasured([instruction]);
   await rest(`mine_rounds?round_id=eq.${indexedRound.round_id}`, {
@@ -254,27 +305,55 @@ async function maybeCloseRandomness(indexedRound) {
   return sent;
 }
 
+let switchboardCloseContextPromise = null;
+async function loadSwitchboardCloseContext() {
+  if (!switchboardCloseContextPromise) {
+    switchboardCloseContextPromise = (async () => {
+      const [{ Randomness }, { loadExplicitSwitchboardEnv }] = await Promise.all([
+        import('@switchboard-xyz/on-demand'),
+        import('./production-switchboard-env.mjs'),
+      ]);
+      const { program: switchboardProgram } = await loadExplicitSwitchboardEnv();
+      assert.equal(
+        switchboardProgram.provider.wallet.publicKey.toBase58(),
+        payer.publicKey.toBase58(),
+        'Lifecycle keeper and Switchboard close authority must use the same wallet',
+      );
+      return { Randomness, switchboardProgram };
+    })();
+  }
+  try {
+    return await switchboardCloseContextPromise;
+  } catch (error) {
+    // A transient historical-cleanup failure must be retryable on a later tick.
+    switchboardCloseContextPromise = null;
+    throw error;
+  }
+}
+
 async function processRound(indexedRound) {
   const address = roundPda(indexedRound.round_id);
   let roundState = await program.account.round.fetchNullable(address);
   const randomness = await maybeCloseRandomness(indexedRound);
   if (!roundState) return { round: String(indexedRound.round_id), randomness, state: 'round-already-closed' };
-  const receipts = await indexedReceipts(indexedRound.round_id);
-  const chainReceiptCount = Number(roundState.totalReceipts.toString());
+  let receipts = await indexedReceipts(indexedRound.round_id);
+  const chainReceiptCount = asBig(roundState.totalReceipts);
   assert.ok(
-    receipts.length <= chainReceiptCount,
+    BigInt(receipts.length) <= chainReceiptCount,
     'Indexed receipt count exceeds the authoritative chain count',
   );
-  if (receipts.length < chainReceiptCount) {
-    return {
-      round: String(indexedRound.round_id),
-      randomness,
-      state: 'awaiting-indexed-receipts',
-      indexedReceipts: receipts.length,
-      chainReceipts: chainReceiptCount,
-    };
+  let receiptSource = 'supabase-index';
+  if (BigInt(receipts.length) < chainReceiptCount) {
+    // The projection is an optimization, never an availability dependency.
+    // Recover only this round's currently live receipt PDAs at confirmed
+    // commitment and validate their exact count, owner, data and seed tuple.
+    receipts = await recoverReceiptRows(indexedRound.round_id, roundState);
+    receiptSource = 'confirmed-round-scan';
   }
   const now = Math.floor(Date.now() / 1000);
+  const settledAt = Number(roundState.settlesAt.toString());
+  const resultRetentionElapsed = !roundState.settled
+    || now >= settledAt + roundAccountRetentionSeconds;
   let processed = [];
   if (!recoveryCloseOnly
       && asBig(roundState.processedReceipts) < asBig(roundState.totalReceipts)
@@ -283,14 +362,16 @@ async function processRound(indexedRound) {
     roundState = await program.account.round.fetch(address);
   }
   let closedReceipts = [];
-  if (asBig(roundState.archivedAtSlot) > 0n
+  if (resultRetentionElapsed
+      && asBig(roundState.archivedAtSlot) > 0n
       && indexedRound.archive_verified === true
       && asBig(roundState.closedReceipts) < asBig(roundState.totalReceipts)) {
     closedReceipts = await closeReceipts(address, receipts);
     roundState = await program.account.round.fetch(address);
   }
   let closedRound = null;
-  if (asBig(roundState.archivedAtSlot) > 0n
+  if (resultRetentionElapsed
+      && asBig(roundState.archivedAtSlot) > 0n
       && indexedRound.archive_verified === true
       && asBig(roundState.processedReceipts) === asBig(roundState.totalReceipts)
       && asBig(roundState.closedReceipts) === asBig(roundState.totalReceipts)
@@ -309,6 +390,8 @@ async function processRound(indexedRound) {
     closedReceipts,
     closedRound,
     randomness,
+    receiptSource,
+    resultRetentionElapsed,
     recoveryCloseOnly,
   };
 }
@@ -362,6 +445,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
   }
   do {
+    emitWorkerHeartbeat('round-lifecycle', 'tick-start');
     try {
       const results = await runWorkerTick({
         worker: 'round-lifecycle',
@@ -375,11 +459,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
             timeoutMs: tickTimeoutMs,
             message: error.message,
           }));
+          emitWorkerHeartbeat('round-lifecycle', 'tick-error', 'tick-timeout');
           process.exit(75);
         },
       });
+      const failedRounds = results.filter((row) => row?.state === 'round-processing-error').length;
+      emitWorkerHeartbeat(
+        'round-lifecycle',
+        'tick-complete',
+        failedRounds > 0 ? `partial-error:${failedRounds}` : 'ok',
+      );
       console.log(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-tick', results }));
     } catch (error) {
+      emitWorkerHeartbeat('round-lifecycle', 'tick-error', error?.code || 'tick-error');
       console.error(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-error', message: String(error) }));
       if (process.env.FAIL_FAST === '1') {
         process.exitCode = 1;

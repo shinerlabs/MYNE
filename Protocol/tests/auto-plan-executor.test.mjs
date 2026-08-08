@@ -2,10 +2,25 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  OPERATION_TIMEOUT_CODE,
   executeAutoPlansDuringWindow,
   fetchActiveAutoPlanAuthorities,
   sendAutoPlanBatchesIsolated,
+  withOperationTimeout,
 } from '../scripts/auto-plan-executor.mjs';
+
+test('external Auto Mine operations have a hard timeout boundary', async () => {
+  let timeoutCallback = false;
+  await assert.rejects(
+    withOperationTimeout(() => new Promise(() => {}), {
+      timeoutMs: 5,
+      label: 'stalled dependency',
+      onTimeout: () => { timeoutCallback = true; },
+    }),
+    (error) => error.code === OPERATION_TIMEOUT_CODE && /stalled dependency/.test(error.message),
+  );
+  assert.equal(timeoutCallback, true);
+});
 
 test('active Auto Mine plans are read in bounded stable pages and deduplicated', async () => {
   const paths = [];
@@ -53,6 +68,46 @@ test('Auto Mine stops submitting as soon as the betting window closes', async ()
   });
   assert.equal(submitted, false);
   assert.deepEqual(events, [{ event: 'auto-plan-window-closed', skipped: 1 }]);
+});
+
+test('an indeterminate timed-out Auto Mine send is not immediately resubmitted', async () => {
+  let sends = 0;
+  const events = [];
+  await sendAutoPlanBatchesIsolated({
+    entries: ['one', 'two', 'three'].map((authority) => ({ authority, ix: authority })),
+    batchSize: 3,
+    operationTimeoutMs: 5,
+    sendBatch: async () => {
+      sends += 1;
+      return new Promise(() => {});
+    },
+    onEvent: (event) => events.push(event),
+  });
+  assert.equal(sends, 1);
+  assert.deepEqual(events[0].authorities, ['one', 'two', 'three']);
+  assert.equal(events[0].event, 'auto-plan-batch-indeterminate');
+});
+
+test('the full-window executor preserves the separately bounded send budget', async () => {
+  let now = 0;
+  const events = [];
+  await executeAutoPlansDuringWindow({
+    bettingEndsAt: 1,
+    nowSeconds: async () => now,
+    sleep: async () => {},
+    indexedRows: async () => [{ authority: 'wallet' }],
+    buildEntry: async ({ authority }) => ({ authority, ix: 'ix' }),
+    sendBatch: async () => {
+      now = 1;
+      await new Promise((resolve) => setTimeout(resolve, 550));
+      return { signature: 'confirmed' };
+    },
+    operationTimeoutMs: 500,
+    sendTimeoutMs: 2_000,
+    onEvent: (event) => events.push(event),
+  });
+  assert.equal(events.some(({ event }) => event === 'auto-plans-executed'), true);
+  assert.equal(events.some(({ event }) => event === 'auto-plan-batch-indeterminate'), false);
 });
 
 test('Auto Mine retries across the betting window and picks up a late indexed plan', async () => {

@@ -10,7 +10,9 @@ import {
   METEORA_DLMM_PROGRAM_TEXT,
   NATIVE_SOL_MINT,
   meteoraRouteForProgram,
+  pendingSwapIsProvablyExpired,
   purchasedTokenBaseUnits,
+  refreshUnsignedV0TransactionBlockhash,
   selectIndexedBuybackRound,
   validateJupiterEndpoint,
   validateJupiterPriorityLevel,
@@ -76,6 +78,71 @@ test('buyback journal refuses incomplete burn evidence and derives exact confirm
   assert.throws(() => purchasedTokenBaseUnits({
     mint: 'MYNE', owner: 'keeper', preTokenBalances: [], postTokenBalances: [],
   }), /no positive MYNE balance delta/);
+});
+
+test('Jupiter V0 blockhash refresh accepts only an unsigned sole-payer message', () => {
+  const payer = 'payer';
+  const untouchedLookup = { accountKey: 'lookup' };
+  const transaction = {
+    message: {
+      staticAccountKeys: [{ toBase58: () => payer }],
+      header: { numRequiredSignatures: 1 },
+      addressTableLookups: [untouchedLookup],
+      recentBlockhash: 'stale-blockhash',
+    },
+    signatures: [new Uint8Array(64)],
+  };
+  const originalMessage = transaction.message;
+  refreshUnsignedV0TransactionBlockhash(transaction, {
+    expectedPayer: payer,
+    blockhash: 'fresh-blockhash',
+  });
+  assert.equal(transaction.message, originalMessage, 'the V0 message must not be recompiled');
+  assert.equal(transaction.message.recentBlockhash, 'fresh-blockhash');
+  assert.equal(transaction.message.addressTableLookups[0], untouchedLookup);
+
+  transaction.signatures[0][0] = 1;
+  assert.throws(() => refreshUnsignedV0TransactionBlockhash(transaction, {
+    expectedPayer: payer,
+    blockhash: 'another-blockhash',
+  }), /must be unsigned/);
+  transaction.signatures[0][0] = 0;
+  assert.throws(() => refreshUnsignedV0TransactionBlockhash(transaction, {
+    expectedPayer: 'other-payer',
+    blockhash: 'another-blockhash',
+  }), /fee payer changed/);
+});
+
+test('an absent pending swap is abandoned only after its exact blockhash expires', () => {
+  assert.equal(pendingSwapIsProvablyExpired({
+    signatureStatus: null,
+    outputIncreased: false,
+    currentBlockHeight: 101,
+    lastValidBlockHeight: 100,
+  }), true);
+  assert.equal(pendingSwapIsProvablyExpired({
+    signatureStatus: null,
+    outputIncreased: false,
+    currentBlockHeight: 100,
+    lastValidBlockHeight: 100,
+  }), false);
+  assert.equal(pendingSwapIsProvablyExpired({
+    signatureStatus: null,
+    outputIncreased: false,
+    blockhashValid: false,
+  }), true);
+  assert.equal(pendingSwapIsProvablyExpired({
+    signatureStatus: { confirmationStatus: 'processed' },
+    outputIncreased: false,
+    currentBlockHeight: 101,
+    lastValidBlockHeight: 100,
+  }), false);
+  assert.equal(pendingSwapIsProvablyExpired({
+    signatureStatus: null,
+    outputIncreased: true,
+    currentBlockHeight: 101,
+    lastValidBlockHeight: 100,
+  }), false);
 });
 
 test('buyback accepts only exact HTTPS Jupiter endpoints unless explicitly overridden', () => {
@@ -205,4 +272,12 @@ test('buyback keeper re-checks the authoritative on-chain completion flag', asyn
   assert.match(source, /pending-swap-output-awaiting-confirmed-token-state/);
   assert.match(source, /pending-burn-awaiting-confirmed-token-state/);
   assert.doesNotMatch(source, /dryRun \? currentRound : 0/);
+  const validation = source.indexOf('for (const instruction of decompiled.instructions)');
+  const refresh = source.indexOf('refreshUnsignedV0TransactionBlockhash(transaction');
+  const simulation = source.indexOf('provider.connection.simulateTransaction(transaction');
+  assert.ok(validation >= 0 && validation < refresh && refresh < simulation);
+  const signing = source.indexOf('swap.sign([payer])');
+  const pendingJournal = source.indexOf('journal.pending = {', signing);
+  assert.ok(source.indexOf('await inspectSwapTransaction(swap') < signing);
+  assert.ok(signing >= 0 && signing < pendingJournal);
 });

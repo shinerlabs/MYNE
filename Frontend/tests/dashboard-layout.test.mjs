@@ -228,7 +228,7 @@ test('collapsing Social preserves Mine board and control tracks', () => {
 });
 
 test('connected miners get an unmistakable primary Mine action', () => {
-  assert.match(source, /const mineAvailable = Boolean\(chain\.state\.account\) && protocolReady && !protocolPaused/);
+  assert.match(source, /const mineAvailable = Boolean\(chain\.state\.account\) && protocolReady && clockReady && !protocolPaused/);
   assert.match(source, /const ready = mineAvailable && selected\.size > 0 && entered > 0 && autoFundingReady/);
   assert.match(source, /deploy\.classList\.toggle\('mine-available', mineAvailable\)/);
   assert.match(fitStyles, /#deploy\.mine-available:not\(:disabled\)[\s\S]*background:\s*#f3f3f4 !important;[\s\S]*color:\s*#09090b !important/);

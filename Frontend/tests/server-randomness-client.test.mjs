@@ -107,6 +107,6 @@ test('an emergency protocol pause is reported before any randomness preparation 
   assert.match(minePage, /configResult\.status === 'fulfilled'[\s\S]*state\.protocolPaused = Boolean\(configResult\.value\.paused\)/);
   assert.match(minePage, /roundResult\.status === 'rejected'[\s\S]*emit\(\)/);
   assert.match(main, /const protocolPaused = chain\.state\.protocolPaused === true/);
-  assert.match(main, /deploy\.disabled = !protocolReady \|\| protocolPaused/);
+  assert.match(main, /deploy\.disabled = !protocolReady \|\| !clockReady \|\| protocolPaused/);
   assert.match(main, /protocolPaused \? 'MINING PAUSED'/);
 });

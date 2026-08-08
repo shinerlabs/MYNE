@@ -152,6 +152,18 @@ test('staking reward window sums exact indexed lamports only when coverage is co
   });
 });
 
+test('finalized round events invalidate APY caches and bypass About Stats staleness', async () => {
+  const [roundsIndex, main] = await Promise.all([
+    readFile(new URL('../src/chain/rounds-index.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(roundsIndex, /export const invalidateStakingRewardWindowCache = \(\) => \{[\s\S]*stakingWindowCache = null/);
+  assert.match(main, /subscribeRoundIndexChanges\(\(\) => \{[\s\S]*invalidateStakingRewardWindowCache\(\)/);
+  assert.match(main, /data-about-panel="stats"\]\.active[\s\S]*refreshProtocolStats\(true\)/);
+  assert.match(main, /if \(force\) protocolStatsDirty = true/);
+  assert.match(main, /queueMicrotask\(\(\) => \{ void refreshProtocolStats\(true\); \}\)/);
+});
+
 test('paused APY uses the newest earlier fully verified window across an index gap', () => {
   const olderComplete = completeRows();
   const brokenLatest = [

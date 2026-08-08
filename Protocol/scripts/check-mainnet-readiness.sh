@@ -241,8 +241,48 @@ grep -q 'from public, anon, authenticated' ../supabase/migrations/20260808124500
 grep -q 'to service_role' ../supabase/migrations/20260808124500_keeper_lease_privileges.sql
 grep -q "status=in.(claimed,accrued,refunded)" scripts/round-indexer.mjs
 test -f ../supabase/migrations/20260808133000_worker_schema_capabilities.sql
+# Preserve the historical capability check: the later projection migration
+# deliberately replaces this view only after all new columns/RPCs exist.
 grep -q 'server-claims-v1' ../supabase/migrations/20260808133000_worker_schema_capabilities.sql
+test -f ../supabase/migrations/20260808134500_round_projection_completeness.sql
+grep -q 'projection_complete boolean not null default false' ../supabase/migrations/20260808134500_round_projection_completeness.sql
+grep -q 'mine_round_projection_digest' ../supabase/migrations/20260808134500_round_projection_completeness.sql
+grep -q 'enforce_mine_round_source_slot_monotonic' ../supabase/migrations/20260808134500_round_projection_completeness.sql
+grep -q 'round-projection-v2' ../supabase/migrations/20260808134500_round_projection_completeness.sql
+grep -q 'round-projection-v2' scripts/production-worker-host.mjs
+grep -q 'round-projection-v2' scripts/round-indexer.mjs
+test -f ../supabase/migrations/20260808135000_wallet_round_history.sql
+grep -q 'mine_wallet_round_history_v1' ../supabase/migrations/20260808135000_wallet_round_history.sql
+grep -q 'cardinality(p_round_ids) > 50' ../supabase/migrations/20260808135000_wallet_round_history.sql
+grep -q 'rounds.projection_complete = true' ../supabase/migrations/20260808135000_wallet_round_history.sql
+grep -Fq 'revoke all on function public.mine_wallet_round_history_v1(text, bigint[]) from public, anon, authenticated' ../supabase/migrations/20260808135000_wallet_round_history.sql
+grep -Fq 'grant execute on function public.mine_wallet_round_history_v1(text, bigint[]) to service_role' ../supabase/migrations/20260808135000_wallet_round_history.sql
+test -f ../supabase/functions/wallet-round-history/index.ts
+grep -q 'requireSession(req)' ../supabase/functions/wallet-round-history/index.ts
+grep -q 'p_wallet: session.walletAddress' ../supabase/functions/wallet-round-history/index.ts
+grep -Fq '[functions.wallet-round-history]' ../supabase/config.toml
 grep -q 'mine_worker_schema_capabilities' scripts/production-worker-host.mjs
+
+test -f docs/PRODUCTION_RESILIENCE.md
+grep -q 'MYNE_WORKER_MODE=observe' docs/WORKER_HOSTING.md
+grep -q 'MYNE_WORKER_HOST_OBSERVE=D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e' docs/WORKER_HOSTING.md
+grep -q 'ROUND_INDEXER_PROJECT_ONLY=1' docs/WORKER_HOSTING.md
+grep -q 'ROUND_ACCOUNT_RETENTION_SECONDS=130' docs/MAINNET_LAUNCH_RUNBOOK.md
+grep -q 'two complete canary rounds' docs/PRODUCTION_RESILIENCE.md
+grep -q 'round-projection-v2' docs/MAINNET_LAUNCH_RUNBOOK.md
+python3 - docs/MAINNET_LAUNCH_RUNBOOK.md <<'PY'
+from pathlib import Path
+import sys
+
+runbook = Path(sys.argv[1]).read_text(encoding='utf-8')
+migrations = [
+    '20260808133000_worker_schema_capabilities.sql',
+    '20260808134500_round_projection_completeness.sql',
+    '20260808135000_wallet_round_history.sql',
+]
+positions = [runbook.index(name) for name in migrations]
+assert positions == sorted(positions), 'Projection/wallet-history migrations are out of order'
+PY
 
 if [[ -z "${MAINNET_RELEASE_MANIFEST:-}" ]]; then
   echo "Set MAINNET_RELEASE_MANIFEST to the frozen, external manifest for the candidate" >&2

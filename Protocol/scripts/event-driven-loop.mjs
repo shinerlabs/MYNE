@@ -1,4 +1,60 @@
 /** A lossless wake signal: events received while work is running wake the next iteration. */
+export const WORKER_HEARTBEAT_TYPE = 'myne-worker-heartbeat-v1';
+
+const HEARTBEAT_PHASES = new Set(['tick-start', 'tick-complete', 'tick-error']);
+
+export function createWorkerHeartbeat(worker, phase, outcome = null, at = Date.now()) {
+  if (typeof worker !== 'string' || !worker) throw new TypeError('Worker name is required');
+  if (!HEARTBEAT_PHASES.has(phase)) throw new TypeError('Worker heartbeat phase is invalid');
+  if (!Number.isFinite(at) || at < 0) throw new TypeError('Worker heartbeat time is invalid');
+  const normalizedOutcome = outcome == null ? null : String(outcome).slice(0, 160);
+  return {
+    type: WORKER_HEARTBEAT_TYPE,
+    worker,
+    phase,
+    outcome: normalizedOutcome,
+    at,
+  };
+}
+
+/** Best-effort local IPC only; heartbeat failure must never alter worker transactions. */
+export function emitWorkerHeartbeat(worker, phase, outcome = null) {
+  const message = createWorkerHeartbeat(worker, phase, outcome);
+  if (typeof process.send !== 'function' || process.connected === false) return message;
+  try {
+    process.send(message, () => {});
+  } catch {
+    // The supervisor may have closed IPC during shutdown. Worker logic remains authoritative.
+  }
+  return message;
+}
+
+export function recordWorkerHeartbeat(status, message, {
+  expectedWorker,
+  receivedAt = Date.now(),
+} = {}) {
+  if (!status || typeof status !== 'object') return false;
+  if (message?.type !== WORKER_HEARTBEAT_TYPE) return false;
+  if (message.worker !== expectedWorker || !HEARTBEAT_PHASES.has(message.phase)) return false;
+  if (!Number.isFinite(receivedAt) || receivedAt < 0) return false;
+  status.lastHeartbeatAt = receivedAt;
+  status.lastHeartbeatPhase = message.phase;
+  status.lastOutcome = message.outcome == null ? null : String(message.outcome).slice(0, 160);
+  if (message.phase === 'tick-complete') status.lastCompletedAt = receivedAt;
+  if (message.phase === 'tick-error') status.lastErrorAt = receivedAt;
+  return true;
+}
+
+export function workerHeartbeatFresh(status, {
+  now = Date.now(),
+  maxAgeMs,
+} = {}) {
+  if (!status?.running || !Number.isFinite(status.lastHeartbeatAt)) return false;
+  if (!Number.isFinite(now) || !Number.isInteger(maxAgeMs) || maxAgeMs <= 0) return false;
+  const age = now - status.lastHeartbeatAt;
+  return age >= 0 && age <= maxAgeMs;
+}
+
 export function createWakeSignal({ setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   let pending = false;
   let waiter = null;

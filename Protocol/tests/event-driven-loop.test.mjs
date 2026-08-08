@@ -2,7 +2,35 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { createWakeSignal, runWorkerTick } from '../scripts/event-driven-loop.mjs';
+import {
+  WORKER_HEARTBEAT_TYPE,
+  createWakeSignal,
+  createWorkerHeartbeat,
+  recordWorkerHeartbeat,
+  runWorkerTick,
+  workerHeartbeatFresh,
+} from '../scripts/event-driven-loop.mjs';
+
+test('worker heartbeat is authenticated to its expected child and expires locally', () => {
+  const status = { running: true, lastHeartbeatAt: 1_000 };
+  const message = createWorkerHeartbeat('round-indexer', 'tick-complete', 'ok', 5_000);
+  assert.equal(message.type, WORKER_HEARTBEAT_TYPE);
+  assert.equal(recordWorkerHeartbeat(status, message, {
+    expectedWorker: 'round-lifecycle',
+    receivedAt: 6_000,
+  }), false);
+  assert.equal(status.lastHeartbeatAt, 1_000);
+  assert.equal(recordWorkerHeartbeat(status, message, {
+    expectedWorker: 'round-indexer',
+    receivedAt: 6_000,
+  }), true);
+  assert.equal(status.lastCompletedAt, 6_000);
+  assert.equal(status.lastOutcome, 'ok');
+  assert.equal(workerHeartbeatFresh(status, { now: 65_999, maxAgeMs: 60_000 }), true);
+  assert.equal(workerHeartbeatFresh(status, { now: 66_001, maxAgeMs: 60_000 }), false);
+  status.running = false;
+  assert.equal(workerHeartbeatFresh(status, { now: 6_000, maxAgeMs: 60_000 }), false);
+});
 
 test('event received during work wakes the next loop without waiting for the fallback timer', async () => {
   const wake = createWakeSignal();

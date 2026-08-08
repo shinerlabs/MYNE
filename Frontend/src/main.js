@@ -20,7 +20,7 @@ import { WALLET_LOGOS } from './wallet-logos.js';
 import {
   loadRoundBets, loadIndexedMinerRoster, loadIndexedRounds, loadIndexedRoundStats,
   loadLatestPlayedSettledRound,
-  loadRoundRandomnessProof,
+  loadRoundRandomnessProof, invalidateStakingRewardWindowCache,
 } from './chain/rounds-index.js';
 import { loadRoundHistory, ROUND_PAGE_SIZE } from './chain/rounds-page.js';
 import {
@@ -509,11 +509,11 @@ if (!protocolReady) {
 const selected = new Set();
 document.querySelectorAll('.slot').forEach((tile) => {
   // Starts empty and is filled by renderTiles from the chain. It used to seed a mock count
-  // derived from the tile id, which rendered plausible-looking miner numbers for a second
+  // derived from the tile id, which rendered plausible-looking position numbers for a second
   // before the first poll replaced them.
-  const minerCount = 0;
-  tile.insertAdjacentHTML('beforeend', `<small class="tile-miner-count" aria-label="${minerCount} miners">${icon('users')}<b>${minerCount}</b></small>`);
-  tile.setAttribute('aria-label', `${tile.getAttribute('aria-label')}, ${minerCount} miners`);
+  const positionCount = 0;
+  tile.insertAdjacentHTML('beforeend', `<small class="tile-miner-count" aria-label="${positionCount} positions">${icon('users')}<b>${positionCount}</b></small>`);
+  tile.setAttribute('aria-label', `${tile.getAttribute('aria-label')}, ${positionCount} positions`);
 });
 const miningBoard = document.querySelector('.board-panel');
 const roundSummary = document.querySelector('.round-summary');
@@ -1495,6 +1495,7 @@ const cumulativeRecent = (total, newestFirst, deltaFor) => {
 
 let protocolStatsFetchedAt = 0;
 let protocolStatsRequest = null;
+let protocolStatsDirty = false;
 const PROTOCOL_STATS_STALE_MS = 10_000;
 
 /**
@@ -1505,7 +1506,13 @@ const PROTOCOL_STATS_STALE_MS = 10_000;
 const refreshProtocolStats = async (force = false) => {
   const root = document.querySelector('[data-about-panel="stats"]');
   if (!root || (!force && Date.now() - protocolStatsFetchedAt < PROTOCOL_STATS_STALE_MS)) return;
-  if (protocolStatsRequest) return protocolStatsRequest;
+  if (protocolStatsRequest) {
+    // A finalized index/account event that lands during an older read must not
+    // be swallowed by that single-flight. Run one fresh snapshot immediately
+    // afterwards; many events still coalesce into the same rerun.
+    if (force) protocolStatsDirty = true;
+    return protocolStatsRequest;
+  }
 
   protocolStatsRequest = (async () => {
     const currentRoundId = (() => {
@@ -1580,7 +1587,13 @@ const refreshProtocolStats = async (force = false) => {
     protocolStatsFetchedAt = Date.now();
   })().catch((error) => {
     console.warn('protocol stats failed', error);
-  }).finally(() => { protocolStatsRequest = null; });
+  }).finally(() => {
+    protocolStatsRequest = null;
+    if (protocolStatsDirty) {
+      protocolStatsDirty = false;
+      queueMicrotask(() => { void refreshProtocolStats(true); });
+    }
+  });
 
   return protocolStatsRequest;
 };
@@ -2858,6 +2871,7 @@ const updateMine = () => {
 
   const deploy = document.querySelector('#deploy');
   const protocolPaused = chain.state.protocolPaused === true;
+  const clockReady = chain.state.clockReady === true;
   const existingPlan = chain.state.plan;
   const planRunning = existingPlan?.enabled === true;
   const planReceiptRent = typeof chain.state.autoPlanMaxFee === 'bigint'
@@ -2869,7 +2883,7 @@ const updateMine = () => {
   const planStalled = planRoundCost != null && existingPlan.balance < planRoundCost;
   const planModeLabel = existingPlan?.rewardMode === 'burn' ? 'AUTO-BURN' : 'AUTO-MINE';
   const planOwnsAction = Boolean(existingPlan);
-  const mineAvailable = Boolean(chain.state.account) && protocolReady && !protocolPaused && !planOwnsAction;
+  const mineAvailable = Boolean(chain.state.account) && protocolReady && clockReady && !protocolPaused && !planOwnsAction;
   const ready = mineAvailable && selected.size > 0 && entered > 0 && autoFundingReady;
   // A manual action during reveal becomes a one-round keeper queue for the next open round.
   deploy.classList.toggle('mine-available', mineAvailable);
@@ -2883,9 +2897,10 @@ const updateMine = () => {
   // instead of the button silently doing nothing.
   // An existing plan owns this slot: its top-up and cancel controls are the only valid actions,
   // so the primary control becomes a truthful status instead of offering a second plan.
-  deploy.disabled = !protocolReady || protocolPaused || planOwnsAction;
+  deploy.disabled = !protocolReady || !clockReady || protocolPaused || planOwnsAction;
   deploy.querySelector('span').textContent = !protocolReady
     ? 'PREVIEW ONLY'
+    : !clockReady ? 'SYNCING SOLANA'
     : protocolPaused ? 'MINING PAUSED'
     : planOwnsAction
       ? !planRunning
@@ -2895,6 +2910,8 @@ const updateMine = () => {
       : bettingOpen ? 'MINE' : 'BID NEXT ROUND';
   deploy.setAttribute('aria-label', !protocolReady
     ? 'Mining becomes available after the audited Solana program is connected'
+    : !clockReady
+      ? 'Mining will be available after the Solana clock is synchronized'
     : protocolPaused
       ? 'Mining is temporarily paused while maintenance is completed'
     : planOwnsAction
@@ -3990,14 +4007,14 @@ async function renderInlineWinners(roundId, account, force = false) {
         const canClaim = you && w.won && !w.claimed;
         // Losers have no payout to show, so show what they staked — otherwise the row is a name
         // beside a blank column and reads as missing data rather than "did not win".
-        // Three states, not two. A winner who already claimed has had their bet record zeroed
-        // on-chain, so the exact payout is genuinely unrecoverable — say "won · claimed" rather
-        // than render a confident 0.000 that reads as "won nothing".
+        // Receipt `claimed` now means the permissionless processor has moved
+        // the exact reward into the wallet's durable Rewards ledgers. It does
+        // not mean the owner has withdrawn SOL or MYNE to their wallet.
         const reward = !w.won
           ? `<span class="winner-staked">${solIcon()} ${chain.format.ethSmart(w.wagered)} staked</span>`
           : w.amountKnown
             ? `${solIcon()} ${chain.format.ethSmart(w.eth)} + <img src="/myne-token-icon.svg" alt=""/> ${chain.format.solIcon(w.bullion)}`
-            : '<span class="winner-staked">won · claimed</span>';
+            : '<span class="winner-staked">won · in Rewards</span>';
         // A near-miss on a solo round is its own outcome: they held the winning tile and the coin
         // flip went to someone else. Worth naming, since "lost" would be misleading.
         const tag = w.isSoloWinner ? '<small class="winner-tag">solo</small>'
@@ -4006,7 +4023,7 @@ async function renderInlineWinners(roundId, account, force = false) {
         return `<div class="winner-row${w.isSoloWinner ? ' solo' : ''}${you ? ' you' : ''}${w.won ? '' : ' lost'}">
           <span class="winner-who">${you ? 'You' : chain.format.short(w.address)}${tag}</span>
           <span class="winner-reward">${reward}</span>
-          ${canClaim ? `<button class="claim-round" data-claim-round="${roundId}">Claim</button>` : (you && w.won && w.claimed ? '<small class="winner-claimed">claimed</small>' : '')}
+          ${canClaim ? `<button class="claim-round" data-claim-round="${roundId}">Claim</button>` : (you && w.won && w.claimed ? '<small class="winner-claimed">in Rewards</small>' : '')}
         </div>`;
       }).join('');
   } catch (err) {
@@ -4227,21 +4244,21 @@ const renderTiles = (state) => {
     if (state.phase === 'betting' && mine > 0n) selected.delete(tile.dataset.slot);
     setClass(tile, 'is-mined', mine > 0n);
     setAttr(tile, 'aria-label', `Tile ${tile.dataset.slot}, ${chain.format.solIcon(total)} SOL deployed${mine > 0n ? `, your position ${chain.format.solIcon(mine)} SOL` : ''}`);
-    // Miners on this tile — the real on-chain count from `getBettorsOnSquare`, not a wager.
+    // Receipt positions on this tile — the instant count stored in the Round PDA.
     // It previously showed the CALLER'S OWN STAKE behind a users icon and a "N miners"
     // aria-label, so the figure contradicted its own label, and `hidden` on a zero stake
     // meant a disconnected visitor saw no counts at all. The crowd on a tile is public and
     // is exactly what a visitor weighs before deploying, so it renders unconditionally.
     const badge = tile.querySelector('.tile-miner-count');
     if (badge) {
-      const miners = Number(state.squareMiners?.[square] ?? 0n);
+      const positions = Number(state.squareMiners?.[square] ?? 0n);
       if (badge.hidden) badge.hidden = false;
       const b = badge.querySelector('b');
-      if (b && b.textContent !== String(miners)) b.textContent = String(miners);
-      setAttr(badge, 'aria-label', `${miners} miner${miners === 1 ? '' : 's'}`);
+      if (b && b.textContent !== String(positions)) b.textContent = String(positions);
+      setAttr(badge, 'aria-label', `${positions} position${positions === 1 ? '' : 's'}`);
       // Empty tiles keep their count but recede: on a quiet round all 25 read "0", and at
       // equal weight that noise is what you have to look past to spot the two that aren't.
-      setClass(badge, 'is-empty', miners === 0);
+      setClass(badge, 'is-empty', positions === 0);
     }
   });
 };
@@ -4291,11 +4308,10 @@ const renderChain = (state) => {
 
   paintMineBalance();
 
-  // `state.unclaimed` is the UNREFINED balance — MYNE credited by claimed rounds and not yet
-  // withdrawn (the contract calls it withdrawUnrefinedBullion). It is NOT the value of unclaimed
-  // wins, and it stays 0 until those rounds are claimed. The panel header is labelled UNREFINED
-  // for that reason: reading "UNCLAIMED 0.000" directly above "2 winning rounds to claim · 2.000"
-  // made two different quantities look like one broken one.
+  // `state.unclaimed` is the durable UNREFINED balance — MYNE accrued when
+  // permissionless receipt processing finishes and not yet withdrawn. Pending
+  // receipt estimates remain in `claimableTotals` until that same value appears
+  // in the on-chain miner ledger.
   const unrefined = chain.format.solIcon(state.unclaimed);
   // Both the badge and the panel header lead with what the miner can act on FIRST: the MYNE in
   // unclaimed wins when there are any, otherwise the unrefined balance. They must agree — the
@@ -4315,10 +4331,9 @@ const renderChain = (state) => {
   // REWARDS rows (the card under the deploy panel). Kept here so they follow the same refresh as
   // the rest of the claim surface rather than drifting on their own timer.
   const setRow = (id, v) => { const n = document.querySelector(id); if (n) n.textContent = v; };
-  // Mined MYNE = already credited in miner state + still owed by unclaimed winning rounds.
-  // Round rewards are credited LAZILY — `_addUserRewardToTotalUnclaimed` runs inside the claim —
-  // so `state.unclaimed` is 0 for a win you have not claimed yet. Showing it alone rendered 0.000
-  // beside a claim button offering 0.600, which is the one case this panel exists for.
+  // Mined MYNE = already accrued in miner state + exact estimates from receipt
+  // processors that have not landed yet. This keeps the visible total stable
+  // while a reward moves atomically from its Round receipt into the claim ledger.
   setRow('#rw-eth', chain.format.ethSmart(claimableSol));
   // The authoritative credited total already contains passive share growth. Subtract that
   // component only for the visual breakdown; pending receipts are entirely mined rewards because
@@ -4367,13 +4382,10 @@ const renderChain = (state) => {
       ? 'Process rewards · withdraw to wallet'
       : 'Withdraw accrued SOL to your wallet';
   }
-  // "Claim All" covers BOTH exits, because from the user's side they are one intent: take what
-  // I have earned. There are two on-chain paths and which applies is an implementation detail:
-  //   - unclaimed ROUNDS      -> claimMany()               (pays SOL + MYNE)
-  //   - unrefined MINER STATE -> withdrawUnrefinedBullion() (MYNE only)
-  // An SOL-only claim — which is EVERY claim during premine — settles the round but leaves the
-  // MYNE behind, so afterwards `claimableTotals.count` is 0 while a real MYNE balance remains. The
-  // button used to grey out there, showing a number with no way to take it.
+  // "Claim All" covers one user intent across the protocol's durable ledgers:
+  // process any remaining receipts, withdraw accrued SOL from StakePosition,
+  // then withdraw the share-backed MYNE balance. Keeping these steps behind one
+  // control avoids leaving a nonzero balance without an obvious exit.
   const refinable = state.unclaimed ?? 0n;
   if (allBtn && !isPremine) {
     const hasRounds = claimableTotals.count > 0;
@@ -4736,14 +4748,12 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAccou
  * names.
  */
 const accountStats = () => {
-  // Rewards reach a miner in TWO stages: winning a round credits nothing until `claim(roundId)`,
-  // and only then does it land in the balance that `getMinerState` reports as awaiting refine.
-  // Counting the second stage alone made the panel read "Unclaimed 0.000" next to a Refine panel
-  // headed "14 winning rounds" — technically the refinable balance, but wrong to a reader.
+  // Show both durable accrued ledgers and exact estimates for receipt processors
+  // still in flight. Each receipt leaves the estimate bucket as it enters the
+  // on-chain balance, so the account menu matches the Rewards panel.
   const pendingBullion = claimableRounds.reduce((sum, r) => sum + r.userBullion, 0n);
-  // A win pays SOL as well as MYNE, and the Refine panel already lists both per round
-  // ("0.0022 + 1.000"), so the summary shows both rather than silently dropping the SOL.
-  const pendingEth = claimableRounds.reduce((sum, r) => sum + r.userEth, 0n);
+  const pendingEth = (chain.state.claimableSol ?? 0n)
+    + claimableRounds.reduce((sum, r) => sum + r.userEth, 0n);
   return [
     ['Stakeable', { bullion: chain.state.bullionBalance }],
     ['Unclaimed', { eth: pendingEth, bullion: chain.state.unclaimed + pendingBullion }],
@@ -5326,9 +5336,12 @@ const confirmedMinerByWallet = new Map();
 let roundMinerCard = null;
 let roundMinerCloseTimer = 0;
 let confirmedMinerRenderedKey = '';
+let confirmedMinerRenderedComplete = false;
 let confirmedMinerRequestKey = '';
 let roundMinerFetchTimer = 0;
 let confirmedMinerFetchAttempt = 0;
+let confirmedMinerRetryKey = '';
+let confirmedMinerNextRetryAt = 0;
 let confirmedMinerPage = 0;
 let confirmedMinerRows = [];
 const CONFIRMED_MINERS_PAGE_SIZE = 10;
@@ -5436,7 +5449,12 @@ const paintRoundMinerIdentity = async (row, wallet) => {
   avatar.replaceChildren(img);
 };
 
-const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty = false } = {}) => {
+const renderConfirmedMiners = (
+  miners,
+  roundId,
+  winningSquare,
+  { confirmedEmpty = false, projectionComplete = true } = {},
+) => {
   if (!roundMinersList) return false;
   const confirmedMiners = miners.map((miner) => ({ ...miner, roundId, winningSquare }));
   // An empty roster is final only when the settled Round account confirms
@@ -5446,6 +5464,7 @@ const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty 
   confirmedMinerByWallet.clear();
   confirmedMiners.forEach((miner) => confirmedMinerByWallet.set(miner.address, miner));
   confirmedMinerRows = confirmedMiners;
+  confirmedMinerRenderedComplete = projectionComplete === true;
   confirmedMinerPage = Math.min(
     confirmedMinerPage,
     Math.max(0, Math.ceil(confirmedMiners.length / CONFIRMED_MINERS_PAGE_SIZE) - 1),
@@ -5471,8 +5490,10 @@ const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty 
     if (confirmedEmpty) {
       roundMinersList.innerHTML = '<p>No bids this round · winning tile published · 0 MYNE rewarded.</p>';
       try {
+        if (!projectionComplete) return true;
         localStorage.setItem('myne-previous-miners', JSON.stringify({
           roundId: String(roundId), winningSquare, miners: [], confirmedEmpty: true,
+          projectionComplete: true,
         }));
       } catch { /* private storage or quota; live chain data remains authoritative */ }
     }
@@ -5508,7 +5529,7 @@ const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty 
     void paintRoundMinerIdentity(row, miner.address);
   });
   try {
-    localStorage.setItem('myne-previous-miners', JSON.stringify({ roundId: String(roundId), winningSquare, miners: confirmedMiners, confirmedEmpty: false }, (_, value) => typeof value === 'bigint' ? { __bigint: value.toString() } : value));
+    if (projectionComplete) localStorage.setItem('myne-previous-miners', JSON.stringify({ roundId: String(roundId), winningSquare, miners: confirmedMiners, confirmedEmpty: false, projectionComplete: true }, (_, value) => typeof value === 'bigint' ? { __bigint: value.toString() } : value));
   } catch { /* private storage or quota; live chain data remains authoritative */ }
   return true;
 };
@@ -5517,9 +5538,11 @@ const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty 
 // This avoids an empty/loading state even though the chain read is asynchronous.
 try {
   const cached = JSON.parse(localStorage.getItem('myne-previous-miners') || 'null', (_, value) => value && value.__bigint !== undefined ? BigInt(value.__bigint) : value);
-  if (cached?.roundId !== undefined && (cached?.miners?.length || cached?.confirmedEmpty === true)) {
+  if (cached?.projectionComplete === true && cached?.roundId !== undefined
+      && (cached?.miners?.length || cached?.confirmedEmpty === true)) {
     renderConfirmedMiners(cached.miners || [], cached.roundId, Number(cached.winningSquare), {
       confirmedEmpty: cached.confirmedEmpty === true,
+      projectionComplete: true,
     });
     confirmedMinerRenderedKey = String(cached.roundId);
   }
@@ -5532,14 +5555,20 @@ const refreshIndexedConfirmedMiners = async () => {
   if (requestId !== indexedMinerRefreshId || !round) return;
   const key = String(round.roundId);
   if (confirmedMinerRenderedKey !== '') {
-    try { if (BigInt(key) <= BigInt(confirmedMinerRenderedKey)) return; } catch { return; }
+    try {
+      if (BigInt(key) < BigInt(confirmedMinerRenderedKey)
+          || (BigInt(key) === BigInt(confirmedMinerRenderedKey) && confirmedMinerRenderedComplete)) return;
+    } catch { return; }
   }
   const result = await loadIndexedMinerRoster(round);
   if (requestId !== indexedMinerRefreshId || !result) return;
   // A settled played round with a non-zero receipt count cannot authoritatively have an empty
   // roster. Leave the previous card in place and retry on the next Realtime/poll signal.
   if (!result.miners.length && round.totalReceipts > 0n) return;
-  const rendered = renderConfirmedMiners(previousRoundMinerRoster(result), round.roundId, result.winningSquare);
+  const rendered = renderConfirmedMiners(
+    previousRoundMinerRoster(result), round.roundId, result.winningSquare,
+    { projectionComplete: round.projectionComplete === true },
+  );
   if (rendered) confirmedMinerRenderedKey = key;
   if (confirmedMinerRequestKey === key) confirmedMinerRequestKey = '';
 };
@@ -5547,12 +5576,43 @@ const refreshIndexedConfirmedMiners = async () => {
 const scheduleRoundMinersRefresh = (state) => {
   if (!protocolReady) return;
   const confirmed = confirmedMinerSource(state.lastResolved, state.lastPlayedResolved);
-  if (!shouldRefreshConfirmedMiners(confirmed, confirmedMinerRenderedKey, confirmedMinerRequestKey)) return;
+  if (!shouldRefreshConfirmedMiners(
+    confirmed,
+    confirmedMinerRenderedKey,
+    confirmedMinerRequestKey,
+    confirmedMinerRenderedComplete,
+  )) return;
   const key = confirmedMinerRoundKey(confirmed);
   const confirmedEmpty = isConfirmedEmptyRound(confirmed);
+  if (confirmedMinerRetryKey === key && Date.now() < confirmedMinerNextRetryAt) return;
+  if (confirmedMinerRetryKey !== key) {
+    confirmedMinerRetryKey = key;
+    confirmedMinerFetchAttempt = 0;
+    confirmedMinerNextRetryAt = 0;
+  }
   confirmedMinerRequestKey = key;
-  confirmedMinerFetchAttempt = 0;
   window.clearTimeout(roundMinerFetchTimer);
+  const retryLater = () => {
+    confirmedMinerFetchAttempt += 1;
+    const delays = [750, 1500, 3000, 6000, 10_000];
+    if (confirmedMinerFetchAttempt >= delays.length) {
+      // A public RPC may permanently disable filtered program-account reads.
+      // Stop the direct loop after a bounded burst and let the finalized
+      // projector's Realtime/poll signal complete the card without a client
+      // fleet generating six failed scans per minute indefinitely.
+      confirmedMinerNextRetryAt = Number.POSITIVE_INFINITY;
+      if (confirmedMinerRequestKey === key) confirmedMinerRequestKey = '';
+      void refreshIndexedConfirmedMiners();
+      return;
+    }
+    const delay = delays[Math.min(confirmedMinerFetchAttempt - 1, delays.length - 1)];
+    confirmedMinerNextRetryAt = Date.now() + delay;
+    if (confirmedMinerRequestKey === key) confirmedMinerRequestKey = '';
+    // One bounded timer accelerates recovery; render ticks and Supabase
+    // Realtime remain the durable retriggers without a one-request-per-second storm.
+    window.clearTimeout(roundMinerFetchTimer);
+    roundMinerFetchTimer = window.setTimeout(() => scheduleRoundMinersRefresh(chain.state), delay);
+  };
   const fetchConfirmedMiners = async () => {
     const requestedRound = confirmed.roundId;
     try {
@@ -5565,19 +5625,24 @@ const scheduleRoundMinersRefresh = (state) => {
       invalidateReceiptCache();
       const result = await readRoundWinners(requestedRound);
       if (String(confirmedMinerSource(chain.state.lastResolved, chain.state.lastPlayedResolved)?.roundId) !== String(requestedRound)) return;
-      if (!result.miners.length && !confirmedEmpty && confirmedMinerFetchAttempt < 8) {
-        confirmedMinerFetchAttempt += 1;
-        roundMinerFetchTimer = window.setTimeout(fetchConfirmedMiners, 750);
+      if (!result.miners.length && !confirmedEmpty) {
+        retryLater();
         return;
       }
       const rendered = renderConfirmedMiners(previousRoundMinerRoster(result), requestedRound, result.winningSquare, {
         confirmedEmpty,
       });
-      if (rendered) confirmedMinerRenderedKey = key;
+      if (rendered) {
+        confirmedMinerRenderedKey = key;
+        confirmedMinerFetchAttempt = 0;
+        confirmedMinerNextRetryAt = 0;
+      }
+      else if (confirmedMinerRequestKey === key) confirmedMinerRequestKey = '';
     } catch (error) {
       // Keep the older confirmed result visible. A transient RPC failure must not replace a
       // known-good miner roster with an error or an empty state.
       console.warn('confirmed miners refresh failed', error);
+      retryLater();
     } finally {
       if (confirmedMinerRequestKey === key
         && (confirmedMinerRenderedKey === key || String(confirmedMinerSource(chain.state.lastResolved, chain.state.lastPlayedResolved)?.roundId) !== String(requestedRound))) {
@@ -5609,15 +5674,17 @@ const renderRoundHistory = () => {
     // round takes the normal result path below because its winning tile and
     // proof remain public even though every reward is zero.
     if (r.status !== 'settled') {
-      const empty = r.status === 'no-bets';
       const live = r.status === 'live';
-      const label = live ? 'LIVE' : empty ? 'unsettled' : 'resolving';
+      const label = String(r.lifecycle?.label || (live ? 'live' : 'resolving')).toUpperCase();
       const time = r.isLive
         ? `${chain.format.formatClock(r.secondsLeft)} ${r.phase === 'betting' ? 'left' : 'result'}`
         : relTime(r.endsAt);
       const result = live
         ? 'Bidding is open · totals update from the live Round account'
-        : empty ? 'No published result — round was not settled' : 'Awaiting keeper resolution';
+        : r.status === 'refunded' ? 'Settlement timed out · every receipt was refunded'
+          : r.status === 'refund-ready' ? 'Settlement timed out · refunds are available'
+            : r.status === 'scheduled' ? 'Round account opened · betting has not started'
+              : 'Awaiting keeper resolution';
       return `
     <div class="round-entry ${r.status}" data-round-mode="${r.mode}" data-round-id="${r.roundId}">
       <button class="round-record" aria-expanded="false">
@@ -5657,12 +5724,17 @@ const renderRoundHistory = () => {
         : `${winnerCount} miner${winnerCount === 1n ? '' : 's'}`;
     const claimable = r.myBet > 0n && !r.claimed;
     const myLine = r.myBet > 0n
-      ? `<div><span>YOUR POSITION</span><strong>${chain.format.ethSmart(r.myBet)} SOL on #${tile}${r.claimed ? ' · claimed' : ''}</strong></div>`
-      : '';
+      ? `<div><span>YOUR POSITION</span><strong>${chain.format.ethSmart(r.myBet)} SOL on #${tile}${r.claimed ? ' · in Rewards' : ''}</strong></div>`
+      : r.walletHistoryKnown === false
+        ? '<div><span>YOUR POSITION</span><strong>Archived wallet history unavailable · live rewards remain in Rewards</strong></div>'
+        : '';
     // No claim button here: history is a ledger, and claiming lives in the Refine panel (which
     // lists every claimable round and can settle them in one transaction via claimMany). Two
     // entry points for the same action meant two places to keep in sync for no gain.
     const extra = myLine ? `<div class="round-detail-extra">${myLine}</div>` : '';
+    const projectionLine = r.projectionComplete === true
+      ? ''
+      : '<div><span>MINERS</span><strong>Participant index is catching up · counts unavailable</strong></div>';
     return `
     <div class="round-entry${claimable ? ' claimable' : ''}" data-round-mode="${r.mode}" data-round-id="${r.roundId}">
       <button class="round-record" aria-expanded="false">
@@ -5670,6 +5742,7 @@ const renderRoundHistory = () => {
       </button>
       <div class="round-detail" hidden data-round-id="${r.roundId}" data-square="${r.winningSquare}" data-prize="${r.potForWinners}" data-winner-total="${r.winnerTotal}" data-solo="${r.singleMinerRound ? '1' : ''}" data-winner="${r.singleMinerWinner || ''}" data-randomness="${r.randomnessValue == null ? '' : randomnessHex(r.randomnessValue)}" data-randomness-mode="${r.randomnessMode ?? 'switchboard'}" data-randomness-state="${r.randomnessState ?? 'settled'}" data-randomness-account="${r.randomnessId ?? ''}" data-randomness-commitment="${r.randomnessCommitment ?? ''}" data-randomness-commit-slot="${r.randomnessCommitSlot ?? ''}" data-wager="${r.totalWager}">
         <div><span>RESULT</span><strong>${result}</strong></div>
+        ${projectionLine}
         <div><span>NETWORK</span><strong>Solana</strong></div>
         <a class="round-explorer round-tx-link" href="${explorerContract}" target="_blank" rel="noreferrer" hidden>View on Solana ↗</a>
         ${extra}
@@ -5722,7 +5795,12 @@ document.querySelector('#round-miners-pagination')?.addEventListener('click', (e
     pageCount - 1,
     confirmedMinerPage + (button.dataset.minersPage === 'next' ? 1 : -1),
   ));
-  renderConfirmedMiners(confirmedMinerRows, confirmedMinerRows[0]?.roundId, confirmedMinerRows[0]?.winningSquare ?? 0);
+  renderConfirmedMiners(
+    confirmedMinerRows,
+    confirmedMinerRows[0]?.roundId,
+    confirmedMinerRows[0]?.winningSquare ?? 0,
+    { projectionComplete: confirmedMinerRenderedComplete },
+  );
 });
 
 const refreshRoundHistory = async ({ force = false } = {}) => {
@@ -6156,15 +6234,20 @@ const scheduleRealtimeSurfaceRefresh = ({ indexed = false, staking = false, glob
     if (route === 'stake' && (refreshStake || refreshIndexed)) void refreshStaking();
     if (route === 'about' && refreshGlobal
       && document.querySelector('[data-about-panel="stats"].active')) {
-      void refreshProtocolStats();
+      void refreshProtocolStats(true);
     }
   }, 100);
 };
 
 subscribeRoundIndexChanges(() => {
   // The indexer has now committed the row, so this refresh cannot race the database tail poll.
+  invalidateStakingRewardWindowCache();
   if (document.body.dataset.route === 'mine') void refreshIndexedConfirmedMiners();
   scheduleRealtimeSurfaceRefresh({ indexed: true, staking: true, global: true });
+});
+window.addEventListener('myne:reward-ledger-changed', () => {
+  invalidateReceiptCache();
+  scheduleRealtimeSurfaceRefresh({ indexed: true, staking: true });
 });
 subscribeAccountActivity(protocolPdas.stakePool, () => {
   invalidateStakingCache();

@@ -1,7 +1,7 @@
 import { PublicKey, SystemProgram, TransactionInstruction } from '@solana/web3.js';
 import bs58 from 'bs58';
 
-import { connection, getAccount } from './client.js';
+import { assertConfiguredCluster, connection, getAccount } from './client.js';
 import { GRID, MIN_ROUND_DEPLOYMENT, setGenesisTime, solanaNetwork } from './config.js';
 import { formatEther, parseEther } from './units.js';
 import { manualDeploymentRequiredBalance, readFeeParams } from './autocommit.js';
@@ -61,13 +61,63 @@ const RECEIPT_CACHE_MS = 5_000;
 // 8-byte discriminator + BetReceipt::INIT_SPACE. Keep this asserted in the
 // protocol capability tests whenever the receipt schema changes.
 const BET_RECEIPT_ACCOUNT_SIZE = 468;
-async function decodedReceipts({ roundId = null, authority = null } = {}) {
+const scanReceipts = async ({ roundId = null, authority = null } = {}) => {
+  const filters = [{ dataSize: BET_RECEIPT_ACCOUNT_SIZE }];
+  if (roundId !== null) filters.push({ memcmp: { offset: 9, bytes: bs58.encode(u64Seed(roundId)) } });
+  if (authority) filters.push({ memcmp: { offset: 17, bytes: new PublicKey(authority).toBase58() } });
+  const accounts = await connection.getProgramAccounts(protocolProgramId, {
+    commitment: 'confirmed',
+    filters,
+  });
+  return accounts.flatMap((entry) => {
+    try {
+      const value = decodeProtocolAccount('BetReceipt', entry.account.data);
+      return value ? [{ publicKey: entry.pubkey, account: value }] : [];
+    } catch { return []; }
+  });
+};
+
+async function decodedReceipts({
+  roundId = null,
+  authority = null,
+  expectedReceiptCount = null,
+} = {}) {
   if (!protocolProgramId) return [];
-  const cacheKey = `${roundId ?? '*'}:${authority ?? '*'}`;
+  const expected = expectedReceiptCount === null ? null : Number(toBig(expectedReceiptCount));
+  const cacheKey = `${roundId ?? '*'}:${authority ?? '*'}:${expected ?? '?'}`;
   const cached = receiptScans.get(cacheKey);
   if (cached?.data && Date.now() - cached.at < RECEIPT_CACHE_MS) return cached.data;
   if (cached?.request) return cached.request;
   const request = (async () => {
+    // Open receipt PDAs are the actionable wallet reward ledger. An exact
+    // authority-filtered confirmed scan is bounded by that wallet's unsettled
+    // receipts and cannot be made incomplete by a stalled history projector.
+    // Use it before Supabase whenever a wallet is involved.
+    if (authority) {
+      try {
+        return await scanReceipts({ roundId, authority });
+      } catch {
+        // Some RPC providers disable getProgramAccounts. For a specific round,
+        // the completeness-gated index below is a safe fallback. An authority-
+        // only index cannot prove that it did not omit an entire older round.
+        if (roundId === null) {
+          throw new Error('The wallet reward ledger is temporarily unavailable; no claim status was assumed');
+        }
+      }
+    }
+    // Current/previous-round participant identity has a direct confirmed fast
+    // lane: this is an exact data-size + round-id memcmp, not a program-wide
+    // scan. Validate its cardinality against Round.totalReceipts before use.
+    if (roundId !== null && !authority && expected !== null) {
+      if (expected === 0) return [];
+      try {
+        const decoded = await scanReceipts({ roundId });
+        if (decoded.length === expected) return decoded;
+      } catch {
+        // Some public RPCs disable getProgramAccounts. The completeness-gated
+        // durable index below remains the fallback.
+      }
+    }
     const indexed = await loadReceiptIndex({ roundId, address: authority });
     if (indexed) {
       const decoded = [];
@@ -81,21 +131,17 @@ async function decodedReceipts({ roundId = null, authority = null } = {}) {
           if (value) decoded.push({ publicKey: chunk[index], account: value });
         }
       }
+      if (expected !== null && decoded.length !== expected) {
+        throw new Error(`Receipt projection incomplete: expected ${expected}, decoded ${decoded.length}`);
+      }
       return decoded;
     }
-    if (solanaNetwork.cluster === 'mainnet-beta') {
+    if (solanaNetwork.cluster === 'mainnet-beta' && roundId === null && !authority) {
       throw new Error('The production receipt index is unavailable; refusing a program-wide account scan');
     }
-    const filters = [{ dataSize: BET_RECEIPT_ACCOUNT_SIZE }];
-    if (roundId !== null) filters.push({ memcmp: { offset: 9, bytes: bs58.encode(u64Seed(roundId)) } });
-    if (authority) filters.push({ memcmp: { offset: 17, bytes: new PublicKey(authority).toBase58() } });
-    const accounts = await connection.getProgramAccounts(protocolProgramId, { commitment: 'confirmed', filters });
-    const decoded = [];
-    for (const entry of accounts) {
-      try {
-        const value = decodeProtocolAccount('BetReceipt', entry.account.data);
-        if (value) decoded.push({ publicKey: entry.pubkey, account: value });
-      } catch { /* another MYNE account type */ }
+    const decoded = await scanReceipts({ roundId, authority });
+    if (expected !== null && decoded.length !== expected) {
+      throw new Error(`Receipt ledger incomplete: expected ${expected}, decoded ${decoded.length}`);
     }
     return decoded;
   })();
@@ -165,9 +211,24 @@ const roundFromAccount = (roundId, account) => {
   };
 };
 
+/** Decode a subscribed Round account without adding a second RPC request. */
+export function decodeRoundAccountData(roundId, data) {
+  return roundFromAccount(roundId, decodeProtocolAccount('Round', data));
+}
+
 export async function readRound(roundId) {
-  const account = await fetchProtocolAccount('Round', roundPda(roundId));
-  return roundFromAccount(roundId, account);
+  return (await readRoundWithContext(roundId)).round;
+}
+
+/** Confirmed Round snapshot plus the RPC context slot used for monotonic UI updates. */
+export async function readRoundWithContext(roundId) {
+  await assertConfiguredCluster();
+  const response = await connection.getAccountInfoAndContext(roundPda(roundId), 'confirmed');
+  const account = response.value ? decodeProtocolAccount('Round', response.value.data) : null;
+  return {
+    round: roundFromAccount(roundId, account),
+    slot: Number(response.context?.slot ?? 0),
+  };
 }
 
 export async function syncRoundGenesis() {
@@ -189,14 +250,29 @@ async function tokenBalance(owner, mint) {
 }
 
 export async function readMiner(address) {
-  const [config, miner, balance, miningPool, stakePosition, stakePool] = await Promise.all([
+  const authority = new PublicKey(address);
+  const accountAddresses = [
+    minerPda(address),
+    protocolPdas.miningPool,
+    stakePositionPda(address),
+    protocolPdas.stakePool,
+  ];
+  const [config, accountSnapshot, balance] = await Promise.all([
     getProtocolConfig(),
-    fetchProtocolAccount('Miner', minerPda(address)),
-    connection.getBalance(new PublicKey(address), 'confirmed'),
-    fetchProtocolAccount('MiningPool', protocolPdas.miningPool),
-    fetchProtocolAccount('StakePosition', stakePositionPda(address)),
-    fetchProtocolAccount('StakePool', protocolPdas.stakePool),
+    connection.getMultipleAccountsInfoAndContext(accountAddresses, 'confirmed'),
+    connection.getBalance(authority, 'confirmed'),
   ]);
+  const decodeSnapshotAccount = (name, info) => {
+    if (!info) return null;
+    if (!info.owner.equals(protocolProgramId)) throw new Error(`${name} account has the wrong owner`);
+    return decodeProtocolAccount(name, info.data);
+  };
+  const [miner, miningPool, stakePosition, stakePool] = [
+    decodeSnapshotAccount('Miner', accountSnapshot.value[0]),
+    decodeSnapshotAccount('MiningPool', accountSnapshot.value[1]),
+    decodeSnapshotAccount('StakePosition', accountSnapshot.value[2]),
+    decodeSnapshotAccount('StakePool', accountSnapshot.value[3]),
+  ];
   const rewardBreakdown = miningRewardBreakdown(miner, miningPool);
   const rewardIndex = toBig(stakePool?.rewardPerWeight);
   const rewardDebt = toBig(stakePosition?.rewardDebt);
@@ -238,6 +314,34 @@ export async function readMyBets(roundId, address) {
     account.amounts.forEach((amount, index) => { totals[index] += toBig(amount); });
   }
   return totals;
+}
+
+/**
+ * Authoritative candidate rounds for this wallet's actionable receipt ledger.
+ * Open BetReceipt PDAs are bounded per wallet and survive until their reward or
+ * refund has been processed, so a stalled history projection cannot hide one.
+ */
+export async function readWalletReceiptRounds(address) {
+  if (!address) return [];
+  const receipts = await decodedReceipts({ authority: address });
+  const ids = [...new Set(receipts
+    .filter(({ account }) => !account.claimed && !account.refunded)
+    .map(({ account }) => toBig(account.roundId).toString()))]
+    .map(BigInt);
+  const rounds = [];
+  for (let offset = 0; offset < ids.length; offset += 100) {
+    const batch = ids.slice(offset, offset + 100);
+    const infos = await connection.getMultipleAccountsInfo(batch.map(roundPda), 'confirmed');
+    infos.forEach((info, index) => {
+      if (!info) return;
+      const roundId = batch[index];
+      rounds.push({
+        roundId,
+        ...roundFromAccount(roundId, decodeProtocolAccount('Round', info.data)),
+      });
+    });
+  }
+  return rounds;
 }
 
 export async function placeBet({ roundId, tiles, ethPerTile }) {
@@ -324,14 +428,25 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
 
 async function claimableReceipts(roundIds, authority) {
   const wanted = new Set(roundIds.map((id) => BigInt(id).toString()));
-  return (await decodedReceipts({ authority })).filter(({ account }) => wanted.has(toBig(account.roundId).toString())
-    && account.authority.equals(new PublicKey(authority)) && !account.claimed && !account.refunded);
+  const authorityKey = new PublicKey(authority);
+  // One confirmed authority-filtered scan is the wallet's complete actionable
+  // ledger. Reuse it for every selected round instead of bursting one
+  // getProgramAccounts request per round from Claim All.
+  const rows = await decodedReceipts({ authority });
+  return rows.filter(({ account }) => wanted.has(toBig(account.roundId).toString())
+    && account.authority.equals(authorityKey)
+    && !account.claimed && !account.refunded);
 }
+
+export const NO_UNCLAIMED_RECEIPTS = 'NO_UNCLAIMED_RECEIPTS';
+const noUnclaimedReceipts = (message) => Object.assign(new Error(message), {
+  code: NO_UNCLAIMED_RECEIPTS,
+});
 
 export async function claimRound(roundId) {
   const account = getAccount();
   const rows = await claimableReceipts([roundId], account);
-  if (!rows.length) throw new Error('No unclaimed receipt for this round');
+  if (!rows.length) throw noUnclaimedReceipts('No unclaimed receipt for this round');
   const authority = new PublicKey(account);
   const { program } = await getWritableProgram();
   const ixs = await Promise.all(rows.map(({ publicKey, account: receipt }) => program.methods.claimReceipt().accounts({
@@ -347,7 +462,7 @@ export async function claimManyRounds(roundIds) {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
   const rows = await claimableReceipts(roundIds, account);
-  if (!rows.length) throw new Error('No unclaimed receipts for these rounds');
+  if (!rows.length) throw noUnclaimedReceipts('No unclaimed receipts for these rounds');
   const authority = new PublicKey(account);
   const { program } = await getWritableProgram();
   const instructions = await Promise.all(rows.map(({ publicKey, account: receipt }) => (
@@ -362,10 +477,18 @@ export async function claimManyRounds(roundIds) {
   // Four receipt settlements remain below legacy transaction account/compute
   // limits in the measured client path. Each chunk is simulated by
   // sendInstructions before the wallet is asked to sign.
-  for (let offset = 0; offset < instructions.length; offset += 4) {
-    signature = await sendInstructions(instructions.slice(offset, offset + 4));
+  try {
+    for (let offset = 0; offset < instructions.length; offset += 4) {
+      signature = await sendInstructions(instructions.slice(offset, offset + 4));
+      // Each confirmed chunk is durable. Remove its receipts from every
+      // subsequent read immediately, even if a later wallet prompt is rejected.
+      invalidateReceiptCache();
+    }
+  } finally {
+    // Also clear in-flight/cache state on a failed simulation or wallet prompt;
+    // an independent lifecycle worker may have processed the same receipts.
+    invalidateReceiptCache();
   }
-  invalidateReceiptCache();
   return signature;
 }
 export const claimManyEthOnly = claimManyRounds;
@@ -430,14 +553,16 @@ export async function burnUnclaimedMyne() {
 
 export async function readRoundWinners(roundId) {
   const round = await readRound(roundId);
-  const receiptRows = await decodedReceipts({ roundId });
+  const receiptRows = await decodedReceipts({
+    roundId,
+    expectedReceiptCount: round.totalReceipts,
+  });
   const miners = aggregateMiners(receiptRows);
   if (!round.resolved || round.winningSquare >= GRID) {
     return { winningSquare: round.winningSquare, winnerTotal: round.winnerTotal, solo: false, winners: [], miners };
   }
   const winningSquare = Number(round.winningSquare);
-  const roundAccount = await fetchProtocolAccount('Round', roundPda(roundId));
-  const soloSample = toBig(roundAccount?.soloSample);
+  const soloSample = toBig(round.soloSample);
   let soloWinner = null;
   if (round.singleMinerRound) {
     const receipt = receiptRows.find(({ account }) => {
@@ -510,7 +635,8 @@ export async function readRoundWinners(roundId) {
 }
 
 export async function readRoundMiners(roundId) {
-  const rows = await decodedReceipts({ roundId });
+  const round = await readRound(roundId);
+  const rows = await decodedReceipts({ roundId, expectedReceiptCount: round.totalReceipts });
   return aggregateMiners(rows);
 }
 export async function readRecentRounds(latestRoundId, lookback = 80) { return readRoundsRange(BigInt(latestRoundId) - BigInt(lookback), latestRoundId); }
@@ -537,39 +663,90 @@ export async function readExpectedRewards(rounds, address) {
   const expected = new Map();
   for (const round of rounds) {
     const key = String(round.roundId);
-    const winningSquare = Number(round.winningSquare);
     if (!authority) {
       expected.set(key, 0n);
       continue;
     }
-    const roundReceipts = receipts.filter(({ account }) => toBig(account.roundId) === BigInt(round.roundId) && !account.refunded);
-    const mine = roundReceipts.filter(({ account }) => account.authority.equals(authority));
-    let reward = 0n;
-    if (winningSquare >= 0 && winningSquare < GRID && round.winnerTotal > 0n) {
-      if (!round.singleMinerRound) reward = mine.reduce((sum, { account }) => sum + intervalReward(
-        round.bullionForWinners,
+    const mine = receipts.filter(({ account }) => toBig(account.roundId) === BigInt(round.roundId)
+      && account.authority.equals(authority) && !account.claimed && !account.refunded);
+    expected.set(key, expectedReceiptMyneReward(round, mine.map(({ account }) => account)));
+  }
+  return expected;
+}
+
+/** Pure exact unprocessed-receipt MYNE accrual, mirroring `receipt_rewards`. */
+export function expectedReceiptMyneReward(round, receiptAccounts) {
+  const winningSquare = Number(round.winningSquare);
+  let reward = 0n;
+  if (winningSquare >= 0 && winningSquare < GRID && toBig(round.winnerTotal) > 0n) {
+    if (round.singleMinerRound) {
+      const soloSample = round.soloSample === undefined || round.soloSample === null
+        ? null
+        : toBig(round.soloSample);
+      const selected = receiptAccounts.some((account) => {
+        const amount = toBig(account.amounts[winningSquare]);
+        const start = toBig(account.cumulativeStarts[winningSquare]);
+        return soloSample !== null && amount > 0n
+          && soloSample >= start && soloSample < start + amount;
+      });
+      if (selected) reward += toBig(round.bullionForWinners);
+    } else {
+      reward += receiptAccounts.reduce((sum, account) => sum + intervalReward(
+        toBig(round.bullionForWinners),
         account.cumulativeStarts[winningSquare],
         account.amounts[winningSquare],
-        round.winnerTotal,
+        toBig(round.winnerTotal),
       ), 0n);
-      else if (round.singleMinerWinner) reward = round.singleMinerWinner === authority.toBase58() ? round.bullionForWinners : 0n;
-      else {
-        const soloSample = round.soloSample === undefined || round.soloSample === null ? null : toBig(round.soloSample);
-        const soloReceipt = roundReceipts.find(({ account }) => {
-          const amount = toBig(account.amounts[winningSquare]);
-          const start = toBig(account.cumulativeStarts[winningSquare]);
-          return soloSample !== null && amount > 0n && soloSample >= start && soloSample < start + amount;
-        });
-        reward = soloReceipt?.account.authority.equals(authority) ? round.bullionForWinners : 0n;
-      }
     }
-    if (round.jackpotHit) reward += mine.reduce((sum, { account }) => sum + intervalReward(
-      round.motherlodeEmission,
+  }
+  if (round.jackpotHit && toBig(round.totalWager) > 0n) {
+    reward += receiptAccounts.reduce((sum, account) => sum + intervalReward(
+      toBig(round.motherlodeEmission),
       account.cumulativeStarts.reduce((total, value) => total + toBig(value), 0n),
       account.totalLamports,
-      round.totalWager,
+      toBig(round.totalWager),
     ), 0n);
-    expected.set(key, reward);
+  }
+  return reward;
+}
+
+/** Pure exact receipt accrual: normal winning tile plus round-wide Motherlode. */
+export function expectedReceiptSolReward(round, receiptAccounts) {
+  const winningSquare = Number(round.winningSquare);
+  let reward = 0n;
+  if (winningSquare >= 0 && winningSquare < GRID && toBig(round.winnerTotal) > 0n) {
+    reward += receiptAccounts.reduce((sum, account) => sum + intervalReward(
+      toBig(round.potForWinners),
+      account.cumulativeStarts[winningSquare],
+      account.amounts[winningSquare],
+      toBig(round.winnerTotal),
+    ), 0n);
+  }
+  if (round.jackpotHit && toBig(round.totalWager) > 0n) {
+    reward += receiptAccounts.reduce((sum, account) => sum + intervalReward(
+      toBig(round.motherlodePayoutLamports),
+      account.cumulativeStarts.reduce((total, value) => total + toBig(value), 0n),
+      account.totalLamports,
+      toBig(round.totalWager),
+    ), 0n);
+  }
+  return reward;
+}
+
+/** Exact per-wallet SOL accrual for every open reward receipt. */
+export async function readExpectedSolRewards(rounds, address) {
+  const receipts = address ? await decodedReceipts({ authority: address }) : [];
+  const authority = address ? new PublicKey(address) : null;
+  const expected = new Map();
+  for (const round of rounds) {
+    const key = String(round.roundId);
+    if (!authority) {
+      expected.set(key, 0n);
+      continue;
+    }
+    const mine = receipts.filter(({ account }) => toBig(account.roundId) === BigInt(round.roundId)
+      && account.authority.equals(authority) && !account.claimed && !account.refunded);
+    expected.set(key, expectedReceiptSolReward(round, mine.map(({ account }) => account)));
   }
   return expected;
 }
@@ -580,7 +757,10 @@ export async function readSettlementTx() { return null; }
 export async function readWinnerCounts(rounds) {
   const counts = new Map();
   for (const round of rounds) {
-    const receipts = await decodedReceipts({ roundId: round.roundId });
+    const receipts = await decodedReceipts({
+      roundId: round.roundId,
+      expectedReceiptCount: round.totalReceipts,
+    });
     const winners = new Set();
     const square = Number(round.winningSquare);
     let soloWinner = null;

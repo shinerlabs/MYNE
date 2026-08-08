@@ -70,25 +70,39 @@ test('server keeper binds before start, preserves the future-slot mix, and settl
   const persist = source.indexOf('const reveal = await loadOrCreateServerReveal');
   const open = source.indexOf('.openRound(ROUND_ID_BN)');
   const bind = source.indexOf('.bindRoundServerCommitment(ROUND_ID_BN');
-  const atomicBind = source.indexOf('sendKeeperInstructions([openIx, bindIx])');
+  const atomicBind = source.indexOf('[openIx, bindIx]');
   const bettingStart = source.indexOf('waitForChainTimestamp(openedAt)');
   const auto = source.indexOf('.executeAutoPlan(ROUND_ID_BN');
   const bettingClose = source.indexOf('waitForChainTimestamp(bettingEndsAt)');
   const lock = source.indexOf('.lockRoundServerEntropy(ROUND_ID_BN)');
   const futureSlot = source.indexOf('serverEntropyAvailable(slotHashes.data, targetSlot)');
+  const settlementWindow = source.indexOf('waitForChainTimestamp(settlesAt)');
   const settle = source.indexOf('.settleRoundServer(Array.from(reveal))');
 
   for (const [label, index] of Object.entries({
-    persist, open, bind, atomicBind, bettingStart, auto, bettingClose, lock, futureSlot, settle,
+    persist, open, bind, atomicBind, bettingStart, auto, bettingClose, lock, futureSlot,
+    settlementWindow, settle,
   })) assert.ok(index >= 0, `Missing ${label} phase`);
   assert.ok(persist < open && open < bind && bind < atomicBind, 'Commitment was not durably bound atomically');
   assert.ok(atomicBind < bettingStart && bettingStart < auto, 'Auto plans must wait for scheduled opened_at');
   assert.ok(auto < bettingClose && bettingClose < lock, 'Entropy must be locked only after betting closes');
-  assert.ok(lock < futureSlot && futureSlot < settle, 'Reveal must mix a future SlotHashes entry');
+  assert.ok(
+    lock < futureSlot && futureSlot < settlementWindow && settlementWindow < settle,
+    'Reveal must mix future entropy and wait for the absolute settlement window',
+  );
   assert.match(source, /slotHashes: SYSVAR_SLOT_HASHES_PUBKEY/);
   assert.match(source, /replaceRecentBlockhash:\s*true/);
   assert.match(source, /reason: 'protocol-paused'[\s\S]*ROUND_KEEPER_DEFERRED_EXIT_CODE/);
   assert.match(source, /scheduledOpenedAt[\s\S]*ROUND_KEEPER_MISSED_EXIT_CODE/);
+  assert.match(source, /createWorkerHeartbeat\('round-keeper'/);
+  assert.match(source, /stage,[\s\S]*deadlines:/);
+  assert.match(source, /next-prebind-deadline-missed/);
+  assert.match(source, /lock-deadline-missed/);
+  assert.match(source, /settlement-deadline-missed/);
+  assert.match(source, /withOperationTimeout/);
+  assert.match(source, /ROUND_KEEPER_RPC_TIMEOUT_MS/);
+  assert.match(source, /ROUND_KEEPER_TRANSACTION_TIMEOUT_MS/);
+  assert.match(source, /signal: controller\.signal/);
   assert.doesNotMatch(source, /roundState\.(?:totalReceipts|grossDeployedLamports)\s*[!<>=]/);
   assert.doesNotMatch(source, /@switchboard-xyz/);
 });

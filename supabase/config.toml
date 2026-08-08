@@ -21,3 +21,6 @@ verify_jwt = false
 
 [functions.profile-update]
 verify_jwt = false
+
+[functions.wallet-round-history]
+verify_jwt = false

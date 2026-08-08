@@ -7,7 +7,7 @@ from the protocol administrator.
 ## Safety model
 
 The service defaults to `MYNE_WORKER_MODE=standby`. Standby verifies all of the following every 30
-seconds, but never starts a transaction-producing worker:
+seconds, but starts no child worker:
 
 - Solana Mainnet genesis and the exact configured, production-approved
   randomness mode (legacy Switchboard or MYNE server commit–reveal);
@@ -15,10 +15,25 @@ seconds, but never starts a transaction-producing worker:
 - protocol version 6 and the configured operational public keys;
 - the verified, non-default Meteora liquidity gate;
 - the protocol remains paused;
-- authenticated access to the production round index.
+- authenticated access to the production round index and the exact
+  `round-projection-v2` schema capability.
+
+`MYNE_WORKER_MODE=observe` is the paused recovery/catch-up mode. It starts exactly one
+`round-indexer` child with `ROUND_INDEXER_PROJECT_ONLY=1` and
+`ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=0`. It cannot archive, close, settle, refund, swap, burn or
+send a transaction; the randomness, lifecycle and buyback workers are not started. The host creates
+an unfunded ephemeral Anchor wallet only because the read APIs require a wallet object, and observe
+mode does not load either operational signer secret. Both standby and observe refuse an unpaused
+protocol.
 
 The service exposes only `/healthz`; its response contains mode, revision and worker state, never
 credentials, RPC URLs or wallet addresses.
+
+In live mode, `ok` is the availability signal for rounds, projection and receipt accrual. Buyback
+is supervised but isolated: a Jupiter/pool/lease outage sets `degraded: true`, names
+`buyback-keeper` in `degradedWorkers`, and leaves `ok: true` so Railway does not restart healthy
+round and claim workers. Alert on both fields. A release canary still requires completed buyback
+evidence before archival even though an operational buyback outage cannot take mining offline.
 
 ## Railway layout
 
@@ -46,7 +61,8 @@ only through Railway's encrypted variable interface; never put them in Git, Verc
 - `MYNE_BUYBACK_KEYPAIR_B64`
 
 The two signer values are base64 encodings of the existing 64-byte Solana keypair JSON arrays. They
-must resolve to the exact distinct authority addresses already stored in `ProtocolConfig`.
+must resolve to the exact distinct authority addresses already stored in `ProtocolConfig`. They are
+required for standby/live validation but are deliberately not read in observe mode.
 
 ## Standby deployment
 
@@ -65,11 +81,49 @@ The expected readiness log is:
 {"event":"worker-host-ready","mode":"standby",...}
 ```
 
+## Paused projection catch-up
+
+After applying every migration through
+`20260808135000_wallet_round_history.sql`, authorize the read/project-only process with the exact
+program acknowledgement:
+
+```text
+MYNE_WORKER_MODE=observe
+MYNE_WORKER_HOST_OBSERVE=D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e
+ROUND_INDEXER_START_SLOT=<recorded program deployment slot>
+REFERRAL_INDEXER_START_SLOT=<slot at or before the first MinerRegistered event>
+OBSERVE_PROJECTION_FRESHNESS_MS=30000
+```
+
+The expected host log has `"mode":"observe"`; the only `worker-started` event must name
+`round-indexer` with `"mode":"project-only"`. Treat any transaction signature emitted in this mode
+as a stop condition.
+
+Do not call the projection caught up until all of the following are recorded from service-role
+queries and finalized Solana reads:
+
+- `/healthz` reports `ok: true`, `mode: "observe"`, `protocolPaused: true`, and the round-indexer
+  reports a fresh heartbeat/completion, `lastOutcome: "ok"`, zero consecutive errors and a recent
+  successful tick within `OBSERVE_PROJECTION_FRESHNESS_MS`;
+- the stable `${programId}:rounds:v2` and `${programId}:rounds:v2:referrals:v1` cursors are at the
+  latest finalized transaction for the program (the older endpoint-keyed cursor rows are not used);
+- the `${programId}:rounds:v2:historical-gaps:v1` cursor completes one full bounded pass and wraps
+  through zero, with no `round-reconciliation-error` or `partial-error:*` tick;
+- every retained terminal/nonterminal Round in the recovery window has the expected row, and each
+  terminal row has `projection_complete=true`; the database digest matches all 25 tile amounts,
+  all 25 receipt counts and the on-chain total/processed/closed counters; and
+- there is no stale unresolved database row for a finalized settled Round and no incomplete row in
+  the two-round canary window.
+
+An old cursor, one successful process start, or a public page that merely looks current is not
+catch-up evidence. Keep mining paused and observe mode running until all checks pass.
+
 ## Controlled live transition
 
-Do not change to live mode until the independent review, release evidence, migrations, real
-server-randomness/Meteora canary and legal gate in `MAINNET_LAUNCH_RUNBOOK.md` are complete. Then set the
-recorded deployment start slots, and only as the final service authorization set:
+Do not change to live mode until the independent review, release evidence, migrations, paused
+provider/Meteora rehearsal, legal gate and projection catch-up in `MAINNET_LAUNCH_RUNBOOK.md` are
+complete. Set the recorded deployment start slots and authorize live workers while the protocol is
+still paused. Only then may the two-round resume canary begin:
 
 ```text
 MYNE_WORKER_MODE=live
@@ -79,6 +133,7 @@ REFERRAL_INDEXER_START_SLOT=<slot at or before the first MinerRegistered event>
 MYNE_FIRST_SERVER_ROUND_ID=<reviewed first managed round>
 SERVER_RANDOMNESS_STATE_DIR=/data/server-randomness
 SERVER_RANDOMNESS_KEEPER_LIVE=D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e
+ROUND_ACCOUNT_RETENTION_SECONDS=130
 ```
 
 Live mode starts the round indexer, lifecycle keeper, buyback keeper and the configured
@@ -92,6 +147,9 @@ Confirmed-program WebSocket notifications are debounced for 750 milliseconds bef
 cycle; the normal polling interval remains the fallback if WebSocket delivery is interrupted.
 Lifecycle recovery processes a fair maximum of 12 rounds per cycle by default, preventing an old
 backlog from exhausting the shared RPC allowance or delaying current reward processing.
+Settlement and reward accrual are immediate, but `ROUND_ACCOUNT_RETENTION_SECONDS=130` delays
+settled Round/receipt closure long enough for two 60-second round cycles of direct-chain winner and
+miner-card recovery.
 
 Server mode commits a secret before betting, locks a future Solana SlotHashes entry only after
 betting closes, and publishes the reveal during settlement. It cannot select a known winning tile
@@ -105,9 +163,11 @@ availability benefit until replica coordination for every worker is independentl
 ## Incident response
 
 1. Pause the protocol on-chain.
-2. Change `MYNE_WORKER_MODE` back to `standby`.
+2. Change `MYNE_WORKER_MODE` to `observe` with the exact `MYNE_WORKER_HOST_OBSERVE` acknowledgement,
+   so projection/reconciliation continue while every transaction-producing worker is fenced.
 3. Preserve Railway logs, `/data/buyback-state.json` and `/data/server-randomness/` before any
    recovery action.
 4. Reconcile the last finalized round, indexed event cursor, buyback signature and archive proof.
 5. Rotate an operational wallet only through the paused, reviewed on-chain rotation instruction.
-6. Resume only after a fresh standby health check and documented sign-off.
+6. Resume only after the full observe-mode catch-up and two-canary gate pass again with documented
+   sign-off.

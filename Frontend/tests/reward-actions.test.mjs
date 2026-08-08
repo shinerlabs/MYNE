@@ -17,6 +17,9 @@ test('reward controls expose three explicit, accessible protocol intents', () =>
   assert.doesNotMatch(main, /SOL auto-paid|Sent when each round settles/);
   assert.match(main, /SOL \+ MYNE · 10% fee/);
   assert.match(main, /Permanent 5× weight · 0% fee/);
+  assert.match(main, /won · in Rewards/);
+  assert.match(main, / · in Rewards/);
+  assert.doesNotMatch(main, /won · claimed| · claimed/);
 });
 
 test('keeper-accrued receipts refresh both the claim index and durable SOL ledger before an action', () => {
@@ -24,22 +27,32 @@ test('keeper-accrued receipts refresh both the claim index and durable SOL ledge
   assert.match(main, /const claimableSol = \(state\.claimableSol \?\? 0n\) \+ claimableTotals\.eth/);
   assert.doesNotMatch(main, /already been paid to your wallet/);
   assert.match(mine, /if \(state\.account\) void refreshMiner\(\);[\s\S]*\}, 5000\);/);
+  const accountStats = main.slice(main.indexOf('const accountStats'), main.indexOf('const renderAccountMenu'));
+  assert.match(accountStats, /chain\.state\.claimableSol \?\? 0n/);
+  assert.match(accountStats, /claimableRounds\.reduce\(\(sum, r\) => sum \+ r\.userEth/);
 });
 
-test('result and miners card resolve through independent bounded indexes', () => {
-  assert.match(mine, /loadLatestSettledRoundId\(roundId\)/);
-  assert.match(mine, /loadLatestPlayedSettledRoundId\(roundId\)/);
-  assert.match(mine, /const resolvedId = BigInt\(resolvedRoundId\)/);
+test('result reads the exact Round PDA first and uses bounded indexes only for older gaps', () => {
+  const resolved = mine.slice(mine.indexOf('async function loadResolved'), mine.indexOf('// --- actions'));
+  assert.match(resolved, /const directRound = await readRound\(targetId\)/);
+  assert.ok(resolved.indexOf('publishDirect()') < resolved.indexOf('loadLatestSettledRound(targetId)'));
+  assert.match(resolved, /loadLatestSettledRound\(targetId\)/);
+  assert.match(resolved, /loadLatestPlayedSettledRound\(targetId\)/);
+  assert.match(resolved, /resolvedLoaders\.has\(key\)/);
+  assert.doesNotMatch(resolved, /loadLatestSettledRound[\s\S]*setTimeout[\s\S]*loadLatestSettledRound/);
+  assert.match(mine, /applyRoundSnapshot\(round, slot\)/);
+  assert.match(mine, /if \(round\.resolved\) publishResolvedRound\(state\.roundId, round\)/);
   assert.match(mine, /state\.lastResolved = \{ roundId: resolvedId, \.\.\.round \}/);
   assert.doesNotMatch(mine, /winnerDisplayUntil/);
-  assert.match(mine, /state\.lastPlayedResolved = participantRound/);
+  assert.match(mine, /state\.lastPlayedResolved = \{ roundId: resolvedId, \.\.\.round \}/);
 });
 
 test('round refreshes cannot publish an old board after the schedule rolls', () => {
   assert.match(mine, /const requestedRoundId = BigInt\(state\.roundId\)/);
   assert.match(mine, /roundRefreshRequest\?\.roundId === requestedRoundId/);
   assert.match(mine, /if \(state\.roundId !== requestedRoundId\) return/);
-  assert.match(mine, /state\.roundId !== requestedRoundId \|\| state\.account !== requestedAccount/);
+  assert.match(mine, /state\.roundId !== roundId \|\| state\.account !== account/);
+  assert.match(mine, /void refreshWalletBets\(requestedRoundId, requestedAccount\)/);
   assert.match(mine, /if \(roundRefreshRequest === request\) roundRefreshRequest = null/);
 });
 
@@ -70,15 +83,45 @@ test('reward ledger reads and actions stay bound to the connected wallet', () =>
   assert.match(burn, /if \(!miner\.hasPosition\)/);
 });
 
+test('wallet reward accounts come from one confirmed cross-account snapshot', () => {
+  const readMiner = lottery.slice(
+    lottery.indexOf('export async function readMiner'),
+    lottery.indexOf('// V6 credits a round'),
+  );
+  assert.match(readMiner, /getMultipleAccountsInfoAndContext\(accountAddresses, 'confirmed'\)/);
+  assert.match(readMiner, /accountSnapshot\.value\[0\]/);
+  assert.match(readMiner, /accountSnapshot\.value\[3\]/);
+  assert.match(readMiner, /info\.owner\.equals\(protocolProgramId\)/);
+  assert.doesNotMatch(readMiner, /fetchProtocolAccount/);
+});
+
 test('Claim All settles receipts before withdrawing MYNE and never aliases SOL-only', () => {
   const claimAll = mine.slice(mine.indexOf('export async function claimAll'), mine.indexOf('/** Settle every selected receipt, then convert'));
   assert.match(claimAll, /await claimMany\(roundIds\)/);
   assert.match(claimAll, /runTx\('Claiming SOL…', withdrawClaimableSol, refreshMiner\)/);
-  assert.match(claimAll, /if \(miner\.rewardsBullion > 0n\) return refine\(\)/);
-  assert.match(claimAll, /return refine\(\)/);
+  assert.match(claimAll, /const refined = await refine\(\)/);
+  assert.match(claimAll, /return refined && allReceiptsProcessed/);
+  assert.match(claimAll, /Claimed available rewards · some receipts still need processing/);
   assert.doesNotMatch(claimAll, /claimEthOnly/);
   assert.match(main, /rewardAction === 'sol'[\s\S]*claimEthOnly\(ids\)/);
   assert.match(main, /rewardAction === 'all'[\s\S]*claimAll\(ids\)/);
+});
+
+test('partial multi-transaction claims invalidate stale receipts and preserve durable progress', () => {
+  const lowLevel = lottery.slice(
+    lottery.indexOf('export async function claimManyRounds'),
+    lottery.indexOf('export const claimManyEthOnly'),
+  );
+  assert.match(lowLevel, /try \{[\s\S]*sendInstructions[\s\S]*invalidateReceiptCache\(\)[\s\S]*\} finally \{[\s\S]*invalidateReceiptCache\(\)/);
+
+  const batching = mine.slice(mine.indexOf('async function claimBatched'), mine.indexOf('/** Claim every supplied round'));
+  assert.match(batching, /error\?\.code === NO_UNCLAIMED_RECEIPTS/);
+  assert.match(batching, /reward is already in the durable wallet ledger/);
+
+  const burn = mine.slice(mine.indexOf('export async function stakeAndBurnRewards'), mine.indexOf('// --- boot'));
+  assert.match(burn, /let allReceiptsProcessed = true/);
+  assert.match(burn, /Staked \+ burned available MYNE · some receipts still need processing/);
+  assert.match(burn, /return false/);
 });
 
 test('SOL-only and Stake + Burn actions explicitly withdraw the accrued owner balance', () => {

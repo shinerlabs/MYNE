@@ -29,7 +29,7 @@ test('normalizes Program coder lower-camel event names to projection names', () 
 test('production indexer replays finalized signatures without moving the cursor', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   assert.match(source, /--replay-signature=/);
-  assert.match(source, /processEvent\(event, signature, transaction\.slot\)/);
+  assert.match(source, /processEvent\(event, signature, transaction\.slot, \{ canonicalReplay: true \}\)/);
   const replayBody = source.slice(
     source.indexOf('async function replayTransactions'),
     source.indexOf('async function signaturesSince'),
@@ -44,30 +44,84 @@ test('production indexer acquires an atomic lease before each tick', async () =>
   assert.match(source, /if \(!\(await acquireIndexerLease\(\)\)\)/);
 });
 
-test('production indexer refuses a partially migrated server claims schema', async () => {
+test('historical gap watermarks can never be adopted as transaction cursors', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
-  assert.match(source, /async function requireIndexerSchema/);
-  assert.match(source, /mine_worker_schema_capabilities\?select=release&release=eq\.server-claims-v1/);
-  assert.match(source, /await requireIndexerSchema\(\)/);
-  assert.match(source, /20260808133000_worker_schema_capabilities\.sql/);
+  const adoption = source.slice(
+    source.indexOf('async function state'),
+    source.indexOf('async function registeredReferrer'),
+  );
+  assert.match(adoption, /!candidateId\.includes\(':historical-gaps:'\)/);
 });
 
-test('settled Round PDAs repair stale unresolved index rows from their canonical transaction', async () => {
+test('production indexer refuses a partially migrated round projection schema', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /async function requireIndexerSchema/);
+  assert.match(source, /mine_worker_schema_capabilities\?select=release&release=eq\.round-projection-v2/);
+  assert.match(source, /await requireIndexerSchema\(\)/);
+  assert.match(source, /20260808134500_round_projection_completeness\.sql/);
+});
+
+test('recent and stale Round PDAs rebuild complete canonical history before cursor advancement', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   const reconciliation = source.slice(
-    source.indexOf('async function replayCanonicalSettlement'),
+    source.indexOf('async function canonicalRoundSignatures'),
     source.indexOf('async function archiveReadyRounds'),
   );
   assert.match(reconciliation, /resolved=eq\.false/);
   assert.match(reconciliation, /settles_at=lte\.\$\{chainNow\}/);
   assert.match(reconciliation, /limit=32/);
-  assert.match(reconciliation, /program\.account\.round\.fetchNullable\(address\)/);
-  assert.match(reconciliation, /roundState\?\.settled/);
+  assert.match(reconciliation, /recentScheduledRoundIds\(currentRoundId, reconcileDepth\)/);
+  assert.match(reconciliation, /historicalGapPlan\(currentRoundId\)/);
+  assert.match(reconciliation, /advanceHistoricalGapCursor\(gapPlan\.next\)/);
+  assert.match(reconciliation, /program\.account\.round\.fetchMultiple\(addresses\)/);
   assert.match(reconciliation, /getSignaturesForAddress\(address/);
-  assert.match(reconciliation, /normalizeAnchorEventName\(event\.name\) !== 'RoundSettled'/);
-  assert.match(reconciliation, /for \(const event of events\) await processEvent\(event, row\.signature, transaction\.slot\)/);
-  assert.match(source, /const reconciled = await reconcileSettledRounds\(\);[\s\S]*return \{ indexed, reconciled, archived, referralsIndexed \}/);
-  assert.doesNotMatch(reconciliation, /getProgramAccounts|\.all\s*\(/);
+  assert.match(reconciliation, /canonicalSignatureOrder\(gathered\)/);
+  assert.match(reconciliation, /for \(const event of roundEvents\)[\s\S]*processEvent\(event, row\.signature, transaction\.slot, \{ canonicalReplay: true \}\)/);
+  assert.match(reconciliation, /roundNeedsCanonicalReplay/);
+  assert.match(reconciliation, /mine_round_projection_digest/);
+  assert.match(reconciliation, /roundProjectionMatchesChain/);
+  assert.match(reconciliation, /projection_complete/);
+  assert.match(reconciliation, /chainRoundProjection\(roundId, state/);
+  assert.match(reconciliation, /changedRoundProjection/);
+  assert.match(source, /reconcileCanonicalRounds\(\);[\s\S]*const indexed = await indexTransactions\(\)/);
+  assert.match(source, /indexed, reconciled, reconciliationFailures, archived, referralsIndexed, projectOnly/);
+  assert.doesNotMatch(reconciliation, /getProgramAccounts|program\.account\.[A-Za-z]+\.all\s*\(/);
+});
+
+test('participant digest migration checks every tile without a PostgREST row cap', async () => {
+  const migration = await readFile(
+    new URL('../../supabase/migrations/20260808134500_round_projection_completeness.sql', import.meta.url),
+    'utf8',
+  );
+  assert.match(migration, /add column if not exists projection_complete boolean not null default false/);
+  assert.match(migration, /add column if not exists projection_version smallint not null default 2/);
+  assert.match(migration, /add column if not exists source_slot bigint/);
+  assert.match(migration, /mine_round_projection_digest\(p_round_ids bigint\[\]\)/);
+  assert.match(migration, /generate_series\(0, 24\)/);
+  assert.match(migration, /sum\(b\.amount_wei\)/);
+  assert.match(migration, /count\(distinct b\.receipt\)/);
+  assert.match(migration, /enforce_mine_round_source_slot_monotonic/);
+  assert.match(migration, /new\.source_slot < old\.source_slot/);
+  assert.match(migration, /before update of source_slot/);
+  assert.match(migration, /'round-projection-v2'/);
+});
+
+test('projection reconciliation does not impose a participant row ceiling', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const reconciliation = source.slice(
+    source.indexOf('async function fetchProjectionDigests'),
+    source.indexOf('async function archiveReadyRounds'),
+  );
+  assert.doesNotMatch(reconciliation, /mine_round_bets\?round_id=in/);
+  assert.doesNotMatch(reconciliation, /maxPages:\s*16|16_000/);
+  assert.match(source, /restImmutableRoundRows/);
+});
+
+test('projection-only mode keeps history live without reaching signer transactions', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  assert.match(source, /ROUND_INDEXER_PROJECT_ONLY/);
+  assert.match(source, /const archived = projectOnly \? 0 : await archiveReadyRounds\(\)/);
+  assert.match(source, /indexed, reconciled, reconciliationFailures, archived, referralsIndexed, projectOnly/);
 });
 
 test('observing RoundArchived never downgrades canonical archive verification', async () => {
@@ -87,6 +141,11 @@ test('DeploymentCreated only writes columns present in the immutable bet ledger'
     source.indexOf("case 'AutoPlanConfigured'"),
   );
   assert.doesNotMatch(deploymentCase, /rent_payer|data\.rentPayer/);
+  assert.ok(
+    deploymentCase.indexOf('projection_complete=eq.true')
+      < deploymentCase.indexOf("upsert('mine_round_bets'"),
+    'projection health must be withdrawn before new participant rows are written',
+  );
 });
 
 test('receipt settlement status is derived from the normalized Anchor event name', async () => {
@@ -101,7 +160,21 @@ test('receipt settlement status is derived from the normalized Anchor event name
   assert.match(receiptCases, /eventName === 'ReceiptClaimed'[\s\S]*'claimed'/);
   assert.match(receiptCases, /eventName === 'ReceiptRefunded'/);
   assert.match(receiptCases, /eventName === 'ReceiptClosed'/);
+  assert.match(receiptCases, /fetchProjectionDigests\(\[BigInt\(roundId\)\]\)/);
+  assert.match(receiptCases, /digest\.indexed_processed_receipts/);
+  assert.match(receiptCases, /digest\.indexed_closed_receipts/);
+  assert.doesNotMatch(receiptCases, /mine_receipt_settlements\?.*select=receipt/);
   assert.doesNotMatch(receiptCases, /event\.name ===/);
+});
+
+test('ensuring a round is insert-only and cannot churn updated_at on replay', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const ensure = source.slice(
+    source.indexOf('async function ensureRound'),
+    source.indexOf('async function sendMeasured'),
+  );
+  assert.match(ensure, /resolution=ignore-duplicates,return=minimal/);
+  assert.doesNotMatch(ensure, /updated_at/);
 });
 
 test('receipt accrual migration preserves historical paid rows and adds the claim-vault status', async () => {
@@ -162,7 +235,7 @@ test('zero-bid settlement still indexes the published winning tile and zero econ
     source.indexOf("case 'RoundSettled'"),
     source.indexOf("case 'ReceiptClaimed'"),
   );
-  assert.match(settledCase, /const winnerTotal = winners\.reduce[\s\S]*0n/);
+  assert.match(settledCase, /const winnerTotal = BigInt\(asString\(roundState\.tileLamports\[winningSquare\]\)\)/);
   assert.match(settledCase, /winnerTotal > 0n \?[\s\S]*: 0n/);
   assert.match(settledCase, /resolved: true/);
   assert.match(settledCase, /winning_square: winningSquare/);

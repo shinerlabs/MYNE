@@ -14,6 +14,7 @@ const [
   profile,
   config,
   myneBalance,
+  walletRoundHistory,
 ] = await Promise.all([
   load('../_shared/common.ts'),
   load('../solana-nonce/index.ts'),
@@ -25,6 +26,7 @@ const [
   load('../profile-update/index.ts'),
   load('../../config.toml'),
   load('../_shared/myne-chat-balance.ts'),
+  load('../wallet-round-history/index.ts'),
 ]);
 
 test('CORS is fail-closed to MYNE production origins and explicit loopback development origins', () => {
@@ -64,11 +66,11 @@ test('wallet verification returns only a moderator UI hint while deletion rechec
 });
 
 test('every public function is origin guarded and every mutation is wallet/rate guarded', () => {
-  for (const source of [nonce, verify, send, react, reactions, remove, profile]) {
+  for (const source of [nonce, verify, send, react, reactions, remove, profile, walletRoundHistory]) {
     assert.match(source, /guardCors\(req\)/);
     assert.match(source, /rateLimitGuard\(/);
   }
-  for (const source of [send, react, remove, profile]) {
+  for (const source of [send, react, remove, profile, walletRoundHistory]) {
     assert.match(source, /requireSession\(req\)/);
     assert.match(source, /session\.walletAddress/);
   }
@@ -83,6 +85,7 @@ test('all custom-wallet functions bypass platform JWT parsing and enforce auth i
     'chat-reactions',
     'chat-delete',
     'profile-update',
+    'wallet-round-history',
   ]) {
     assert.match(config, new RegExp(`\\[functions\\.${functionName}\\]\\nverify_jwt = false`));
   }
@@ -132,6 +135,14 @@ test('wallet ownership is derived server-side for messages, reactions, and profi
   assert.doesNotMatch(send, /payload\?\.walletAddress/);
   assert.doesNotMatch(react, /payload\?\.walletAddress/);
   assert.doesNotMatch(profile, /payload\?\.walletAddress/);
+  assert.match(walletRoundHistory, /p_wallet: session\.walletAddress/);
+  assert.doesNotMatch(walletRoundHistory, /payload\?\.wallet|payload\.wallet/);
+});
+
+test('wallet round history is a bounded decoration read, not a public settlement-table grant', () => {
+  assert.match(walletRoundHistory, /const MAX_ROUND_IDS = 50/);
+  assert.match(walletRoundHistory, /mine_wallet_round_history_v1/);
+  assert.match(walletRoundHistory, /p_round_ids: roundIds/);
 });
 
 test('avatar persistence verifies raster MIME, canonical bytes, magic signatures, and decoded size', () => {

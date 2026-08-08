@@ -27,9 +27,15 @@ export function previousConfirmedRoundId(currentRoundId) {
   return id > 0n ? id - 1n : null;
 }
 
-export function shouldRefreshConfirmedMiners(lastResolved, renderedKey, requestKey) {
+export function shouldRefreshConfirmedMiners(
+  lastResolved,
+  renderedKey,
+  requestKey,
+  renderedComplete = true,
+) {
   const key = confirmedMinerRoundKey(lastResolved);
-  if (key === null || key === renderedKey || key === requestKey) return false;
+  if (key === null || key === requestKey) return false;
+  if (key === renderedKey) return renderedComplete !== true;
   // A delayed RPC response must never replace a newer roster already rendered from the index.
   if (renderedKey !== '') {
     try { return BigInt(key) > BigInt(renderedKey); } catch { return false; }

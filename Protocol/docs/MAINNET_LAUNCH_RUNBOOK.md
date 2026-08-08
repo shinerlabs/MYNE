@@ -1,5 +1,9 @@
 # Mainnet launch runbook
 
+The operational authority, completeness and two-round resume requirements in
+[`PRODUCTION_RESILIENCE.md`](./PRODUCTION_RESILIENCE.md) are mandatory for every
+activation and incident recovery.
+
 This is an ordered, controlled launch procedure—not an automatic deployment script. Stop on any mismatch. The read-only artifact preflight is:
 
 ```bash
@@ -15,7 +19,9 @@ one-way paused migration, but an older Devnet layout is not a Mainnet migration 
    layout address. It receives the direct 1% round
    allocation plus 10% of the gross staking allocation (0.8% of volume), for 1.8% direct admin
    revenue before integer dust.
-2. **Randomness role:** Switchboard authority, round rent payer, archive attestor, indexer and lifecycle keeper.
+2. **Randomness role:** authority for the provider selected on-chain (currently MYNE server
+   commit-reveal; Switchboard remains supported only when the deployed configuration selects it),
+   round rent payer, archive attestor, indexer and lifecycle keeper.
 3. **Buyback role:** receives only the 1% allocations, performs the registered-pool swaps and burns, and marks completion.
 
 The deployer remains a fourth, separate offline key for deployment, upgrades and protocol
@@ -209,6 +215,8 @@ supabase/migrations/20260808123000_empty_round_stats.sql
 supabase/migrations/20260808124500_keeper_lease_privileges.sql
 supabase/migrations/20260808130000_round_realtime.sql
 supabase/migrations/20260808133000_worker_schema_capabilities.sql
+supabase/migrations/20260808134500_round_projection_completeness.sql
+supabase/migrations/20260808135000_wallet_round_history.sql
 ```
 
 The receipt-accrual and later migrations are part of the same release as the upgraded program
@@ -218,9 +226,14 @@ payments from rewards safely processed into the owner claim vault. The
 public ledger while excluding it from mined and Motherlode award totals. Do
 not deploy the upgraded workers or frontend until every listed migration is present
 and the PostgREST schema cache exposes their updated status/view contracts.
-The final `mine_worker_schema_capabilities` marker is service-role-only; the
-production worker host refuses to report healthy or start its children until it
-can read the exact `server-claims-v1` release marker.
+The `20260808133000` marker records the earlier claim-vault schema and is retained in migration
+history. The later projection migration replaces that view with the final service-role-only
+`round-projection-v2` marker. The production worker host and standalone indexer refuse to report
+healthy or start until that exact final value is visible. The wallet-history migration must then
+be applied last; its service-only RPC returns display history for at most 50
+projection-complete rounds and never defines claimability. Deploy the matching
+`wallet-round-history` Edge Function with wallet-session authentication and keep the underlying
+settlement table/RPC unavailable to browser roles.
 `keeper_lease_privileges` ensures only the service role can fence production
 workers; the Supabase security advisor must report no public execution access.
 
@@ -252,7 +265,14 @@ keeper with the same randomness role. Set:
 ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1
 REFERRAL_INDEXER_START_SLOT=<program deployment slot>
 RANDOMNESS_RETENTION_SECONDS=86400
+ROUND_ACCOUNT_RETENTION_SECONDS=130
 ```
+
+The 130-second Round retention is a release invariant: settlement and reward accrual remain
+immediate, while the settled Round/receipt accounts stay readable for at least two 60-second round
+cycles so the winner and miner cards can recover from a missed subscription before cleanup.
+`RANDOMNESS_RETENTION_SECONDS` applies only when the configured provider creates external
+Switchboard randomness accounts; current server commit-reveal mode has no such account to close.
 
 The referral v1 cursor is intentionally independent from the existing round cursor. Keep its start
 slot at or before the first `MinerRegistered` event so the finalized-log backfill can prove every
@@ -263,15 +283,19 @@ The live buyback keeper also requires the service-role-only database lease from 
 its 10-minute default fence prevents overlapping replicas from spending the same allocation. Keep
 its journal on one durable, backed-up volume and never bypass the lease during an unresolved swap.
 The reviewed managed-host layout, standby checks, secret boundaries, one-replica rule and incident
-procedure are defined in `WORKER_HOSTING.md`. Deploy and prove that service in standby while the
-protocol is paused; do not use a laptop or browser tab as the production supervisor.
+procedure are defined in `WORKER_HOSTING.md`. Deploy in standby, then enter the acknowledged
+projection-only observe mode while the protocol remains paused. Observe mode must complete a
+finalized backfill and one full historical-gap cursor pass without a reconciliation failure before
+any transaction-producing worker is authorized. Do not use a laptop or browser tab as the
+production supervisor.
 
-Switchboard also creates an auxiliary lookup table for each randomness request. `closeIx()` closes
-the randomness account after the verification window, but later LUT rent recovery requires the
-ephemeral request signer after Solana's lookup-table cooldown. Retain those ephemeral signers only
-in the production secret manager and add a separately reviewed post-cooldown `closeLutIx()`
-operation; never
-write their private keys to the repository or an ordinary keeper journal.
+If a future reviewed configuration selects Switchboard, it also creates an auxiliary lookup table
+for each randomness request. `closeIx()` closes the randomness account after the verification
+window, but later LUT rent recovery requires the ephemeral request signer after Solana's
+lookup-table cooldown. Retain those ephemeral signers only in the production secret manager and
+add a separately reviewed post-cooldown `closeLutIx()` operation; never write their private keys to
+the repository or an ordinary keeper journal. This cleanup path does not apply to the current
+server commit-reveal provider.
 
 ## 5. Create and register the selected official Meteora pool
 
@@ -289,33 +313,47 @@ verifies the MYNE/WSOL mint order and reserve balances, simulates the transactio
 exact submission confirmation. Repeat only after independently reviewing every printed address and
 threshold.
 
-## 6. Rehearse randomness and buyback while paused/controlled
+## 6. Rehearse the configured randomness provider and buyback while paused/controlled
 
-Run the exact Switchboard sequence with measured compute: atomically create/open/bind a fresh
-uncommitted request; submit manual and Auto-round deployments with that bound account; wait for
-betting to close; atomically commit and call `record_round_randomness_commit`; wait for the seed
-slot; then atomically reveal and call `settle_round_verified`. Confirm early commit, missing/wrong
-deployment randomness account, wrong owner/binding, stale commit, stale reveal, duplicate
-settlement and missed-reveal paths fail safely. Run the buyback keeper in dry-run mode, then
-authorize one tiny direct-pool canary. Verify swap and burn signatures appear in
-`mine_buyback_executions`.
+Rehearse the exact provider recorded in `ProtocolConfig`; never run a keeper for a different
+provider. For the current server commit-reveal mode, pre-open and bind each Round before its
+scheduled `opened_at`, preserve the full `[opened_at, betting_ends_at)` 60-second betting interval,
+lock a future Solana SlotHashes entry only after betting closes, then publish the committed reveal
+and call the server settlement instruction. Prove commitment/binding mismatch, early entropy lock,
+missing or stale SlotHashes data, wrong authority, duplicate settlement and withheld reveal paths
+fail into the documented refund path without blocking future round preparation.
 
-## 7. Activate once and observe one complete round
+If a future reviewed configuration selects Switchboard instead, rehearse its create/open/bind,
+post-close commit, future-slot seed, reveal and `settle_round_verified` path with the same failure
+coverage. In either mode, every prepared zero-bid round must still publish a winning tile and award
+zero MYNE. Run the buyback keeper in dry-run mode, then authorize one tiny direct-pool canary.
+Verify swap and burn signatures appear in `mine_buyback_executions`.
+
+## 7. Resume through two canary rounds
 
 Only after all gates pass, run `pnpm mainnet:activate` without its submission flag. The activation
 script repeats the exact DAMM v2/DLMM pool and vault checks, simulates `set_paused(false)`, and requires exact
 acknowledgements for production service health and the independent security review. Repeat with the
 printed `SUBMIT_MAINNET_ACTIVATE` value only when those statements are true. Save the config
-snapshot and activation signature. Observe one complete low-volume round through:
+snapshot and activation signature. The resume gate is two complete rounds: one low-volume played
+round and one empty round. Across both, prove:
 
 1. receipt creation;
-2. Switchboard settlement;
+2. settlement by the provider selected on-chain, including the complete provider proof;
 3. permissionless accumulated and auto-burn reward processing;
 4. exact fee evidence: 8% gross staking split into 0.8% direct admin and 7.2% net stakers, 2%
    Motherlode, 1% swap/burn and 1% direct admin, with the complete 12% conserved;
 5. deterministic archive commitment;
 6. receipt closure with rent returned to users;
 7. round closure with rent returned to the randomness role;
-8. delayed Switchboard randomness closure.
+8. provider-specific cleanup where applicable, without shortening
+   `ROUND_ACCOUNT_RETENTION_SECONDS=130`;
+9. confirmed winner display for the full practical five-second result interval, exact live tile
+   totals/miner roster, claim-vault SOL/MYNE balances and gap-free 50-row history pagination;
+10. `projection_complete=true` for both canaries, the stable v2 forward/referral cursors caught up
+    to the latest finalized program transaction, no outstanding reconciliation failure, and a
+    continuously healthy `/healthz` through the following round.
 
-If any counter, payout invariant, archive hash or evidence total disagrees, pause and investigate. Do not advertise until this sequence and the independent review are signed off.
+If any counter, payout invariant, archive hash, cursor, health deadline or evidence total
+disagrees, pause and investigate. Do not advertise until both canaries and the independent review
+are signed off.

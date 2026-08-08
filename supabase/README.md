@@ -40,10 +40,19 @@ the event-driven frontend. Private receipt settlements, keeper leases, and
 indexer cursors remain unpublished; the existing timed reads remain a recovery
 path if Realtime is unavailable.
 
-Migration `20260808133000_worker_schema_capabilities.sql` is the final,
-service-role-only release marker. Both the worker host and standalone round
-indexer require its exact `server-claims-v1` value before they start, so an
-older database can no longer look healthy while new receipt events fail.
+Migration `20260808133000_worker_schema_capabilities.sql` records the historical
+`server-claims-v1` capability. Migration
+`20260808134500_round_projection_completeness.sql` then adds the 25-tile/counter
+digest, monotonic finalized source slot and projection health fields before it
+atomically replaces the service-role-only marker with `round-projection-v2`.
+Both the worker host and standalone round indexer require that final value, so
+an older or partially migrated database cannot look healthy.
+
+Migration `20260808135000_wallet_round_history.sql` must follow it. The
+service-role-only RPC decorates at most 50 projection-complete historical rows
+for the signed wallet. The matching `wallet-round-history` Edge Function takes
+the wallet only from the verified session; browser callers cannot enumerate a
+different wallet or use this display projection as claim authority.
 
 ## Wallet-only chat
 
@@ -179,7 +188,10 @@ ban enforcement.
    administrator provisioning, and the final `mine_worker_schema_capabilities` release marker in
    timestamp order. The production worker host refuses to start until the marker is readable by
    `service_role`; this prevents a healthy-looking worker from running against a partial schema.
-4. Deploy all matching Edge Functions with the MYNE origin allowlist.
+4. Deploy all matching Edge Functions with the MYNE origin allowlist, including
+   `wallet-round-history`. Its custom signed-wallet session is mandatory even
+   though Supabase gateway JWT verification is disabled; the service-only RPC
+   must remain revoked from `public`, `anon`, and `authenticated`.
 5. Provision moderators with the guarded `Protocol` command. Keep wallet addresses in ignored
    operational configuration, dry-run first, then require exact confirmation:
 

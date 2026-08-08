@@ -7,7 +7,7 @@
  * canonical archive hash on-chain.
  */
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import anchor from '@anchor-lang/core';
 import {
@@ -29,13 +29,34 @@ import {
   myneClaimProjection,
 } from './referral-index-policy.mjs';
 import { normalizeAnchorEventData, normalizeAnchorEventName } from './anchor-event-data.mjs';
-import { attachProgramWake, createWakeSignal, runWorkerTick } from './event-driven-loop.mjs';
+import {
+  canonicalSignatureOrder,
+  historicalRoundGapBatch,
+  recentScheduledRoundIds,
+  roundNeedsCanonicalReplay,
+  roundProjectionMatchesChain,
+} from './round-reconciliation-policy.mjs';
+import {
+  attachProgramWake,
+  createWakeSignal,
+  emitWorkerHeartbeat,
+  runWorkerTick,
+} from './event-driven-loop.mjs';
 
 const { AnchorProvider, EventParser, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
   || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
-const provider = AnchorProvider.env();
+const environmentProvider = AnchorProvider.env();
+// Projection, cursor and reconciliation must observe one finality boundary.
+// Anchor's environment default can be `processed`, while log history below is
+// explicitly finalized; mixing them lets a newer account state race ahead of
+// the transaction stream that explains it.
+const provider = new AnchorProvider(
+  environmentProvider.connection,
+  environmentProvider.wallet,
+  { commitment: 'finalized', preflightCommitment: 'confirmed', skipPreflight: false },
+);
 setProvider(provider);
 const payer = provider.wallet.payer;
 assert.ok(payer, 'A file-backed randomness/indexer wallet is required');
@@ -46,20 +67,22 @@ const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 assert.match(supabaseUrl, /^https:\/\//, 'SUPABASE_URL must use HTTPS');
 assert.ok(serviceRole, 'SUPABASE_SERVICE_ROLE_KEY is required and must remain server-side');
 
-// RPC URLs commonly carry API keys. Persist only a stable digest as cursor
-// identity so service credentials never enter Supabase rows, backups or logs.
-const rpcIdentity = createHash('sha256')
-  .update(provider.connection.rpcEndpoint)
-  .digest('hex')
-  .slice(0, 24);
-const INDEXER_ID = `${PROGRAM_ID.toBase58()}:${rpcIdentity}`;
+// A projection cursor belongs to the program/schema, not an RPC URL. Tying it
+// to an endpoint made failover start a second cursor and a second lease while
+// the first writer could still be active.
+const INDEXER_ID = `${PROGRAM_ID.toBase58()}:rounds:v2`;
 const REFERRAL_INDEXER_ID = `${INDEXER_ID}:referrals:v${REFERRAL_PROJECTION_VERSION}`;
+const ROUND_GAP_CURSOR_ID = `${INDEXER_ID}:historical-gaps:v1`;
 const intervalMs = Number(process.env.ROUND_INDEXER_INTERVAL_MS || 3000);
 const tickTimeoutMs = Number(process.env.ROUND_INDEXER_TICK_TIMEOUT_MS || 120_000);
 const realtimeDebounceMs = Number(process.env.ROUND_INDEXER_REALTIME_DEBOUNCE_MS || 750);
 const startSlot = Number(process.env.ROUND_INDEXER_START_SLOT ?? -1);
 const referralStartSlot = Number(process.env.REFERRAL_INDEXER_START_SLOT ?? startSlot);
 const maxPages = Number(process.env.ROUND_INDEXER_MAX_PAGES || 100);
+const reconcileDepth = Number(process.env.ROUND_INDEXER_RECONCILE_DEPTH || 12);
+const reconcileMaxPages = Number(process.env.ROUND_INDEXER_RECONCILE_MAX_PAGES || 4);
+const reconcileGapBatch = Number(process.env.ROUND_INDEXER_GAP_BATCH || 8);
+const projectOnly = process.env.ROUND_INDEXER_PROJECT_ONLY === '1';
 const requireBuybackEvidence = process.env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE === '1';
 // A supervised child can be restarted after an RPC watchdog timeout while its
 // database lease is still live. The host supplies one stable, replica-scoped
@@ -69,6 +92,7 @@ const indexerInstanceId = String(process.env.ROUND_INDEXER_LEASE_HOLDER || '').t
 const SERVER_RANDOMNESS_SLOT_FLAG = 1n << 63n;
 const SERVER_RANDOMNESS_SLOT_MASK = SERVER_RANDOMNESS_SLOT_FLAG - 1n;
 const SIGNED_BIGINT_MAX = SERVER_RANDOMNESS_SLOT_MASK;
+const ROUND_PROJECTION_VERSION = 2;
 assert.ok(Number.isInteger(intervalMs) && intervalMs >= 1000, 'ROUND_INDEXER_INTERVAL_MS must be >= 1000');
 assert.ok(
   Number.isInteger(tickTimeoutMs) && tickTimeoutMs >= 15_000 && tickTimeoutMs <= 600_000,
@@ -80,6 +104,23 @@ assert.ok(
 );
 assert.ok(Number.isInteger(referralStartSlot), 'REFERRAL_INDEXER_START_SLOT must be an integer');
 assert.ok(Number.isInteger(maxPages) && maxPages > 0, 'ROUND_INDEXER_MAX_PAGES must be positive');
+assert.match(
+  String(process.env.ROUND_INDEXER_PROJECT_ONLY || '0'),
+  /^(?:0|1)$/,
+  'ROUND_INDEXER_PROJECT_ONLY must be 0 or 1',
+);
+assert.ok(
+  Number.isInteger(reconcileDepth) && reconcileDepth > 0 && reconcileDepth <= 64,
+  'ROUND_INDEXER_RECONCILE_DEPTH must be between 1 and 64',
+);
+assert.ok(
+  Number.isInteger(reconcileMaxPages) && reconcileMaxPages > 0 && reconcileMaxPages <= 8,
+  'ROUND_INDEXER_RECONCILE_MAX_PAGES must be between 1 and 8',
+);
+assert.ok(
+  Number.isInteger(reconcileGapBatch) && reconcileGapBatch > 0 && reconcileGapBatch <= 32,
+  'ROUND_INDEXER_GAP_BATCH must be between 1 and 32',
+);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const finalizedChainTimeSeconds = async () => {
@@ -126,7 +167,7 @@ const indexedNetwork = requireMatchingSolanaNetwork({
     ? PROGRAM_ID.toBase58()
     : null,
 });
-if (indexedNetwork === 'mainnet-beta') {
+if (indexedNetwork === 'mainnet-beta' && !projectOnly) {
   assert.equal(
     requireBuybackEvidence,
     true,
@@ -150,6 +191,23 @@ async function rest(path, { method = 'GET', body, prefer } = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+/**
+ * Page an exact, immutable round relation without PostgREST's 1,000-row cap.
+ * Callers must supply a deterministic order and only use this after the chain
+ * counters prove no more rows can be appended.
+ */
+async function restImmutableRoundRows(path, { pageSize = 1000 } = {}) {
+  assert.match(path, /round_id=eq\.[^&]+/);
+  assert.match(path, /(?:^|&)order=/);
+  const rows = [];
+  const separator = path.includes('?') ? '&' : '?';
+  for (let offset = 0; ; offset += pageSize) {
+    const chunk = await rest(`${path}${separator}limit=${pageSize}&offset=${offset}`);
+    rows.push(...(chunk || []));
+    if (!chunk || chunk.length < pageSize) return rows;
+  }
+}
+
 async function acquireIndexerLease() {
   const response = await fetch(`${supabaseUrl}/rest/v1/rpc/acquire_mine_keeper_lease`, {
     method: 'POST',
@@ -159,7 +217,7 @@ async function acquireIndexerLease() {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      p_lease_name: `round-indexer:${PROGRAM_ID.toBase58()}:${rpcIdentity}`,
+      p_lease_name: `round-indexer:${PROGRAM_ID.toBase58()}:rounds:v2`,
       p_holder: indexerInstanceId,
       p_ttl_seconds: 120,
     }),
@@ -176,17 +234,24 @@ const upsert = (table, rows, conflict) => rest(
 
 async function requireIndexerSchema() {
   const rows = await rest(
-    'mine_worker_schema_capabilities?select=release&release=eq.server-claims-v1&limit=1',
+    'mine_worker_schema_capabilities?select=release&release=eq.round-projection-v2&limit=1',
   );
   assert.equal(
     rows?.length,
     1,
-    'Round index schema is incomplete; apply every Supabase migration through 20260808133000_worker_schema_capabilities.sql',
+    'Round index schema is incomplete; apply every Supabase migration through 20260808134500_round_projection_completeness.sql',
   );
 }
 
 async function ensureRound(roundId) {
-  await upsert('mine_rounds', { round_id: asString(roundId), updated_at: new Date().toISOString() }, 'round_id');
+  // Several events defensively ensure their parent row exists. A merge upsert
+  // touched the row timestamp even when it already existed, creating a Realtime storm
+  // during canonical replay. Ignore the conflict so this is insert-only.
+  await rest('mine_rounds?on_conflict=round_id', {
+    method: 'POST',
+    body: [{ round_id: asString(roundId) }],
+    prefer: 'resolution=ignore-duplicates,return=minimal',
+  });
 }
 
 async function sendMeasured(instructions) {
@@ -236,9 +301,16 @@ function eventU64(value, label) {
   return encoded;
 }
 
-async function processEvent(event, signature, slot) {
+async function processEvent(event, signature, slot, { canonicalReplay = false } = {}) {
   const data = normalizeAnchorEventData(event.data);
   const eventName = normalizeAnchorEventName(event.name);
+  // Forward cursor writes carry their finalized transaction slot. Historical
+  // canonical replay deliberately omits it: replay fills missing evidence but
+  // must not claim to be a newer observation than the live cursor.
+  const roundSource = {
+    projection_version: ROUND_PROJECTION_VERSION,
+    ...(canonicalReplay ? {} : { source_slot: asString(slot) }),
+  };
   switch (eventName) {
     case 'RoundOpened': {
       await upsert('mine_rounds', {
@@ -248,6 +320,7 @@ async function processEvent(event, signature, slot) {
         betting_ends_at: asString(data.bettingEndsAt),
         settles_at: asString(data.settlesAt),
         refund_at: asString(data.refundAt),
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -263,6 +336,7 @@ async function processEvent(event, signature, slot) {
         randomness_provider_kind: SWITCHBOARD_PROVIDER_KIND,
         randomness_id: new PublicKey(data.randomnessAccount).toBase58(),
         randomness_commit_slot: commitSlot.toString(),
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -278,6 +352,7 @@ async function processEvent(event, signature, slot) {
         randomness_provider_kind: SWITCHBOARD_PROVIDER_KIND,
         randomness_id: new PublicKey(data.randomnessAccount).toBase58(),
         randomness_commit_slot: commitSlot.toString(),
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -293,6 +368,7 @@ async function processEvent(event, signature, slot) {
         randomness_commitment_hex: eventHex32(data.commitment, 'Server commitment'),
         randomness_commitment_signature: signature,
         randomness_commitment_tx_slot: asString(slot),
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -310,6 +386,7 @@ async function processEvent(event, signature, slot) {
         randomness_target_slot: targetSlot.toString(),
         randomness_lock_signature: signature,
         randomness_lock_tx_slot: asString(slot),
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -335,6 +412,7 @@ async function processEvent(event, signature, slot) {
         randomness_hex: randomnessHex,
         randomness_reveal_signature: signature,
         randomness_reveal_tx_slot: asString(slot),
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -359,6 +437,20 @@ async function processEvent(event, signature, slot) {
         deployment_slot: slot,
       })).filter((row) => BigInt(row.amount_wei) > 0n);
       if (rows.length) {
+        if (!canonicalReplay) {
+          // A row previously proven complete becomes provisional as soon as a
+          // newer finalized deployment is observed. Invalidate before adding
+          // the new rows so no reader can cache a partial roster as complete.
+          // The false-only filter avoids update/realtime churn.
+          await rest(
+            `mine_rounds?round_id=eq.${roundId}&projection_complete=eq.true`,
+            {
+              method: 'PATCH',
+              body: { projection_complete: false, ...roundSource },
+              prefer: 'return=minimal',
+            },
+          );
+        }
         await upsert('mine_round_bets', rows, 'round_id,receipt,square');
         // One exact indexed read resolves a short social referral code. Never scan program
         // accounts or wildcard-query the ever-growing bet ledger in production.
@@ -424,6 +516,7 @@ async function processEvent(event, signature, slot) {
         mining_admin_lamports: asString(data.miningAdminLamports),
         admin_total_lamports: asString(data.adminTotalLamports),
         admin_fee_wallet: new PublicKey(data.adminFeeWallet).toBase58(),
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -431,18 +524,16 @@ async function processEvent(event, signature, slot) {
     case 'RoundSettled': {
       const roundId = asString(data.roundId);
       await ensureRound(roundId);
-      const bets = await rest(`mine_round_bets?round_id=eq.${roundId}&select=bettor,receipt,square,amount_wei,cumulative_start_wei`);
       const winningSquare = Number(data.winningTile);
-      const winners = (bets || []).filter((bet) => Number(bet.square) === winningSquare);
-      const winnerTotal = winners.reduce((sum, bet) => sum + BigInt(bet.amount_wei), 0n);
+      const roundState = await program.account.round.fetch(roundPda(roundId));
+      const winnerTotal = BigInt(asString(roundState.tileLamports[winningSquare]));
       const prize = BigInt(asString(data.prizeLamports));
       const payoutMul = winnerTotal > 0n ? (prize * 1_000_000_000_000_000_000n) / winnerTotal : 0n;
       const soloSample = BigInt(asString(data.soloSample));
-      const soloWinner = data.soloMode
-        ? winners.find((bet) => {
-          const start = BigInt(bet.cumulative_start_wei);
-          return soloSample >= start && soloSample < start + BigInt(bet.amount_wei);
-        })?.bettor ?? null
+      const digest = (await fetchProjectionDigests([BigInt(roundId)])).get(roundId) ?? null;
+      const projectionComplete = roundProjectionMatchesChain(roundState, digest);
+      const soloWinner = data.soloMode && projectionComplete
+        ? await indexedSoloWinner(roundId, winningSquare, soloSample)
         : null;
       const randomness = bytes(data.randomness);
       assert.equal(randomness.length, 32, 'Round randomness output must contain 32 bytes');
@@ -514,8 +605,10 @@ async function processEvent(event, signature, slot) {
         ...providerFields,
         solo_sample: soloSample.toString(),
         total_receipts: asString(data.totalReceipts),
+        projection_complete: projectionComplete,
         settlement_signature: signature,
         settlement_slot: slot,
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
@@ -548,20 +641,22 @@ async function processEvent(event, signature, slot) {
         slot,
         updated_at: new Date().toISOString(),
       }, 'round_id,receipt,status');
-      const statusFilter = eventName === 'ReceiptClosed' ? 'closed' : 'claimed,accrued,refunded';
-      const rows = await rest(`mine_receipt_settlements?round_id=eq.${roundId}&status=in.(${statusFilter})&select=receipt`);
+      // Aggregate in Postgres. An unbounded PostgREST select silently caps at
+      // 1,000 rows and previously froze these counters on large rounds.
+      const digest = (await fetchProjectionDigests([BigInt(roundId)])).get(roundId);
+      assert.ok(digest, `Missing participant digest for round ${roundId}`);
       await rest(`mine_rounds?round_id=eq.${roundId}`, {
         method: 'PATCH',
         body: eventName === 'ReceiptClosed'
-          ? { closed_receipts: new Set((rows || []).map((row) => row.receipt)).size, updated_at: new Date().toISOString() }
-          : { processed_receipts: new Set((rows || []).map((row) => row.receipt)).size, updated_at: new Date().toISOString() },
+          ? { closed_receipts: digest.indexed_closed_receipts, ...roundSource, updated_at: new Date().toISOString() }
+          : { processed_receipts: digest.indexed_processed_receipts, ...roundSource, updated_at: new Date().toISOString() },
         prefer: 'return=minimal',
       });
       break;
     }
     case 'BuybackCompleted': {
       await rest(`mine_rounds?round_id=eq.${asString(data.roundId)}`, {
-        method: 'PATCH', body: { buyback_completed: true, updated_at: new Date().toISOString() }, prefer: 'return=minimal',
+        method: 'PATCH', body: { buyback_completed: true, ...roundSource, updated_at: new Date().toISOString() }, prefer: 'return=minimal',
       });
       break;
     }
@@ -571,13 +666,14 @@ async function processEvent(event, signature, slot) {
         archive_hash: bytes(data.archiveHash).toString('hex'),
         archive_slot: asString(data.slot),
         archived_at: new Date().toISOString(),
+        ...roundSource,
         updated_at: new Date().toISOString(),
       }, 'round_id');
       break;
     }
     case 'RoundClosed': {
       await rest(`mine_rounds?round_id=eq.${asString(data.roundId)}`, {
-        method: 'PATCH', body: { closed_signature: signature, closed_slot: slot, updated_at: new Date().toISOString() }, prefer: 'return=minimal',
+        method: 'PATCH', body: { closed_signature: signature, closed_slot: slot, ...roundSource, updated_at: new Date().toISOString() }, prefer: 'return=minimal',
       });
       break;
     }
@@ -588,7 +684,33 @@ async function processEvent(event, signature, slot) {
 
 async function state(id = INDEXER_ID) {
   const rows = await rest(`mine_indexer_state?id=eq.${encodeURIComponent(id)}&select=*`);
-  return rows?.[0] ?? null;
+  if (rows?.[0]) return rows[0];
+
+  // One-time endpoint-keyed cursor adoption. The signature stream is the same
+  // canonical Mainnet history across honest RPCs, so the newest existing
+  // program projection is a safe starting point for the stable v2 identity.
+  // Persist the adopted row before returning; later failovers use only v2.
+  const candidates = await rest(
+    'mine_indexer_state?select=*&order=newest_slot.desc&limit=64',
+  );
+  const referralCursor = id === REFERRAL_INDEXER_ID;
+  const legacy = (candidates || []).find((candidate) => {
+    const candidateId = String(candidate.id || '');
+    if (!candidateId.startsWith(`${PROGRAM_ID.toBase58()}:`)) return false;
+    return referralCursor
+      ? candidateId.includes(':referrals:')
+      : !candidateId.includes(':referrals:')
+        && !candidateId.includes(':historical-gaps:')
+        && candidateId !== INDEXER_ID;
+  });
+  if (!legacy) return null;
+  const adopted = {
+    ...legacy,
+    id,
+    updated_at: new Date().toISOString(),
+  };
+  await upsert('mine_indexer_state', adopted, 'id');
+  return adopted;
 }
 
 async function registeredReferrer(authority) {
@@ -670,7 +792,9 @@ async function replayTransactions(signatures) {
     assert.equal(transaction.meta.err, null, `Replay transaction ${signature} failed on chain`);
     const parsed = [...parser.parseLogs(transaction.meta.logMessages)];
     assert.ok(parsed.length > 0, `Replay transaction ${signature} contains no MYNE events`);
-    for (const event of parsed) await processEvent(event, signature, transaction.slot);
+    for (const event of parsed) {
+      await processEvent(event, signature, transaction.slot, { canonicalReplay: true });
+    }
     await processReferralEvents(parsed, signature, transaction.slot);
     transactions += 1;
     events += parsed.length;
@@ -755,64 +879,268 @@ async function indexReferralTransactions() {
   return rows.length;
 }
 
+async function canonicalRoundSignatures(address) {
+  const gathered = [];
+  let before;
+  for (let page = 0; page < reconcileMaxPages; page += 1) {
+    const rows = await provider.connection.getSignaturesForAddress(address, {
+      limit: 1000,
+      ...(before ? { before } : {}),
+    }, 'finalized');
+    gathered.push(...rows);
+    if (rows.length < 1000) return canonicalSignatureOrder(gathered);
+    before = rows.at(-1).signature;
+  }
+  throw new Error(
+    `Round ${address.toBase58()} exceeds the bounded canonical replay history; `
+    + 'raise ROUND_INDEXER_RECONCILE_MAX_PAGES after capacity review',
+  );
+}
+
 /**
- * Recover a settlement event when the global program-signature cursor missed a
- * transaction but the canonical Round PDA already records `settled = true`.
- *
- * The repair remains bounded: only recent indexed unresolved rows are probed,
- * and each exact Round PDA has a small signature history. Replaying the real
- * transaction preserves the winning wallet, fee event and server proof; those
- * facts must never be guessed from an incomplete database row.
+ * Rebuild one exact round oldest-to-newest. Settlement depends on commitment,
+ * lock, reveal, fee and bet events, so replaying only the settlement transaction
+ * cannot repair a missing prerequisite. Every projection is an idempotent
+ * upsert and the global cursor is deliberately untouched.
  */
-async function replayCanonicalSettlement(roundId, address) {
-  const signatures = await provider.connection.getSignaturesForAddress(address, {
-    limit: 64,
-  }, 'finalized');
+async function replayCanonicalRoundHistory(roundId, address) {
+  const signatures = await canonicalRoundSignatures(address);
+  let transactions = 0;
+  let settlementSignature = null;
   for (const row of signatures) {
-    if (row.err) continue;
     const transaction = await provider.connection.getTransaction(row.signature, {
       commitment: 'finalized', maxSupportedTransactionVersion: 0,
     });
     if (!transaction?.meta?.logMessages || transaction.meta.err) continue;
     const events = [...parser.parseLogs(transaction.meta.logMessages)];
-    const isSettlement = events.some((event) => {
-      if (normalizeAnchorEventName(event.name) !== 'RoundSettled') return false;
+    const roundEvents = events.filter((event) => {
       const data = normalizeAnchorEventData(event.data);
-      return asString(data.roundId) === asString(roundId);
+      return data.roundId !== undefined && asString(data.roundId) === asString(roundId);
     });
-    if (!isSettlement) continue;
-    for (const event of events) await processEvent(event, row.signature, transaction.slot);
-    return row.signature;
+    if (!roundEvents.length) continue;
+    for (const event of roundEvents) {
+      await processEvent(event, row.signature, transaction.slot, { canonicalReplay: true });
+      if (normalizeAnchorEventName(event.name) === 'RoundSettled') {
+        settlementSignature = row.signature;
+      }
+    }
+    transactions += 1;
   }
-  return null;
+  return { transactions, settlementSignature };
 }
 
-async function reconcileSettledRounds() {
+async function fetchProjectionDigests(roundIds) {
+  if (!roundIds.length) return new Map();
+  assert.ok(roundIds.length <= 128, 'Projection digest round batch exceeds the reviewed bound');
+  const rows = await rest('rpc/mine_round_projection_digest', {
+    method: 'POST',
+    body: { p_round_ids: roundIds.map(asString) },
+  });
+  return new Map((rows || []).map((row) => [String(row.round_id), row]));
+}
+
+async function indexedSoloWinner(roundId, winningSquare, soloSample) {
+  const rows = await rest(
+    `mine_round_bets?round_id=eq.${roundId}&square=eq.${winningSquare}`
+      + `&cumulative_start_wei=lte.${soloSample}`
+      + '&select=bettor,cumulative_start_wei,amount_wei'
+      + '&order=cumulative_start_wei.desc&limit=1',
+  );
+  const candidate = rows?.[0];
+  if (!candidate) return null;
+  const start = BigInt(candidate.cumulative_start_wei);
+  const amount = BigInt(candidate.amount_wei);
+  return soloSample >= start && soloSample < start + amount ? candidate.bettor : null;
+}
+
+const chainRoundProjection = (
+  roundId,
+  state,
+  { projectionComplete = false, soloWinner = null } = {},
+) => {
+  const settled = Boolean(state.settled);
+  const winningSquare = Number(state.winningTile);
+  const gross = BigInt(asString(state.grossDeployedLamports));
+  const winnerTotal = settled && winningSquare >= 0 && winningSquare < 25
+    ? BigInt(asString(state.tileLamports[winningSquare]))
+    : 0n;
+  const prize = BigInt(asString(state.prizeLamports));
+  return {
+    round_id: asString(roundId),
+    rent_payer: state.rentPayer.toBase58(),
+    opened_at: asString(state.openedAt),
+    betting_ends_at: asString(state.bettingEndsAt),
+    settles_at: asString(state.settlesAt),
+    refund_at: asString(state.refundAt),
+    resolved: settled,
+    winning_square: settled ? winningSquare : null,
+    jackpot_hit: settled ? Boolean(state.motherlodeHit) : false,
+    single_miner_round: settled ? Boolean(state.soloMode) : false,
+    winner: settled && Boolean(state.soloMode) && projectionComplete ? soloWinner : null,
+    total_wager_wei: gross.toString(),
+    winner_total_wei: winnerTotal.toString(),
+    pot_for_winners_wei: prize.toString(),
+    bullion_for_winners_wei: asString(state.baseEmission),
+    payout_mul_wad: winnerTotal > 0n
+      ? ((prize * 1_000_000_000_000_000_000n) / winnerTotal).toString()
+      : '0',
+    solo_sample: asString(state.soloSample),
+    total_receipts: Number(asString(state.totalReceipts)),
+    processed_receipts: Number(asString(state.processedReceipts)),
+    closed_receipts: Number(asString(state.closedReceipts)),
+    buyback_completed: Boolean(state.buybackCompleted),
+    projection_complete: Boolean(projectionComplete),
+    projection_version: ROUND_PROJECTION_VERSION,
+  };
+};
+
+const sameProjectionValue = (left, right) => {
+  if (left === null || left === undefined || right === null || right === undefined) {
+    return (left ?? null) === (right ?? null);
+  }
+  if (typeof right === 'boolean') return (left === true || String(left) === 'true') === right;
+  return String(left) === String(right);
+};
+
+/** Return only changed authoritative fields; no-op ticks emit no database update. */
+const changedRoundProjection = (indexedRound, projection) => {
+  if (!indexedRound) return { ...projection, updated_at: new Date().toISOString() };
+  const changed = Object.fromEntries(
+    Object.entries(projection).filter(([key, value]) => !sameProjectionValue(indexedRound[key], value)),
+  );
+  return Object.keys(changed).length
+    ? { round_id: projection.round_id, ...changed, updated_at: new Date().toISOString() }
+    : null;
+};
+
+/**
+ * Walk the entire historical id range in a small persistent round-robin batch.
+ * Recent-window reconciliation repairs fresh failures quickly; this watermark
+ * eventually discovers an older row that is wholly absent (and therefore
+ * cannot appear in a `resolved=false` database query).
+ */
+async function historicalGapPlan(currentRoundId) {
+  const rows = await rest(
+    `mine_indexer_state?id=eq.${encodeURIComponent(ROUND_GAP_CURSOR_ID)}`
+      + '&select=newest_slot&limit=1',
+  );
+  const { ids, nextRoundId } = historicalRoundGapBatch({
+    currentRoundId,
+    recentDepth: reconcileDepth,
+    nextRoundId: rows?.[0]?.newest_slot ?? 0n,
+    batchSize: reconcileGapBatch,
+  });
+  return { ids, next: nextRoundId };
+}
+
+async function advanceHistoricalGapCursor(nextRoundId) {
+  await upsert('mine_indexer_state', {
+    id: ROUND_GAP_CURSOR_ID,
+    newest_signature: null,
+    newest_slot: asString(nextRoundId),
+    updated_at: new Date().toISOString(),
+  }, 'id');
+}
+
+/**
+ * Reconcile both indexed stale rows and a fixed recent schedule window. The
+ * latter discovers entirely missing database rows from deterministic Round PDA
+ * addresses without a program-wide account scan.
+ */
+async function reconcileCanonicalRounds() {
   const chainNow = await finalizedChainTimeSeconds();
-  const candidates = await rest(
+  const initializedAt = BigInt(asString(indexedConfig.initializedAt));
+  const duration = BigInt(asString(indexedConfig.roundDurationSeconds));
+  const currentRoundId = BigInt(chainNow) < initializedAt
+    ? 0n
+    : (BigInt(chainNow) - initializedAt) / duration;
+  const recentIds = recentScheduledRoundIds(currentRoundId, reconcileDepth);
+  const gapPlan = await historicalGapPlan(currentRoundId);
+  const staleRows = await rest(
     'mine_rounds?closed_signature=is.null&resolved=eq.false'
       + `&settles_at=lte.${chainNow}`
       + '&select=round_id&order=round_id.desc&limit=32',
   );
-  let reconciled = 0;
-  const missing = [];
-  for (const candidate of candidates || []) {
-    const address = roundPda(candidate.round_id);
-    const roundState = await program.account.round.fetchNullable(address);
-    if (!roundState?.settled) continue;
-    const signature = await replayCanonicalSettlement(candidate.round_id, address);
-    if (!signature) {
-      missing.push(asString(candidate.round_id));
-      continue;
-    }
-    reconciled += 1;
+  const ids = [...new Set([
+    ...recentIds.map(String),
+    ...(staleRows || []).map((row) => String(row.round_id)),
+    ...gapPlan.ids.map(String),
+  ])].map(BigInt);
+  const addresses = ids.map(roundPda);
+  const states = await program.account.round.fetchMultiple(addresses);
+  const presentIds = ids.filter((_, index) => states[index]);
+  if (!presentIds.length) {
+    await advanceHistoricalGapCursor(gapPlan.next);
+    return { reconciled: 0, reconciliationFailures: 0 };
   }
-  assert.deepEqual(
-    missing,
-    [],
-    `Settled Round PDA(s) lack a recoverable settlement transaction: ${missing.join(', ')}`,
-  );
-  return reconciled;
+  const idFilter = presentIds.map(String).join(',');
+  const [indexedRows, projectionDigests] = await Promise.all([
+    rest(
+      `mine_rounds?round_id=in.(${idFilter})&select=*`,
+    ),
+    fetchProjectionDigests(presentIds),
+  ]);
+  const indexedById = new Map((indexedRows || []).map((row) => [String(row.round_id), row]));
+  let reconciled = 0;
+  let reconciliationFailures = 0;
+  for (let index = 0; index < ids.length; index += 1) {
+    const state = states[index];
+    if (!state) continue;
+    const roundId = ids[index];
+    const key = String(roundId);
+    try {
+      let digest = projectionDigests.get(key) ?? null;
+      if (roundNeedsCanonicalReplay({
+        indexedRound: indexedById.get(key),
+        chainRound: state,
+        indexedProjection: digest,
+      })) {
+        const indexedRound = indexedById.get(key);
+        if (indexedRound?.projection_complete === true) {
+          // A replay can take several paged RPC reads. Withdraw the health
+          // assertion first so the frontend never treats its intermediate
+          // writes as a final participant roster.
+          await rest(
+            `mine_rounds?round_id=eq.${key}&projection_complete=eq.true`,
+            {
+              method: 'PATCH',
+              body: {
+                projection_complete: false,
+                projection_version: ROUND_PROJECTION_VERSION,
+                updated_at: new Date().toISOString(),
+              },
+              prefer: 'return=minimal',
+            },
+          );
+          indexedById.set(key, { ...indexedRound, projection_complete: false });
+        }
+        await replayCanonicalRoundHistory(roundId, addresses[index]);
+        digest = (await fetchProjectionDigests([roundId])).get(key) ?? null;
+        reconciled += 1;
+      }
+      const projectionComplete = roundProjectionMatchesChain(state, digest);
+      const winningSquare = Number(state.winningTile);
+      const soloWinner = state.settled && state.soloMode && projectionComplete
+        ? await indexedSoloWinner(roundId, winningSquare, BigInt(asString(state.soloSample)))
+        : null;
+      // Counters and winner facts come directly from the account after event
+      // replay, so a stale read model can never leave the public ledger stuck
+      // on `unsettled` or processed_receipts=0.
+      const projection = chainRoundProjection(roundId, state, { projectionComplete, soloWinner });
+      const patch = changedRoundProjection(indexedById.get(key), projection);
+      if (patch) await upsert('mine_rounds', patch, 'round_id');
+    } catch (error) {
+      reconciliationFailures += 1;
+      console.error(JSON.stringify({
+        at: new Date().toISOString(),
+        event: 'round-reconciliation-error',
+        round: key,
+        message: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }
+  await advanceHistoricalGapCursor(gapPlan.next);
+  return { reconciled, reconciliationFailures };
 }
 
 async function archiveReadyRounds() {
@@ -835,19 +1163,28 @@ async function archiveReadyRounds() {
     const state = await program.account.round.fetchNullable(address);
     if (!state) continue;
     if (Number(state.processedReceipts.toString()) !== Number(state.totalReceipts.toString())) continue;
-    const bets = await rest(`mine_round_bets?round_id=eq.${round.round_id}&select=*&order=receipt.asc,square.asc`);
-    const receiptCount = new Set((bets || []).map((bet) => bet.receipt)).size;
-    const chainReceiptCount = Number(state.totalReceipts.toString());
-    if (receiptCount !== chainReceiptCount) continue;
-    const settlements = await rest(`mine_receipt_settlements?round_id=eq.${round.round_id}&status=in.(claimed,accrued,refunded)&select=*&order=receipt.asc`);
-    const settlementCount = new Set((settlements || []).map((entry) => entry.receipt)).size;
-    if (settlementCount !== chainReceiptCount) continue;
     if (state.settled && !state.buybackCompleted) continue;
+    const chainReceiptCount = Number(state.totalReceipts.toString());
+    const digest = (await fetchProjectionDigests([BigInt(round.round_id)]))
+      .get(String(round.round_id));
+    if (!roundProjectionMatchesChain(state, digest)) continue;
+    if (Number(digest.indexed_processed_receipts) !== chainReceiptCount) continue;
+    const [bets, settlements] = await Promise.all([
+      restImmutableRoundRows(
+        `mine_round_bets?round_id=eq.${round.round_id}&select=*&order=receipt.asc,square.asc`,
+      ),
+      restImmutableRoundRows(
+        `mine_receipt_settlements?round_id=eq.${round.round_id}`
+          + '&status=in.(claimed,accrued,refunded)&select=*&order=receipt.asc,status.asc',
+      ),
+    ]);
     // A settled v6 round is not archival-ready until its exact on-chain fee
     // event has been indexed and the allocation conserves every lamport.
     // Refund-only rounds never distribute fees and therefore skip this gate.
     const feeAudit = state.settled ? requireRoundFeeAudit(round) : null;
-    const buybacks = await rest(`mine_buyback_executions?round_id=eq.${round.round_id}&select=*&order=sequence.asc`);
+    const buybacks = await restImmutableRoundRows(
+      `mine_buyback_executions?round_id=eq.${round.round_id}&select=*&order=sequence.asc`,
+    );
     if (requireBuybackEvidence && state.settled) {
       // Compare evidence to the amount emitted and indexed for this round. Do
       // not duplicate a version-specific basis-point formula in the indexer.
@@ -944,17 +1281,26 @@ export async function indexerTick() {
     return {
       indexed: 0,
       reconciled: 0,
+      reconciliationFailures: 0,
       archived: 0,
       referralsIndexed: 0,
       skipped: true,
       reason: 'round-indexer-lease-held-by-another-instance',
     };
   }
+  // Repair exact recent/stale round histories before advancing the global
+  // cursor. Otherwise a cursor that reaches RoundSettled while its earlier
+  // proof event is absent fails before the recovery path can run.
+  const { reconciled, reconciliationFailures } = await reconcileCanonicalRounds();
   const indexed = await indexTransactions();
-  const reconciled = await reconcileSettledRounds();
-  const archived = await archiveReadyRounds();
+  // Projection-only instances are safe to keep alive during a protocol pause
+  // or stateful-worker shutdown. They read finalized accounts/logs and repair
+  // Supabase, but cannot enter any archive/sign/send transaction path.
+  const archived = projectOnly ? 0 : await archiveReadyRounds();
   const referralsIndexed = await indexReferralTransactions();
-  return { indexed, reconciled, archived, referralsIndexed };
+  return {
+    indexed, reconciled, reconciliationFailures, archived, referralsIndexed, projectOnly,
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -983,6 +1329,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }
   }
   do {
+    emitWorkerHeartbeat('round-indexer', 'tick-start');
     try {
       const result = await runWorkerTick({
         worker: 'round-indexer',
@@ -996,11 +1343,22 @@ if (import.meta.url === `file://${process.argv[1]}`) {
             timeoutMs: tickTimeoutMs,
             message: error.message,
           }));
+          emitWorkerHeartbeat('round-indexer', 'tick-error', 'tick-timeout');
           process.exit(75);
         },
       });
+      emitWorkerHeartbeat(
+        'round-indexer',
+        'tick-complete',
+        result.skipped
+          ? result.reason
+          : result.reconciliationFailures > 0
+            ? `partial-error:${result.reconciliationFailures}`
+            : 'ok',
+      );
       console.log(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer', ...result }));
     } catch (error) {
+      emitWorkerHeartbeat('round-indexer', 'tick-error', error?.code || 'tick-error');
       console.error(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer-error', message: String(error) }));
       if (process.env.FAIL_FAST === '1') {
         process.exitCode = 1;

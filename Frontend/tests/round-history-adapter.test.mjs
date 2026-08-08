@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
+import { indexedRoundFromRow } from '../src/chain/rounds-index.js';
 import { roundIdsForRange } from '../src/chain/round-range.js';
 
 const indexedReader = await readFile(new URL('../src/chain/rounds-index.js', import.meta.url), 'utf8');
@@ -25,6 +26,36 @@ test('round history supports ascending callers and reports its scan cap', () => 
   });
 });
 
+test('normal round rows preserve server provider identity before proof detail loads', () => {
+  const commitment = 'ab'.repeat(32);
+  const open = indexedRoundFromRow({
+    round_id: '41',
+    resolved: false,
+    randomness_provider_kind: 'server',
+    randomness_commitment_hex: commitment,
+    randomness_id: null,
+    randomness_commit_slot: null,
+  });
+  assert.equal(open.randomnessMode, 'server');
+  assert.equal(open.randomnessState, 'commitment-bound');
+  assert.equal(open.randomnessId, null);
+  assert.equal(open.randomnessCommitment, commitment);
+
+  const settled = indexedRoundFromRow({
+    round_id: '41',
+    resolved: true,
+    randomness_provider_kind: 'server-commit-reveal',
+    randomness_commitment_hex: commitment,
+    randomness_id: null,
+    randomness_commit_slot: null,
+  });
+  assert.equal(settled.randomnessMode, 'server');
+  assert.equal(settled.randomnessState, 'settled');
+  assert.equal(settled.randomnessCommitment, commitment);
+
+  assert.match(indexedReader, /'randomness_provider_kind', 'randomness_commitment_hex'/);
+});
+
 test('paused round history counts indexed records instead of advancing with wall-clock ids', () => {
   const statsReader = indexedReader.slice(
     indexedReader.indexOf('export async function loadIndexedRoundStats'),
@@ -45,4 +76,9 @@ test('Rounds headline stats refresh while paused or reconnecting after an upgrad
 test('visible history winner counts use one indexed batch instead of per-round RPC reads', () => {
   assert.match(indexedReader, /export async function loadIndexedWinnerCounts/);
   assert.match(indexedReader, /from\('mine_round_bets'\)[\s\S]*\.in\('round_id', ids\)/);
+  assert.match(indexedReader, /round\.projectionComplete === true/);
+  assert.match(indexedReader, /projection_complete/);
+  assert.match(indexedReader, /processed_receipts/);
+  assert.match(indexedReader, /archive_verified/);
+  assert.match(indexedReader, /export async function loadIndexedRoundProjectionRows/);
 });

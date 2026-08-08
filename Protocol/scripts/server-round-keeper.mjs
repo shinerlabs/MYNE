@@ -25,6 +25,7 @@ import {
 } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 import {
+  PROVIDER_PREPARATION_SAFETY_MARGIN_SECONDS,
   ROUND_KEEPER_DEFERRED_EXIT_CODE,
   ROUND_KEEPER_MISSED_EXIT_CODE,
 } from './round-schedule-policy.mjs';
@@ -35,7 +36,14 @@ import {
   serverEntropyAvailable,
   serverRandomnessCommitment,
 } from './server-randomness-policy.mjs';
-import { executeAutoPlansDuringWindow } from './auto-plan-executor.mjs';
+import {
+  executeAutoPlansDuringWindow,
+  withOperationTimeout,
+} from './auto-plan-executor.mjs';
+import {
+  WORKER_HEARTBEAT_TYPE,
+  createWorkerHeartbeat,
+} from './event-driven-loop.mjs';
 
 const { AnchorProvider, Program, Wallet } = anchor;
 const PROGRAM_ID = new PublicKey(
@@ -68,6 +76,97 @@ const provider = new AnchorProvider(connection, new Wallet(keypair), { commitmen
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const program = new Program(idl, provider);
 
+const explicitRoundId = requiredEnv('MYNE_ROUND_ID');
+assert.match(explicitRoundId, /^\d+$/, 'MYNE_ROUND_ID must be an unsigned integer');
+const ROUND_ID = BigInt(explicitRoundId);
+const ROUND_ID_BN = new anchor.BN(ROUND_ID.toString());
+const LIVE_AUTHORIZED = process.env.SERVER_RANDOMNESS_KEEPER_LIVE === PROGRAM_ID.toBase58();
+assert.ok(
+  LIVE_AUTHORIZED,
+  `Set SERVER_RANDOMNESS_KEEPER_LIVE=${PROGRAM_ID.toBase58()} only after server-mode approval`,
+);
+
+const boundedInteger = (value, fallback, minimum, maximum, name) => {
+  const parsed = Number(value ?? fallback);
+  assert.ok(
+    Number.isSafeInteger(parsed) && parsed >= minimum && parsed <= maximum,
+    `${name} must be between ${minimum} and ${maximum}`,
+  );
+  return parsed;
+};
+const rpcTimeoutMs = boundedInteger(
+  process.env.ROUND_KEEPER_RPC_TIMEOUT_MS,
+  8_000,
+  500,
+  30_000,
+  'ROUND_KEEPER_RPC_TIMEOUT_MS',
+);
+const transactionTimeoutMs = boundedInteger(
+  process.env.ROUND_KEEPER_TRANSACTION_TIMEOUT_MS,
+  12_000,
+  2_000,
+  30_000,
+  'ROUND_KEEPER_TRANSACTION_TIMEOUT_MS',
+);
+const transactionFlowTimeoutMs = boundedInteger(
+  process.env.ROUND_KEEPER_TRANSACTION_FLOW_TIMEOUT_MS,
+  30_000,
+  5_000,
+  55_000,
+  'ROUND_KEEPER_TRANSACTION_FLOW_TIMEOUT_MS',
+);
+const autoPlanOperationTimeoutMs = boundedInteger(
+  process.env.AUTO_PLAN_OPERATION_TIMEOUT_MS,
+  8_000,
+  500,
+  30_000,
+  'AUTO_PLAN_OPERATION_TIMEOUT_MS',
+);
+const settlementLateSeconds = boundedInteger(
+  process.env.ROUND_KEEPER_SETTLEMENT_LATE_SECONDS,
+  5,
+  2,
+  120,
+  'ROUND_KEEPER_SETTLEMENT_LATE_SECONDS',
+);
+const prebindGraceSeconds = boundedInteger(
+  process.env.ROUND_KEEPER_PREBIND_GRACE_SECONDS,
+  15,
+  2,
+  45,
+  'ROUND_KEEPER_PREBIND_GRACE_SECONDS',
+);
+
+const boundedRpc = (label, operation, timeoutMs = rpcTimeoutMs) => withOperationTimeout(
+  operation,
+  { timeoutMs, label },
+);
+
+let heartbeatStage = 'preflight';
+let heartbeatDeadlines = {};
+const emitRoundHeartbeat = (phase, stage = heartbeatStage, outcome = null) => {
+  heartbeatStage = stage;
+  const message = {
+    ...createWorkerHeartbeat('round-keeper', phase, outcome),
+    type: WORKER_HEARTBEAT_TYPE,
+    roundId: ROUND_ID.toString(),
+    stage,
+    deadlines: heartbeatDeadlines,
+  };
+  if (typeof process.send === 'function' && process.connected !== false) {
+    try { process.send(message, () => {}); } catch { /* Host may be shutting down. */ }
+  }
+  return message;
+};
+emitRoundHeartbeat('tick-start', 'preflight', 'starting');
+process.once('uncaughtExceptionMonitor', (error) => {
+  emitRoundHeartbeat(
+    'tick-error',
+    heartbeatStage,
+    error instanceof Error ? error.message : String(error),
+  );
+});
+
 const pda = (seed, ...extra) => PublicKey.findProgramAddressSync(
   [Buffer.from(seed), ...extra.map((value) => Buffer.from(value))],
   PROGRAM_ID,
@@ -75,9 +174,13 @@ const pda = (seed, ...extra) => PublicKey.findProgramAddressSync(
 const config = pda('config');
 const stakePool = pda('stake_pool');
 const liquidityGate = pda('liquidity_gate');
-const configState = await program.account.protocolConfig.fetch(config);
+const configState = await boundedRpc(
+  'Protocol config read',
+  () => program.account.protocolConfig.fetch(config),
+);
 assert.equal(Number(configState.version), 6, 'Server round keeper requires protocol fee schedule v6');
 if (configState.paused) {
+  emitRoundHeartbeat('tick-complete', 'deferred', 'protocol-paused');
   console.log(JSON.stringify({ event: 'server-round-idle', reason: 'protocol-paused' }));
   process.exit(ROUND_KEEPER_DEFERRED_EXIT_CODE);
 }
@@ -90,34 +193,49 @@ assert.ok(
   'Keeper wallet must equal config.randomness_authority',
 );
 requireMatchingSolanaNetwork({
-  genesisHash: await connection.getGenesisHash(),
+  genesisHash: await boundedRpc('Genesis hash read', () => connection.getGenesisHash()),
   randomnessProgram: configState.randomnessProgram.toBase58(),
   serverRandomnessProgram: PROGRAM_ID.toBase58(),
 });
 
-const explicitRoundId = requiredEnv('MYNE_ROUND_ID');
-assert.match(explicitRoundId, /^\d+$/, 'MYNE_ROUND_ID must be an unsigned integer');
-const ROUND_ID = BigInt(explicitRoundId);
-const ROUND_ID_BN = new anchor.BN(ROUND_ID.toString());
-const LIVE_AUTHORIZED = process.env.SERVER_RANDOMNESS_KEEPER_LIVE === PROGRAM_ID.toBase58();
-assert.ok(
-  LIVE_AUTHORIZED,
-  `Set SERVER_RANDOMNESS_KEEPER_LIVE=${PROGRAM_ID.toBase58()} only after server-mode approval`,
-);
+const roundIdNumber = Number(ROUND_ID);
+assert.ok(Number.isSafeInteger(roundIdNumber), 'MYNE_ROUND_ID exceeds the safe schedule range');
+const scheduledOpenedAt = Number(configState.initializedAt.toString())
+  + roundIdNumber * Number(configState.roundDurationSeconds.toString());
+const scheduledBettingEndsAt = scheduledOpenedAt
+  + Number(configState.bettingDurationSeconds.toString());
+const scheduledSettlesAt = scheduledOpenedAt
+  + Number(configState.roundDurationSeconds.toString());
+heartbeatDeadlines = {
+  prebindAt: scheduledOpenedAt
+    - Number(configState.bettingDurationSeconds.toString())
+    + PROVIDER_PREPARATION_SAFETY_MARGIN_SECONDS
+    + prebindGraceSeconds,
+  prepareAt: scheduledOpenedAt,
+  lockAt: scheduledSettlesAt,
+  settleAt: scheduledSettlesAt + settlementLateSeconds,
+};
+emitRoundHeartbeat('tick-start', 'preflight-complete', 'configuration-verified');
+
 const roundSeed = Buffer.alloc(8);
 roundSeed.writeBigUInt64LE(ROUND_ID);
 const round = pda('round', roundSeed);
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const asBigInt = (value) => BigInt(value?.toString?.() ?? value ?? 0);
-const chainTimeSeconds = async () => {
+const readChainTimeSeconds = async (cancelled = () => false) => {
   let lastError = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
+    if (cancelled()) throw new Error('Confirmed chain-time observation cancelled');
     try {
-      const slot = await connection.getSlot('confirmed');
+      const slot = await boundedRpc('Confirmed slot read', () => connection.getSlot('confirmed'));
       for (let offset = 0; offset < 16 && slot >= offset; offset += 1) {
+        if (cancelled()) throw new Error('Confirmed chain-time observation cancelled');
         try {
-          const blockTime = await connection.getBlockTime(slot - offset);
+          const blockTime = await boundedRpc(
+            `Block time read for slot ${slot - offset}`,
+            () => connection.getBlockTime(slot - offset),
+          );
           if (Number.isInteger(blockTime)) return blockTime;
         } catch (error) {
           lastError = error;
@@ -132,18 +250,31 @@ const chainTimeSeconds = async () => {
   const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
   throw new Error(`Confirmed chain time is temporarily unavailable${detail}`);
 };
+const chainTimeSeconds = () => {
+  let cancelled = false;
+  return withOperationTimeout(() => readChainTimeSeconds(() => cancelled), {
+    timeoutMs: Math.min(30_000, rpcTimeoutMs * 2),
+    label: 'Confirmed chain-time observation',
+    onTimeout: () => { cancelled = true; },
+  });
+};
 const waitForChainTimestamp = async (target) => {
   for (;;) {
     const remaining = target - await chainTimeSeconds();
     if (remaining <= 0) return;
+    emitRoundHeartbeat('tick-start', heartbeatStage, `waiting:${remaining}s`);
     await sleep(Math.min(4_000, Math.max(250, remaining * 1_000)));
   }
 };
 const fetchRoundWithRetry = async (predicate, label) => {
   let lastError = null;
   for (let attempt = 0; attempt < 12; attempt += 1) {
+    emitRoundHeartbeat('tick-start', heartbeatStage, `${label}:attempt-${attempt + 1}`);
     try {
-      const state = await program.account.round.fetchNullable(round);
+      const state = await boundedRpc(
+        `${label} round read`,
+        () => program.account.round.fetchNullable(round),
+      );
       if (state && predicate(state)) return state;
     } catch (error) {
       lastError = error;
@@ -154,16 +285,36 @@ const fetchRoundWithRetry = async (predicate, label) => {
   throw new Error(`${label} did not become visible${detail}`);
 };
 const indexedRows = async (path) => {
-  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
-    headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
-  });
-  const text = await response.text();
+  emitRoundHeartbeat('tick-start', 'auto-plan-index', 'reading-active-plans');
+  const controller = new AbortController();
+  const response = await withOperationTimeout(
+    () => fetch(`${supabaseUrl}/rest/v1/${path}`, {
+      headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` },
+      signal: controller.signal,
+    }),
+    {
+      timeoutMs: autoPlanOperationTimeoutMs,
+      label: 'Auto-plan index HTTP request',
+      onTimeout: () => controller.abort(),
+    },
+  );
+  const text = await boundedRpc(
+    'Auto-plan index response body',
+    () => response.text(),
+    autoPlanOperationTimeoutMs,
+  );
   assert.ok(response.ok, `Indexed read failed (${response.status}): ${text}`);
   return text ? JSON.parse(text) : [];
 };
 
-const buildKeeperTransaction = async (ixs, units, blockhashCommitment = 'finalized') => {
-  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(blockhashCommitment);
+// A finalized blockhash adds avoidable latency to the five-second result
+// window. The transaction itself is still simulated, sent and confirmed; a
+// fresh confirmed blockhash is the appropriate liveness boundary here.
+const buildKeeperTransaction = async (ixs, units, blockhashCommitment = 'confirmed') => {
+  const { blockhash, lastValidBlockHeight } = await boundedRpc(
+    `Latest ${blockhashCommitment} blockhash`,
+    () => connection.getLatestBlockhash(blockhashCommitment),
+  );
   const message = new TransactionMessage({
     recentBlockhash: blockhash,
     payerKey: keypair.publicKey,
@@ -181,41 +332,77 @@ const buildKeeperTransaction = async (ixs, units, blockhashCommitment = 'finaliz
   transaction.sign([keypair]);
   return { transaction, blockhash, lastValidBlockHeight };
 };
-const sendKeeperInstructions = async (ixs) => {
-  const simulationBuild = await buildKeeperTransaction(ixs, 1_400_000);
-  const simulation = await connection.simulateTransaction(simulationBuild.transaction, {
-    commitment,
-    sigVerify: false,
-    replaceRecentBlockhash: true,
+const sendKeeperInstructions = async (ixs, label = 'Keeper transaction') => {
+  let timedOut = false;
+  const assertFlowActive = () => {
+    if (!timedOut) return;
+    const error = new Error(`${label} transaction flow timed out`);
+    error.code = 'MYNE_OPERATION_TIMEOUT';
+    throw error;
+  };
+  return withOperationTimeout(async () => {
+    const simulationBuild = await buildKeeperTransaction(ixs, 1_400_000);
+    assertFlowActive();
+    const simulation = await boundedRpc(
+      `${label} simulation`,
+      () => connection.simulateTransaction(simulationBuild.transaction, {
+        commitment,
+        sigVerify: false,
+        replaceRecentBlockhash: true,
+      }),
+      transactionTimeoutMs,
+    );
+    assertFlowActive();
+    assert.equal(
+      simulation.value.err,
+      null,
+      `Keeper simulation failed: ${JSON.stringify(simulation.value.err)}\n${(simulation.value.logs || []).join('\n')}`,
+    );
+    emitRoundHeartbeat('tick-start', heartbeatStage, `${label}:simulated`);
+    const measuredUnits = Math.max(50_000, Number(simulation.value.unitsConsumed || 1_400_000));
+    const computeLimit = Math.min(1_400_000, Math.ceil(measuredUnits * 1.1));
+    const finalBuild = await buildKeeperTransaction(ixs, computeLimit);
+    assertFlowActive();
+    const signature = await boundedRpc(
+      `${label} send`,
+      () => connection.sendTransaction(finalBuild.transaction, txOpts),
+      transactionTimeoutMs,
+    );
+    assertFlowActive();
+    emitRoundHeartbeat('tick-start', heartbeatStage, `${label}:sent:${signature}`);
+    const confirmation = await boundedRpc(
+      `${label} confirmation`,
+      () => connection.confirmTransaction({
+        signature,
+        blockhash: finalBuild.blockhash,
+        lastValidBlockHeight: finalBuild.lastValidBlockHeight,
+      }, commitment),
+      transactionTimeoutMs,
+    );
+    assertFlowActive();
+    assert.equal(confirmation.value.err, null, `Keeper transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    emitRoundHeartbeat('tick-start', heartbeatStage, `${label}:confirmed:${signature}`);
+    return { signature, measuredUnits, computeLimit };
+  }, {
+    timeoutMs: transactionFlowTimeoutMs,
+    label: `${label} transaction flow`,
+    onTimeout: () => { timedOut = true; },
   });
-  assert.equal(
-    simulation.value.err,
-    null,
-    `Keeper simulation failed: ${JSON.stringify(simulation.value.err)}\n${(simulation.value.logs || []).join('\n')}`,
-  );
-  const measuredUnits = Math.max(50_000, Number(simulation.value.unitsConsumed || 1_400_000));
-  const computeLimit = Math.min(1_400_000, Math.ceil(measuredUnits * 1.1));
-  const finalBuild = await buildKeeperTransaction(ixs, computeLimit);
-  const signature = await connection.sendTransaction(finalBuild.transaction, txOpts);
-  const confirmation = await connection.confirmTransaction({
-    signature,
-    blockhash: finalBuild.blockhash,
-    lastValidBlockHeight: finalBuild.lastValidBlockHeight,
-  }, commitment);
-  assert.equal(confirmation.value.err, null, `Keeper transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-  return { signature, measuredUnits, computeLimit };
 };
 
-let roundState = await program.account.round.fetchNullable(round);
+let roundState = await boundedRpc(
+  'Initial round read',
+  () => program.account.round.fetchNullable(round),
+);
 if (roundState?.settled) {
+  emitRoundHeartbeat('tick-complete', 'settled', 'already-settled');
   console.log(JSON.stringify({ ok: true, event: 'server-round-already-settled', round: ROUND_ID.toString() }));
   process.exit(0);
 }
 
 if (!roundState) {
-  const scheduledOpenedAt = Number(configState.initializedAt.toString())
-    + Number(ROUND_ID) * Number(configState.roundDurationSeconds.toString());
   if ((await chainTimeSeconds()) >= scheduledOpenedAt) {
+    emitRoundHeartbeat('tick-error', 'prepare-deadline-missed', `deadline:${scheduledOpenedAt}`);
     console.error(JSON.stringify({
       event: 'server-round-window-missed',
       round: ROUND_ID.toString(),
@@ -236,6 +423,7 @@ const roundCommitment = serverRandomnessCommitment({
 });
 let bindSignature = null;
 if (!roundState) {
+  emitRoundHeartbeat('tick-start', 'preparing', 'opening-and-binding');
   const openIx = await program.methods
     .openRound(ROUND_ID_BN)
     .accounts({ config, round, payer: keypair.publicKey, systemProgram: SystemProgram.programId })
@@ -244,11 +432,22 @@ if (!roundState) {
     .bindRoundServerCommitment(ROUND_ID_BN, Array.from(roundCommitment))
     .accounts({ config, round, authority: keypair.publicKey })
     .instruction();
-  bindSignature = (await sendKeeperInstructions([openIx, bindIx])).signature;
+  bindSignature = (await sendKeeperInstructions(
+    [openIx, bindIx],
+    'Atomic round preparation',
+  )).signature;
   roundState = await fetchRoundWithRetry(
     (state) => Buffer.from(state.randomnessAccount.toBytes()).equals(roundCommitment),
     'Atomic round opening and server commitment binding',
   );
+  const prebindCompletedAt = await chainTimeSeconds();
+  if (prebindCompletedAt > heartbeatDeadlines.prebindAt) {
+    emitRoundHeartbeat(
+      'tick-error',
+      'next-prebind-deadline-missed',
+      `late-by:${prebindCompletedAt - heartbeatDeadlines.prebindAt}s`,
+    );
+  }
 } else {
   assert.ok(
     Buffer.from(roundState.randomnessAccount.toBytes()).equals(roundCommitment),
@@ -263,7 +462,22 @@ if (!roundState) {
 
 const openedAt = Number(roundState.openedAt.toString());
 const bettingEndsAt = Number(roundState.bettingEndsAt.toString());
+const settlesAt = Number(roundState.settlesAt.toString());
 const refundAt = Number(roundState.refundAt.toString());
+assert.equal(openedAt, scheduledOpenedAt, 'Round opened_at disagrees with the canonical schedule');
+assert.equal(bettingEndsAt, scheduledBettingEndsAt, 'Round betting deadline disagrees with config');
+assert.equal(settlesAt, scheduledSettlesAt, 'Round settlement time disagrees with config');
+heartbeatDeadlines = {
+  prebindAt: scheduledOpenedAt
+    - Number(configState.bettingDurationSeconds.toString())
+    + PROVIDER_PREPARATION_SAFETY_MARGIN_SECONDS
+    + prebindGraceSeconds,
+  prepareAt: openedAt,
+  lockAt: settlesAt,
+  settleAt: settlesAt + settlementLateSeconds,
+  refundAt,
+};
+emitRoundHeartbeat('tick-start', 'commitment-bound', bindSignature || 'recovered');
 console.log(JSON.stringify({
   ok: true,
   event: 'server-round-commitment-bound',
@@ -275,18 +489,28 @@ console.log(JSON.stringify({
 
 // A pre-created round exists before betting but the program rejects both
 // manual and automated deployments until its scheduled `opened_at`.
+heartbeatStage = 'awaiting-betting-open';
 await waitForChainTimestamp(openedAt);
+emitRoundHeartbeat('tick-start', 'betting-open', `closes:${bettingEndsAt}`);
 if ((await chainTimeSeconds()) < bettingEndsAt) {
-  const receiptRent = BigInt(await connection.getMinimumBalanceForRentExemption(468));
+  const receiptRent = BigInt(await boundedRpc(
+    'Bet receipt rent exemption read',
+    () => connection.getMinimumBalanceForRentExemption(468),
+  ));
   await executeAutoPlansDuringWindow({
     bettingEndsAt,
     nowSeconds: chainTimeSeconds,
     sleep,
     indexedRows,
     buildEntry: async ({ authority: indexedAuthority }) => {
+      emitRoundHeartbeat('tick-start', 'auto-plan-read', indexedAuthority);
       const authority = new PublicKey(indexedAuthority);
       const autoPlan = pda('auto_plan', authority.toBuffer());
-      const plan = await program.account.autoPlan.fetchNullable(autoPlan);
+      const plan = await boundedRpc(
+        `Auto-plan read for ${authority.toBase58()}`,
+        () => program.account.autoPlan.fetchNullable(autoPlan),
+        autoPlanOperationTimeoutMs,
+      );
       if (!plan || !plan.authority.equals(authority)) return null;
       const perRound = plan.amounts.reduce((sum, amount) => sum + asBigInt(amount), 0n);
       if (!plan.active || asBigInt(plan.balanceLamports) < perRound + receiptRent
@@ -305,45 +529,94 @@ if ((await chainTimeSeconds()) < bettingEndsAt) {
         .instruction();
       return { authority: authority.toBase58(), ix };
     },
-    sendBatch: (batch) => sendKeeperInstructions(batch.map(({ ix }) => ix)),
-    onEvent: (event) => console[event.error ? 'error' : 'log'](JSON.stringify({
-      ...event, round: ROUND_ID.toString(),
-    })),
+    sendBatch: (batch) => {
+      emitRoundHeartbeat('tick-start', 'auto-plan-send', `batch:${batch.length}`);
+      return sendKeeperInstructions(
+        batch.map(({ ix }) => ix),
+        'Auto-plan execution',
+      );
+    },
+    operationTimeoutMs: autoPlanOperationTimeoutMs,
+    sendTimeoutMs: transactionFlowTimeoutMs + 1_000,
+    onEvent: (event) => {
+      emitRoundHeartbeat('tick-start', 'auto-plans', event.event);
+      console[event.error ? 'error' : 'log'](JSON.stringify({
+        ...event, round: ROUND_ID.toString(),
+      }));
+    },
   });
 }
 
+heartbeatStage = 'awaiting-betting-close';
 await waitForChainTimestamp(bettingEndsAt);
-roundState = await program.account.round.fetch(round);
+emitRoundHeartbeat('tick-start', 'betting-closed', `lock-deadline:${settlesAt}`);
+roundState = await boundedRpc('Betting-close round read', () => program.account.round.fetch(round));
 if (!roundState.settled && asBigInt(roundState.randomnessCommitSlot) === SERVER_RANDOMNESS_PENDING) {
   const lockIx = await program.methods
     .lockRoundServerEntropy(ROUND_ID_BN)
     .accounts({ config, round, executor: keypair.publicKey })
     .instruction();
-  const lockSignature = (await sendKeeperInstructions([lockIx])).signature;
+  const lockSignature = (await sendKeeperInstructions(
+    [lockIx],
+    'Server entropy lock',
+  )).signature;
   roundState = await fetchRoundWithRetry(
     (state) => asBigInt(state.randomnessCommitSlot) !== SERVER_RANDOMNESS_PENDING,
     'Future server entropy slot lock',
   );
+  const lockCompletedAt = await chainTimeSeconds();
+  if (lockCompletedAt > heartbeatDeadlines.lockAt) {
+    emitRoundHeartbeat(
+      'tick-error',
+      'lock-deadline-missed',
+      `late-by:${lockCompletedAt - heartbeatDeadlines.lockAt}s`,
+    );
+  }
   console.log(JSON.stringify({
     event: 'server-entropy-locked',
     round: ROUND_ID.toString(),
     signature: lockSignature,
   }));
+  emitRoundHeartbeat('tick-start', 'entropy-locked', lockSignature);
 }
 if (roundState.settled) {
+  emitRoundHeartbeat('tick-complete', 'settled', 'settled-during-recovery');
   console.log(JSON.stringify({ ok: true, event: 'server-round-settled', round: ROUND_ID.toString() }));
   process.exit(0);
 }
 assert.ok((await chainTimeSeconds()) < refundAt, 'Round reached its refund window before server settlement');
 const targetSlot = decodeServerEntropySlot(roundState.randomnessCommitSlot);
+let lastEntropyHeartbeatAt = 0;
 for (;;) {
   assert.ok((await chainTimeSeconds()) < refundAt, 'Future entropy slot was not retained before refund');
-  const slotHashes = await connection.getAccountInfo(SYSVAR_SLOT_HASHES_PUBKEY, commitment);
+  const slotHashes = await boundedRpc(
+    'SlotHashes sysvar read',
+    () => connection.getAccountInfo(SYSVAR_SLOT_HASHES_PUBKEY, commitment),
+  );
   if (slotHashes && serverEntropyAvailable(slotHashes.data, targetSlot)) break;
+  if (Date.now() - lastEntropyHeartbeatAt >= 1_000) {
+    emitRoundHeartbeat('tick-start', 'awaiting-entropy', `target-slot:${targetSlot}`);
+    lastEntropyHeartbeatAt = Date.now();
+  }
   await sleep(150);
 }
 
-const gateState = await program.account.liquidityGate.fetch(liquidityGate);
+heartbeatStage = 'awaiting-settlement-window';
+await waitForChainTimestamp(settlesAt);
+const settlementStartedAt = await chainTimeSeconds();
+if (settlementStartedAt > heartbeatDeadlines.settleAt) {
+  emitRoundHeartbeat(
+    'tick-error',
+    'settlement-deadline-missed',
+    `late-by:${settlementStartedAt - heartbeatDeadlines.settleAt}s`,
+  );
+} else {
+  emitRoundHeartbeat('tick-start', 'settlement-ready', `deadline:${heartbeatDeadlines.settleAt}`);
+}
+const gateState = await boundedRpc(
+  'Liquidity gate read',
+  () => program.account.liquidityGate.fetch(liquidityGate),
+);
 assert.equal(gateState.verified, true, 'Liquidity gate is not verified');
 assert.ok(gateState.myneVault && gateState.solVault, 'Liquidity gate has no verified token vaults');
 const settleIx = await program.methods
@@ -362,8 +635,12 @@ const settleIx = await program.methods
     executor: keypair.publicKey,
   })
   .instruction();
-const settlementSignature = (await sendKeeperInstructions([settleIx])).signature;
+const settlementSignature = (await sendKeeperInstructions(
+  [settleIx],
+  'Server round settlement',
+)).signature;
 roundState = await fetchRoundWithRetry((state) => state.settled, 'Server round settlement');
+emitRoundHeartbeat('tick-complete', 'settled', settlementSignature);
 console.log(JSON.stringify({
   ok: true,
   event: 'server-round-settled',

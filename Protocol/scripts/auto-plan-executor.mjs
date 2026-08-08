@@ -5,15 +5,65 @@ const boundedInteger = (value, fallback, minimum, maximum) => {
   return Number.isSafeInteger(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback;
 };
 
-export async function fetchActiveAutoPlanAuthorities({ indexedRows, pageSize = 250, maxPages = 100 }) {
+export const OPERATION_TIMEOUT_CODE = 'MYNE_OPERATION_TIMEOUT';
+
+/**
+ * Put a hard wall-clock boundary around an external operation. The caller may
+ * additionally abort the underlying request, but the timeout itself never
+ * relies on a cooperative RPC/HTTP implementation.
+ */
+export async function withOperationTimeout(operation, {
+  timeoutMs,
+  label,
+  onTimeout = () => {},
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  assert.equal(typeof operation, 'function', 'Timed operation callback is required');
+  assert.ok(Number.isSafeInteger(timeoutMs) && timeoutMs > 0, 'Operation timeout must be positive');
+  assert.ok(typeof label === 'string' && label, 'Operation timeout label is required');
+  let timer = null;
+  let completed = false;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimer(() => {
+      if (completed) return;
+      const error = new Error(`${label} exceeded ${timeoutMs}ms`);
+      error.code = OPERATION_TIMEOUT_CODE;
+      try {
+        onTimeout(error);
+      } catch (timeoutError) {
+        reject(timeoutError);
+        return;
+      }
+      reject(error);
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(operation), timeout]);
+  } finally {
+    completed = true;
+    if (timer !== null) clearTimer(timer);
+  }
+}
+
+export async function fetchActiveAutoPlanAuthorities({
+  indexedRows,
+  pageSize = 250,
+  maxPages = 100,
+  operationTimeoutMs = 8_000,
+}) {
   assert.equal(typeof indexedRows, 'function', 'indexedRows callback is required');
   const size = boundedInteger(pageSize, 250, 1, 1_000);
   const pages = boundedInteger(maxPages, 100, 1, 1_000);
+  const timeout = boundedInteger(operationTimeoutMs, 8_000, 500, 30_000);
   const authorities = new Set();
   for (let page = 0; page < pages; page += 1) {
     const offset = page * size;
-    const rows = await indexedRows(
-      `mine_auto_plans?active=eq.true&balance_lamports=gt.0&select=authority&order=authority.asc&limit=${size}&offset=${offset}`,
+    const rows = await withOperationTimeout(
+      () => indexedRows(
+        `mine_auto_plans?active=eq.true&balance_lamports=gt.0&select=authority&order=authority.asc&limit=${size}&offset=${offset}`,
+      ),
+      { timeoutMs: timeout, label: `Auto-plan index page ${page + 1}` },
     );
     for (const row of rows) {
       if (typeof row?.authority === 'string' && row.authority) authorities.add(row.authority);
@@ -39,16 +89,30 @@ async function mapConcurrent(values, limit, mapper) {
 }
 
 export async function sendAutoPlanBatchesIsolated({
-  entries, batchSize, sendBatch, canSend = async () => true, onEvent = () => {},
+  entries,
+  batchSize,
+  sendBatch,
+  canSend = async () => true,
+  operationTimeoutMs = 12_000,
+  sendTimeoutMs = operationTimeoutMs,
+  onEvent = () => {},
 }) {
   const size = boundedInteger(batchSize, 4, 1, 6);
+  const timeout = boundedInteger(operationTimeoutMs, 12_000, 500, 30_000);
+  const sendTimeout = boundedInteger(sendTimeoutMs, timeout, 500, 60_000);
   const sendIsolated = async (batch) => {
-    if (!(await canSend())) {
+    if (!(await withOperationTimeout(canSend, {
+      timeoutMs: timeout,
+      label: 'Auto-plan betting-window check',
+    }))) {
       onEvent({ event: 'auto-plan-window-closed', skipped: batch.length });
       return;
     }
     try {
-      const sent = await sendBatch(batch);
+      const sent = await withOperationTimeout(() => sendBatch(batch), {
+        timeoutMs: sendTimeout,
+        label: `Auto-plan batch (${batch.length})`,
+      });
       onEvent({
         event: 'auto-plans-executed',
         authorities: batch.map(({ authority }) => authority),
@@ -58,6 +122,17 @@ export async function sendAutoPlanBatchesIsolated({
       });
       return;
     } catch (error) {
+      // A timed-out send has an indeterminate landing status. Do not bisect and
+      // immediately resubmit it; the next window pass first reloads every plan
+      // from chain and the on-chain last_round guard decides what remains.
+      if (error?.code === OPERATION_TIMEOUT_CODE) {
+        onEvent({
+          event: 'auto-plan-batch-indeterminate',
+          authorities: batch.map(({ authority }) => authority),
+          error: error.message,
+        });
+        return;
+      }
       if (batch.length > 1) {
         const split = Math.ceil(batch.length / 2);
         await sendIsolated(batch.slice(0, split));
@@ -90,14 +165,30 @@ export async function executeAutoPlansDuringWindow({
   batchSize = process.env.AUTO_PLAN_BATCH_SIZE || 4,
   retryMs = process.env.AUTO_PLAN_RETRY_MS || 5_000,
   buildConcurrency = process.env.AUTO_PLAN_READ_CONCURRENCY || 12,
+  operationTimeoutMs = process.env.AUTO_PLAN_OPERATION_TIMEOUT_MS || 8_000,
+  sendTimeoutMs = process.env.AUTO_PLAN_SEND_TIMEOUT_MS || 30_000,
   onEvent = () => {},
 }) {
   const retryDelay = boundedInteger(retryMs, 5_000, 500, 15_000);
   const concurrency = boundedInteger(buildConcurrency, 12, 1, 32);
-  while (await nowSeconds() < bettingEndsAt) {
+  const timeout = boundedInteger(operationTimeoutMs, 8_000, 500, 30_000);
+  const sendTimeout = boundedInteger(sendTimeoutMs, 30_000, 2_000, 60_000);
+  const readNow = () => withOperationTimeout(nowSeconds, {
+    timeoutMs: timeout,
+    label: 'Auto-plan chain time',
+  });
+  while (await readNow() < bettingEndsAt) {
     try {
-      const authorities = await fetchActiveAutoPlanAuthorities({ indexedRows });
-      const built = await mapConcurrent(authorities, concurrency, async (authority) => buildEntry({ authority }));
+      const authorities = await fetchActiveAutoPlanAuthorities({
+        indexedRows,
+        operationTimeoutMs: timeout,
+      });
+      const built = await mapConcurrent(authorities, concurrency, async (authority) => (
+        withOperationTimeout(() => buildEntry({ authority }), {
+          timeoutMs: timeout,
+          label: `Auto-plan account ${authority}`,
+        })
+      ));
       const executable = [];
       for (let index = 0; index < built.length; index += 1) {
         const result = built[index];
@@ -113,7 +204,9 @@ export async function executeAutoPlansDuringWindow({
         entries: executable,
         batchSize,
         sendBatch,
-        canSend: async () => await nowSeconds() < bettingEndsAt,
+        canSend: async () => await readNow() < bettingEndsAt,
+        operationTimeoutMs: timeout,
+        sendTimeoutMs: sendTimeout,
         onEvent,
       });
     } catch (error) {
@@ -122,7 +215,7 @@ export async function executeAutoPlansDuringWindow({
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    const remainingMs = (bettingEndsAt - await nowSeconds()) * 1_000;
+    const remainingMs = (bettingEndsAt - await readNow()) * 1_000;
     if (remainingMs <= 0) break;
     await sleep(Math.min(retryDelay, Math.max(100, remainingMs)));
   }

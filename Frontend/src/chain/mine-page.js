@@ -14,7 +14,7 @@ import {
   onAccountChange, readableError, restoreConnection, syncChainClock,
 } from './client.js';
 import {
-  claimRound, claimManyRounds, placeBet, readJackpot, readMiner, readMyBets, readRound, netClaimable, passiveOnRounds,
+  claimManyRounds, decodeRoundAccountData, invalidateReceiptCache, NO_UNCLAIMED_RECEIPTS, placeBet, readJackpot, readMiner, readMyBets, readRound, readRoundWithContext, netClaimable, passiveOnRounds,
   verifyFeeEconomics, verifyPremine, verifyRoundTiming, waitForTx, withdrawUnrefined,
   burnUnclaimedMyne, claimManyEthOnly, syncRoundGenesis,
 } from './lottery.js';
@@ -24,7 +24,7 @@ import {
 import { minerPda, stakePositionPda } from './miner-registration.js';
 import { subscribeAccountActivity } from './protocol-realtime.js';
 import {
-  loadLatestIndexedRoundId, loadLatestPlayedSettledRoundId, loadLatestSettledRoundId,
+  loadLatestIndexedRoundId, loadLatestPlayedSettledRound, loadLatestSettledRound,
 } from './rounds-index.js';
 import {
   ROUND_DURATION, BETTING_DURATION, isPremine,
@@ -52,8 +52,8 @@ export const state = {
   phase: 'betting',
   secondsLeft: 0,
   squareTotals: Array(25).fill(0n),
-  // Distinct miners per tile, straight from the chain. Public — populated with or without a
-  // connected wallet, because the crowd on a tile informs where to deploy.
+  // Receipt positions per tile, straight from the chain. One wallet may submit
+  // more than one receipt, so this must not be presented as a unique-wallet count.
   squareMiners: Array(25).fill(0n),
   myBets: Array(25).fill(0n),
   totalWager: 0n,
@@ -78,15 +78,50 @@ export const state = {
   // recent participant/reward card.
   lastPlayedResolved: null,
   currentRound: null, // full readRound() of state.roundId — carries its own `resolved`/winner
+  currentRoundSlot: 0,
   plan: null, // MYNE auto-plan for the connected account (null = none configured)
   autoPlanMaxFee: null, // live rent for one BetReceipt; null means the RPC quote is unavailable
   autoPlanFundingReserve: 0n, // setup rent + configured fee budget excluded before applying 90%
   // Live maintenance status, refreshed with the round. `null` means the config
   // read has not completed; only an authoritative on-chain `true` disables Mine.
   protocolPaused: null,
+  // No transaction may derive a round id until both the chain clock and
+  // protocol genesis have been synchronized.
+  clockReady: false,
   // Last Round PDA that actually existed when the authoritative pause was
   // observed. Unlike `roundId`, this does not advance with wall-clock time.
   pausedRoundId: null,
+};
+
+const nonDecreasingVector = (next = [], previous = []) => previous.every(
+  (value, index) => BigInt(next[index] ?? 0) >= BigInt(value ?? 0),
+);
+
+/**
+ * Apply a same-round confirmed snapshot without allowing an older HTTP response
+ * to erase a newer websocket bid or settlement. Round counters are monotonic by
+ * construction, so a decrease is always a stale/inconsistent read.
+ */
+const applyRoundSnapshot = (round, slot = 0) => {
+  if (!round || BigInt(round.id ?? state.roundId) !== BigInt(state.roundId)) return false;
+  const current = state.currentRound;
+  const incomingSlot = Number(slot || 0);
+  if (current) {
+    if (incomingSlot > 0 && state.currentRoundSlot > 0 && incomingSlot < state.currentRoundSlot) return false;
+    if (current.resolved && !round.resolved) return false;
+    if (BigInt(current.requestedAt ?? 0) > 0n && BigInt(round.requestedAt ?? 0) === 0n) return false;
+    if (BigInt(round.totalWager ?? 0) < BigInt(current.totalWager ?? 0)) return false;
+    if (BigInt(round.totalReceipts ?? 0) < BigInt(current.totalReceipts ?? 0)) return false;
+    if (!nonDecreasingVector(round.tileLamports, current.tileLamports)) return false;
+    if (!nonDecreasingVector(round.tileReceipts, current.tileReceipts)) return false;
+  }
+  state.squareTotals = round.tileLamports ?? Array(25).fill(0n);
+  state.squareMiners = round.tileReceipts ?? Array(25).fill(0n);
+  state.totalWager = round.totalWager;
+  state.currentRound = round;
+  if (incomingSlot > 0) state.currentRoundSlot = Math.max(state.currentRoundSlot, incomingSlot);
+  if (round.resolved) publishResolvedRound(state.roundId, round);
+  return true;
 };
 
 const emptyTileBets = () => Array(25).fill(0n);
@@ -172,7 +207,7 @@ export const setLive = (next) => {
   const active = protocolReady && Boolean(next);
   if (active === live) return;
   live = active;
-  if (!live || document.hidden) return;
+  if (!live || document.hidden || !state.clockReady) return;
   void syncChainClock();
   tick();
   void refreshRound();
@@ -183,71 +218,105 @@ export const setLive = (next) => {
 // --- polling -------------------------------------------------------------------------
 
 /**
- * Tile totals only change when someone bets, so a 5s poll is plenty. The countdown is
- * arithmetic (see round.js) and ticks locally every second without any RPC traffic.
+ * Confirmed account subscriptions publish bids and results immediately. This
+ * five-second snapshot is the bounded reconnect/missed-notification fallback;
+ * the countdown itself ticks locally without RPC traffic.
  */
 let roundRefreshRequest = null;
+let walletBetsRefreshRequest = null;
+
+const boundedWalletRead = (promise, timeoutMs = 8_000) => new Promise((resolve, reject) => {
+  const timer = window.setTimeout(
+    () => reject(new Error('Wallet receipt read timed out')),
+    timeoutMs,
+  );
+  Promise.resolve(promise).then(
+    (value) => { window.clearTimeout(timer); resolve(value); },
+    (error) => { window.clearTimeout(timer); reject(error); },
+  );
+});
+
+const refreshWalletBets = (roundId, account) => {
+  const key = `${roundId}:${account}`;
+  if (walletBetsRefreshRequest?.key === key) return walletBetsRefreshRequest.promise;
+  const request = { key, promise: null };
+  request.promise = (async () => {
+    try {
+      const myBets = await boundedWalletRead(readMyBets(roundId, account));
+      if (state.roundId !== roundId || state.account !== account) return;
+      state.myBets = reconcileConfirmedTileBets({
+        roundId,
+        account,
+        onChainBets: myBets,
+      });
+      emit();
+    } catch (error) {
+      console.warn('wallet receipt refresh failed; public round remains current', error);
+    }
+  })().finally(() => {
+    if (walletBetsRefreshRequest === request) walletBetsRefreshRequest = null;
+  });
+  walletBetsRefreshRequest = request;
+  return request.promise;
+};
+
 async function refreshRound() {
+  if (!state.clockReady) return;
   const requestedRoundId = BigInt(state.roundId);
   if (roundRefreshRequest?.roundId === requestedRoundId) return roundRefreshRequest.promise;
 
   const request = { roundId: requestedRoundId, promise: null };
   request.promise = (async () => {
-  try {
-    // One Round PDA contains both tile totals and tile participant counts. Reading it once avoids
-    // two duplicate getAccountInfo calls on every five-second refresh (and during the result poll).
-    const [roundResult, configResult] = await Promise.allSettled([
-      readRound(requestedRoundId),
-      // A temporary config read failure must not hide public round data. Leave
-      // the previous pause value intact and let the next five-second poll retry.
-      getProtocolConfig(),
-    ]);
-    // A read started before the 65-second boundary belongs to the old board. Never let it
-    // overwrite the newly rolled round, even if the RPC response arrives after tick() clears it.
-    if (state.roundId !== requestedRoundId) return;
+    try {
+      // One Round PDA contains both tile totals and tile participant counts. Reading it once avoids
+      // two duplicate getAccountInfo calls on every five-second refresh (and during the result poll).
+      const [roundResult, configResult] = await Promise.allSettled([
+        readRoundWithContext(requestedRoundId),
+        // A temporary config read failure must not hide public round data. Leave
+        // the previous pause value intact and let the next five-second poll retry.
+        getProtocolConfig(),
+      ]);
+      // A read started before the 65-second boundary belongs to the old board. Never let it
+      // overwrite the newly rolled round, even if the RPC response arrives after tick() clears it.
+      if (state.roundId !== requestedRoundId) return;
 
-    if (configResult.status === 'fulfilled') {
-      state.protocolPaused = Boolean(configResult.value.paused);
-      if (!state.protocolPaused) {
-        state.pausedRoundId = null;
-      } else if (roundResult.status === 'fulfilled' && roundResult.value.requestedAt > 0n) {
-        state.pausedRoundId = roundResult.value.id ?? requestedRoundId;
-      } else {
-        const indexedRoundId = await loadLatestIndexedRoundId(requestedRoundId);
-        if (state.roundId !== requestedRoundId) return;
-        if (indexedRoundId !== null) state.pausedRoundId = indexedRoundId;
+      if (configResult.status === 'fulfilled') {
+        state.protocolPaused = Boolean(configResult.value.paused);
+        if (!state.protocolPaused) {
+          state.pausedRoundId = null;
+        } else if (roundResult.status === 'fulfilled' && roundResult.value.round.requestedAt > 0n) {
+          state.pausedRoundId = roundResult.value.round.id ?? requestedRoundId;
+        } else {
+          const indexedRoundId = await loadLatestIndexedRoundId(requestedRoundId);
+          if (state.roundId !== requestedRoundId) return;
+          if (indexedRoundId !== null) state.pausedRoundId = indexedRoundId;
+        }
       }
-    }
-    // A paused schedule may have no current Round PDA. Preserve the separately
-    // fetched pause flag so the renderer can pin the latest verified winner,
-    // then surface the round read failure through the existing retry path.
-    if (roundResult.status === 'rejected') {
+      // A paused schedule may have no current Round PDA. Preserve the separately
+      // fetched pause flag so the renderer can pin the latest verified winner,
+      // then surface the round read failure through the existing retry path.
+      if (roundResult.status === 'rejected') {
+        emit();
+        throw roundResult.reason;
+      }
+      const { round, slot } = roundResult.value;
+      if (!applyRoundSnapshot(round, slot)) return;
+      // Publish the authoritative public board before any wallet-specific receipt
+      // lookup. A throttled receipt index/RPC must never delay bids or a winner.
       emit();
-      throw roundResult.reason;
+      const requestedAccount = state.account;
+      if (!requestedAccount) {
+        state.myBets = Array(25).fill(0n);
+        emit();
+        return;
+      }
+      // Wallet receipt enrichment is deliberately detached from the public
+      // Round read. A slow/disabled account scan cannot hold the five-second
+      // board/config reconciliation single-flight open.
+      void refreshWalletBets(requestedRoundId, requestedAccount);
+    } catch (error) {
+      console.warn('round refresh failed', error);
     }
-    const round = roundResult.value;
-    const requestedAccount = state.account;
-    const myBets = requestedAccount
-      ? await readMyBets(requestedRoundId, requestedAccount)
-      : Array(25).fill(0n);
-    if (state.roundId !== requestedRoundId || state.account !== requestedAccount) return;
-
-    state.squareTotals = round.tileLamports ?? Array(25).fill(0n);
-    state.squareMiners = round.tileReceipts ?? Array(25).fill(0n);
-    state.totalWager = round.totalWager;
-    state.currentRound = round;
-    // A current-round settlement drives the final five-second winner reveal through
-    // `currentRound`. It must not replace the durable result pointers yet: those advance only
-    // after the next round starts and separately track the latest result and latest played result.
-    state.myBets = reconcileConfirmedTileBets({
-      roundId: requestedRoundId,
-      account: requestedAccount,
-      onChainBets: myBets,
-    });
-    emit();
-  } catch (error) {
-    console.warn('round refresh failed', error);
-  }
   })().finally(() => {
     if (roundRefreshRequest === request) roundRefreshRequest = null;
   });
@@ -290,9 +359,9 @@ async function refreshPlan() {
     }
     if (planResult.status === 'rejected') throw planResult.reason;
     const plan = planResult.value;
-    // Keep a DISABLED plan visible while it still holds a balance. An exhausted plan keeps
-    // its unspent deposit until cancelPlan() refunds it, so hiding it here stranded the
-    // user's SOL with no way to withdraw from the UI.
+    // Keep a DISABLED plan visible while it still holds a balance. An exhausted
+    // plan keeps its unspent deposit until cancelPlan() refunds it, so hiding it
+    // here would strand the user's SOL with no withdrawal control.
     state.plan = plan && (plan.enabled || plan.balance > 0n) ? plan : null;
     emit();
   } catch (error) {
@@ -301,6 +370,9 @@ async function refreshPlan() {
 }
 
 let minerRefreshId = 0;
+let minerRefreshRequest = null;
+let minerRefreshDirty = false;
+let minerRefreshTimer = null;
 
 const clearMinerState = () => {
     // Clear refinedAccrued / totalUnclaimed / hasReferrer too: they are per-ACCOUNT, and leaving
@@ -316,12 +388,18 @@ const clearMinerState = () => {
 };
 
 export async function refreshMiner() {
-  const requestId = ++minerRefreshId;
   const requestedAccount = state.account;
   if (!requestedAccount) {
     clearMinerState();
     return emit();
   }
+  if (minerRefreshRequest?.account === requestedAccount) {
+    minerRefreshDirty = true;
+    return minerRefreshRequest.promise;
+  }
+  const requestId = ++minerRefreshId;
+  const request = { account: requestedAccount, promise: null };
+  request.promise = (async () => {
   try {
     const miner = await readMiner(requestedAccount);
     // Wallet reads can resolve out of order when the user changes account or
@@ -349,7 +427,28 @@ export async function refreshMiner() {
     }
     return null;
   }
+  })().finally(() => {
+    if (minerRefreshRequest !== request) return;
+    minerRefreshRequest = null;
+    if (minerRefreshDirty && state.account === requestedAccount) {
+      minerRefreshDirty = false;
+      queueMicrotask(() => { void refreshMiner(); });
+    }
+  });
+  minerRefreshRequest = request;
+  return request.promise;
 }
+
+const scheduleMinerRefresh = () => {
+  if (!state.account || minerRefreshTimer !== null) return;
+  // A settlement mutates several subscribed accounts in one transaction.
+  // Coalesce their notifications into one wallet-ledger read instead of one
+  // read per changed PDA; direct user actions still refresh immediately.
+  minerRefreshTimer = window.setTimeout(() => {
+    minerRefreshTimer = null;
+    if (!document.hidden && state.account) void refreshMiner();
+  }, 100);
+};
 
 /**
  * Ticks every second. When the slot number rolls over, the previous round has closed —
@@ -357,6 +456,10 @@ export async function refreshMiner() {
  */
 let lastRevealPoll = 0;
 function tick() {
+  if (protocolReady && !state.clockReady) {
+    emit();
+    return;
+  }
   const next = roundState();
   const rolled = next.roundId !== state.roundId;
 
@@ -375,6 +478,7 @@ function tick() {
     state.myBets = Array(25).fill(0n);
     state.totalWager = 0n;
     state.currentRound = null; // fresh round: not resolved, no winner yet
+    state.currentRoundSlot = 0;
     if (live && previous !== null) loadResolved(previous);
     if (live) {
       refreshRound();
@@ -393,8 +497,12 @@ function tick() {
   emit();
 }
 
-let stopRoundRealtime = null;
-let realtimeRoundId = null;
+// Keep the live round and the immediately previous round subscribed at the
+// same time. Settlement is intentionally asynchronous: the previous Round PDA
+// may change a fraction of a second after the wall-clock id rolls forward. A
+// single-current-round subscription drops that exact update and leaves the
+// winner dependent on the slower database index.
+const roundRealtimeStops = new Map();
 let walletRealtimeStops = [];
 let globalRealtimeStops = [];
 
@@ -408,7 +516,9 @@ const syncWalletRealtime = (account) => {
   if (!account) return;
   const authority = new PublicKey(account);
   const onRewardAccountChange = () => {
-    if (!document.hidden) void refreshMiner();
+    invalidateReceiptCache();
+    window.dispatchEvent(new Event('myne:reward-ledger-changed'));
+    if (!document.hidden) scheduleMinerRefresh();
   };
   walletRealtimeStops = [
     subscribeAccountActivity(minerPda(authority), onRewardAccountChange),
@@ -427,12 +537,36 @@ const syncWalletRealtime = (account) => {
 
 const syncRoundRealtime = (roundId) => {
   const id = BigInt(roundId);
-  if (realtimeRoundId === id) return;
-  stopRoundRealtime?.();
-  realtimeRoundId = id;
-  stopRoundRealtime = subscribeAccountActivity(derivePda('round', u64Seed(id)), () => {
-    if (!document.hidden && live) void refreshRound();
-  });
+  const observed = new Set([id, ...(id > 0n ? [id - 1n] : [])].map(String));
+  for (const [key, stop] of roundRealtimeStops) {
+    if (observed.has(key)) continue;
+    stop();
+    roundRealtimeStops.delete(key);
+  }
+  for (const key of observed) {
+    if (roundRealtimeStops.has(key)) continue;
+    const observedId = BigInt(key);
+    const stop = subscribeAccountActivity(derivePda('round', u64Seed(observedId)), ({ account, slot }) => {
+      if (document.hidden || !live) return;
+      try {
+        // accountSubscribe already delivered the authoritative confirmed bytes.
+        // Decode them immediately instead of waiting for a second HTTP RPC round
+        // trip; the regular refresh below still reconciles wallet-specific bets
+        // and acts as the fallback if a websocket payload cannot be decoded.
+        const round = decodeRoundAccountData(observedId, account.data);
+        if (observedId === state.roundId) {
+          if (applyRoundSnapshot(round, slot)) emit();
+        } else if (publishResolvedRound(observedId, round)) {
+          emit();
+          if (state.account) scheduleMinerRefresh();
+        }
+      } catch {
+        if (observedId === state.roundId) void refreshRound();
+        else void loadResolved(observedId);
+      }
+    });
+    roundRealtimeStops.set(key, stop);
+  }
 };
 
 const startGlobalRealtime = () => {
@@ -448,10 +582,10 @@ const startGlobalRealtime = () => {
     // Passive MYNE and pending SOL can change when somebody else claims or a round distributes its
     // staking allocation. Both affect this wallet even when its own PDA bytes do not change.
     subscribeAccountActivity(protocolPdas.miningPool, () => {
-      if (!document.hidden && state.account) void refreshMiner();
+      if (!document.hidden && state.account) scheduleMinerRefresh();
     }),
     subscribeAccountActivity(protocolPdas.stakePool, () => {
-      if (!document.hidden && state.account) void refreshMiner();
+      if (!document.hidden && state.account) scheduleMinerRefresh();
     }),
   ];
 };
@@ -460,50 +594,77 @@ const startGlobalRealtime = () => {
  * At rollover the previous round should already be settled. Retry briefly if RPC confirmation
  * lags so the result tile and latest-played miners card update from known-good records.
  */
-async function loadResolved(roundId, attempt = 0) {
-  // A suspended/background tab can skip several elapsed ids between ticks. Discard late
-  // responses for an older current-round snapshot, then resolve the newest settled round at or
-  // before this target. Zero-bid rounds are full results with a winning tile.
-  if (state.roundId !== BigInt(roundId) + 1n) return;
-  try {
-    // Use the production index to locate the newest resolved round at or before
-    // the elapsed id. It includes zero-bid rounds instead of skipping their
-    // verifiable winning tiles.
-    const [indexedRoundId, indexedPlayedRoundId] = await Promise.all([
-      loadLatestSettledRoundId(roundId),
-      loadLatestPlayedSettledRoundId(roundId),
-    ]);
-    const resolvedRoundId = indexedRoundId ?? roundId;
-    const playedRoundId = indexedPlayedRoundId ?? resolvedRoundId;
-    const [round, playedRound] = await Promise.all([
-      readRound(resolvedRoundId),
-      BigInt(playedRoundId) === BigInt(resolvedRoundId)
-        ? Promise.resolve(null)
-        : readRound(playedRoundId).catch(() => null),
-    ]);
-    if (round.resolved && state.roundId === BigInt(roundId) + 1n) {
-      const resolvedId = BigInt(resolvedRoundId);
-      state.lastResolved = { roundId: resolvedId, ...round };
-      const participantRound = playedRound?.resolved && playedRound.totalWager > 0n
-        ? { roundId: BigInt(playedRoundId), ...playedRound }
-        : round.totalWager > 0n
-          ? state.lastResolved
-          : null;
-      if (participantRound) state.lastPlayedResolved = participantRound;
-      emit();
-      // Receipt settlement is permissionless and may land just after the round
-      // result. Pull the miner ledger alongside the result so newly credited
-      // MYNE is immediately available to Claim All / Stake + Burn.
-      if (state.account) void refreshMiner();
-      if (BigInt(resolvedRoundId) === BigInt(roundId)) return;
+const publishResolvedRound = (roundId, round) => {
+  const resolvedId = BigInt(roundId);
+  if (!round?.resolved || resolvedId > state.roundId) return false;
+  const latestId = state.lastResolved?.roundId == null
+    ? -1n
+    : BigInt(state.lastResolved.roundId);
+  if (resolvedId >= latestId) state.lastResolved = { roundId: resolvedId, ...round };
+  if (round.totalWager > 0n) {
+    const latestPlayedId = state.lastPlayedResolved?.roundId == null
+      ? -1n
+      : BigInt(state.lastPlayedResolved.roundId);
+    if (resolvedId >= latestPlayedId) {
+      state.lastPlayedResolved = { roundId: resolvedId, ...round };
     }
-  } catch (error) {
-    console.warn('resolved round read failed', error);
   }
-  // Settlement can land a few hundred milliseconds after the round rolls over. Retry quickly so
-  // a fresh page load or RPC race never leaves the previous-miners panel blank for a full poll
-  // interval; once a roster is rendered, later failures leave that confirmed roster untouched.
-  if (attempt < 24) window.setTimeout(() => loadResolved(roundId, attempt + 1), 500);
+  return true;
+};
+
+const resolvedLoaders = new Map();
+const resolvedRetryDelay = () => new Promise((resolve) => window.setTimeout(resolve, 500));
+
+async function loadResolved(roundId) {
+  // Read the exact Round PDA first. The chain owns the winner; Supabase is a
+  // rebuildable history/read model and must never be a prerequisite for the
+  // five-second reveal or latest-result pointer.
+  const targetId = BigInt(roundId);
+  if (targetId > state.roundId) return;
+  const key = targetId.toString();
+  if (resolvedLoaders.has(key)) return resolvedLoaders.get(key);
+  const request = (async () => {
+    const publishDirect = async () => {
+      try {
+        const directRound = await readRound(targetId);
+        if (!publishResolvedRound(targetId, directRound)) return false;
+        emit();
+        if (state.account) void refreshMiner();
+        return true;
+      } catch {
+        // A skipped/unopened id has no PDA; preserve the last verified result.
+        return false;
+      }
+    };
+    // The chain owns the result and gets the first attempt.
+    if (await publishDirect()) return;
+
+    // Read the durable projection once, so a fresh page can restore a result
+    // even after rent cleanup. It never gates the live direct-account reveal.
+    try {
+      const [indexedLatest, indexedPlayed] = await Promise.all([
+        loadLatestSettledRound(targetId),
+        loadLatestPlayedSettledRound(targetId),
+      ]);
+      let changed = false;
+      for (const candidate of [indexedLatest, indexedPlayed]) {
+        if (!candidate) continue;
+        changed = publishResolvedRound(candidate.roundId, candidate) || changed;
+      }
+      if (changed) emit();
+    } catch (error) {
+      console.warn('indexed resolved-round fallback failed', error);
+    }
+
+    // Settlement normally confirms inside the five-second result period. Burst
+    // only the exact PDA while accountSubscribe remains the primary path.
+    for (let attempt = 1; attempt < 10; attempt += 1) {
+      await resolvedRetryDelay();
+      if (await publishDirect()) return;
+    }
+  })().finally(() => resolvedLoaders.delete(key));
+  resolvedLoaders.set(key, request);
+  return request;
 }
 
 // --- actions -------------------------------------------------------------------------
@@ -597,6 +758,7 @@ export async function mine({
   tiles, ethPerTile, auto = false, plays = 1, fundRounds = 1, autoClaim = false,
   rewardMode = 'accumulate',
 }) {
+  if (!state.clockReady) return notify('Synchronizing with Solana — please try again in a moment');
   if (!getAccount()) return connectWallet();
   if (!tiles.length) return notify('Select at least one tile');
   if (!(ethPerTile > 0)) return notify('Enter an SOL amount');
@@ -740,27 +902,16 @@ export async function cancelAutoPlan() {
 }
 
 export async function claim(roundId) {
-  if (!getAccount()) return connectWallet();
-  const processed = await runTx('Processing round rewards…', () => claimRound(roundId), refreshMiner);
-  if (!processed || state.claimableSol <= 0n) return processed;
-  return runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
+  return claimEthOnly([roundId]);
 }
 
 /**
- * Rounds settled per claim transaction.
+ * Rounds processed per visible Claim-All work unit.
  *
- * `claimMany` loops `_claimSimpleFor` once per round, and every iteration does its own SOL
- * transfer, bribe handling and `Claimed` event — the cost is linear in rounds, not amortised
- * across the batch. Measured single-round claims ran 111k–195k gas, so once the ~25k of
- * transaction overhead is excluded the marginal cost is up to ~170k per round. Fifteen rounds is
- * therefore ~2.6M gas, which is bounded and comfortably below anything this chain has rejected.
- *
- * Left unbounded, a miner who never claimed would eventually build a backlog whose batch cannot
- * fit in a block at all — and because the panel lists every unclaimed win across all history, that
- * backlog only ever grows. The cap is what stops the Claim button from becoming permanently
- * un-pressable for exactly the users who have won the most.
- *
- * Anyone with 15 or fewer claimable rounds still signs exactly once, as before.
+ * Receipt processing has a fixed Solana compute/account cost. The low-level
+ * client simulates and confirms groups of at most four receipt instructions;
+ * this outer bound prevents a large backlog from becoming one unmanageable UI
+ * action while still making deterministic progress on every confirmation.
  */
 const CLAIM_CHUNK = 15;
 
@@ -768,11 +919,12 @@ const chunkRounds = (ids, size = CLAIM_CHUNK) =>
   Array.from({ length: Math.ceil(ids.length / size) }, (_, i) => ids.slice(i * size, i * size + size));
 
 /**
- * Send one claim transaction per batch, stopping at the first failure.
+ * Process one bounded round group at a time, stopping at the first failure.
  *
- * Each round is settled independently on-chain, so batches that already confirmed stay claimed —
- * a failure partway through is real progress, not a rollback. Returns how many rounds actually
- * landed so the caller can say so rather than implying the whole set succeeded.
+ * The low-level sender may use several four-receipt Solana transactions. Every
+ * confirmed transaction is durable even if a later wallet prompt fails; the
+ * final refresh discovers that exact progress and leaves remaining receipts
+ * available for the next click.
  */
 async function claimBatched(roundIds, send, verb) {
   const batches = chunkRounds(roundIds);
@@ -780,11 +932,28 @@ async function claimBatched(roundIds, send, verb) {
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i];
     const step = batches.length > 1 ? ` · batch ${i + 1} of ${batches.length}` : '';
-    const ok = await runTx(
-      `${verb} ${batch.length} round${batch.length === 1 ? '' : 's'}…${step}`,
-      () => send(batch),
-      null, // refresh once at the end instead of after every batch
-    );
+    let ok = false;
+    try {
+      notify(`${verb} ${batch.length} round${batch.length === 1 ? '' : 's'}…${step}`);
+      const hash = await send(batch);
+      notify('Submitted — waiting for confirmation…');
+      const receipt = await waitForTx(hash);
+      if (receipt.status !== 'success') notify('Transaction reverted');
+      else {
+        notify(`Confirmed · ${explorerTx(hash).split('/').pop().slice(0, 10)}…`);
+        ok = true;
+      }
+    } catch (error) {
+      if (error?.code === NO_UNCLAIMED_RECEIPTS) {
+        // The permissionless worker won the race after the panel refresh. The
+        // reward is already in the durable wallet ledger, so this batch is
+        // complete and the owner-signed withdrawal below must still proceed.
+        notify('Rewards already processed — refreshing your claim balance…');
+        ok = true;
+      } else {
+        notify(readableError(error));
+      }
+    }
     if (!ok) break;
     claimed += batch.length;
   }
@@ -804,11 +973,7 @@ export async function claimMany(roundIds) {
 }
 
 /**
- * Claim the SOL from every supplied round, leaving the MYNE unrefined.
- *
- * The contract batches this natively (claimManyAdvanced), so this is ordinary runTx work — no
- * wallet-capability probing. The only loop is the gas-bounded batching above, which costs a
- * signature per 15 rounds instead of the one-per-round it replaced.
+ * Process supplied rewards and withdraw accrued SOL, leaving MYNE unrefined.
  */
 export async function claimEthOnly(roundIds) {
   if (!getAccount()) return connectWallet();
@@ -871,12 +1036,11 @@ export async function claimAll(roundIds) {
     return false;
   }
   let handled = false;
+  let allReceiptsProcessed = true;
   if (roundIds.length > 0) {
     const claimed = await claimMany(roundIds);
-    // Do not present a partial receipt settlement as "Claim All". Already-confirmed batches remain
-    // safe and claimable MYNE stays in the miner account; the user can retry the remaining batch.
-    if (claimed !== roundIds.length) return false;
-    handled = true;
+    allReceiptsProcessed = claimed === roundIds.length;
+    handled = claimed > 0;
   }
   const miner = roundIds.length > 0 ? await freshRewardAccount(account) : initialMiner;
   if (!miner) return false;
@@ -885,7 +1049,15 @@ export async function claimAll(roundIds) {
     if (!withdrawn) return false;
     handled = true;
   }
-  if (miner.rewardsBullion > 0n) return refine();
+  if (miner.rewardsBullion > 0n) {
+    const refined = await refine();
+    if (!allReceiptsProcessed) notify('Claimed available rewards · some receipts still need processing');
+    return refined && allReceiptsProcessed;
+  }
+  if (!allReceiptsProcessed) {
+    notify('Claimed available rewards · some receipts still need processing');
+    return false;
+  }
   if (handled) return true;
   notify('Nothing available to claim');
   return false;
@@ -901,9 +1073,15 @@ export async function stakeAndBurnRewards(roundIds) {
     notify('This wallet has no complete mining reward account — no transaction was submitted');
     return false;
   }
+  let allReceiptsProcessed = true;
   if (roundIds.length > 0) {
     const claimed = await claimMany(roundIds);
-    if (claimed !== roundIds.length) return false;
+    allReceiptsProcessed = claimed === roundIds.length;
+    if (!allReceiptsProcessed) {
+      // Already-confirmed receipt accrual remains withdrawable/burnable. Do not
+      // strand it merely because a later receipt or wallet prompt failed.
+      notify('Processing available rewards · some receipts will remain for the next attempt');
+    }
   }
   const miner = roundIds.length > 0 ? await freshRewardAccount(account) : initialMiner;
   if (!miner) return false;
@@ -914,12 +1092,20 @@ export async function stakeAndBurnRewards(roundIds) {
     const withdrawn = await runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
     if (!withdrawn) return false;
   }
-  if (miner.rewardsBullion === 0n) return notify('No MYNE available to stake and burn');
+  if (miner.rewardsBullion === 0n) {
+    if (!allReceiptsProcessed) return false;
+    return notify('No MYNE available to stake and burn');
+  }
   if (!miner.hasPosition) {
     notify('This wallet’s staking reward account is unavailable — no transaction was submitted');
     return false;
   }
-  return runTx('Staking + burning MYNE…', burnUnclaimedMyne, refreshMiner);
+  const burned = await runTx('Staking + burning MYNE…', burnUnclaimedMyne, refreshMiner);
+  if (burned && !allReceiptsProcessed) {
+    notify('Staked + burned available MYNE · some receipts still need processing');
+    return false;
+  }
+  return burned;
 }
 
 // --- boot ----------------------------------------------------------------------------
@@ -936,25 +1122,34 @@ export function start() {
   // Anchor to the chain BEFORE the first roundId is derived. Ordering matters: computing it
   // from the raw device clock and correcting a moment later makes a skewed device paint the
   // wrong round, then jump — and any bet placed in that window carries the wrong id.
-  const clockReady = Promise.all([syncChainClock(), syncRoundGenesis()]).then(([skew]) => {
-    // Only worth reporting once it exceeds the sub-second measurement noise.
-    if (skew !== null && Math.abs(skew) >= 1) {
-      console.info(`[clock] device is ${skew > 0 ? 'behind' : 'ahead of'} chain by ${Math.abs(skew).toFixed(1)}s — corrected`);
+  const clockReady = (async () => {
+    let attempt = 0;
+    while (!state.clockReady) {
+      try {
+        const [skew] = await Promise.all([syncChainClock(), syncRoundGenesis()]);
+        // Only worth reporting once it exceeds the sub-second measurement noise.
+        if (skew !== null && Math.abs(skew) >= 1) {
+          console.info(`[clock] device is ${skew > 0 ? 'behind' : 'ahead of'} chain by ${Math.abs(skew).toFixed(1)}s — corrected`);
+        }
+        state.clockReady = true;
+        state.roundId = roundState().roundId;
+        syncRoundRealtime(state.roundId);
+        tick();
+        if (live) refreshRound();
+        // Read the previous verified result only after the chain-derived id is known.
+        if (live && state.roundId > 0n) loadResolved(state.roundId - 1n);
+        return true;
+      } catch (error) {
+        attempt += 1;
+        console.warn('Solana clock/genesis synchronization failed; retrying', error);
+        emit();
+        const delay = Math.min(15_000, 1_000 * (2 ** Math.min(attempt - 1, 4)));
+        await new Promise((resolve) => window.setTimeout(resolve, delay));
+      }
     }
-    state.roundId = roundState().roundId;
-    syncRoundRealtime(state.roundId);
-    tick();
-    if (live) refreshRound();
-    // refreshRound() only sets `lastResolved` if the CURRENT round is already resolved, which is
-    // true only inside its reveal window — so on a fresh load the "Last round" row had nothing to
-    // render for ~3s and sat on its placeholder. Read the previous round explicitly. Deliberately
-    // inside clockReady: a skewed device's uncorrected id can be off by one, and seeding the wrong
-    // round is worse than seeding a moment later.
-    if (live && state.roundId > 0n) loadResolved(state.roundId - 1n);
-  }).catch(() => {});
+    return true;
+  })();
 
-  state.roundId = roundState().roundId;
-  syncRoundRealtime(state.roundId);
   startGlobalRealtime();
 
   onAccountChange((account) => {
@@ -964,10 +1159,11 @@ export function start() {
     // Invalidate in-flight reads and remove the previous wallet's actionable
     // balances synchronously, before the replacement RPC read completes.
     minerRefreshId += 1;
+    minerRefreshDirty = false;
     clearMinerState();
     void refreshMiner();
     refreshPlan();
-    if (account && live) refreshRound();
+    if (account && live && state.clockReady) refreshRound();
     emit();
   });
 
@@ -978,13 +1174,12 @@ export function start() {
   // stale build is loud rather than quietly telling users their MYNE is locked after launch.
   verifyPremine(isPremine);
   if (live) {
-    refreshRound();
     refreshJackpot();
   }
 
   window.setInterval(tick, 1000);
   window.setInterval(() => {
-    if (!live || document.hidden) return;
+    if (!live || document.hidden || !state.clockReady) return;
     void refreshRound();
     // The lifecycle keeper can settle a receipt between round-boundary reads.
     // Keep the account-specific reward ledger current on the same bounded poll
@@ -999,13 +1194,12 @@ export function start() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       void syncChainClock();
-      if (live) {
+      if (live && state.clockReady) {
         void refreshRound();
         void refreshJackpot();
       }
     }
   });
-  tick();
   return clockReady;
 }
 

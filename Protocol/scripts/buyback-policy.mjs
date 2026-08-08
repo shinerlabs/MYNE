@@ -54,6 +54,58 @@ export function isCompleteBuybackExecution(entry) {
   );
 }
 
+/**
+ * Refresh only the recent blockhash of Jupiter's unsigned V0 message. The
+ * keeper validates programs separately before calling this helper, and signs
+ * and journals the resulting exact message afterward.
+ */
+export function refreshUnsignedV0TransactionBlockhash(transaction, {
+  expectedPayer,
+  blockhash,
+}) {
+  assert.equal(
+    transaction?.message?.staticAccountKeys?.[0]?.toBase58?.(),
+    expectedPayer,
+    'Jupiter transaction fee payer changed unexpectedly',
+  );
+  assert.equal(
+    transaction.message.header?.numRequiredSignatures,
+    1,
+    'Jupiter transaction requires an unexpected signer',
+  );
+  assert.equal(transaction.signatures?.length, 1, 'Jupiter transaction signature layout changed');
+  assert.equal(transaction.signatures[0]?.length, 64, 'Jupiter transaction signature must be 64 bytes');
+  assert.ok(
+    Array.from(transaction.signatures[0] || []).every((byte) => byte === 0),
+    'Jupiter transaction must be unsigned before its blockhash is refreshed',
+  );
+  assert.ok(typeof blockhash === 'string' && blockhash.length > 0, 'Fresh blockhash is required');
+  transaction.message.recentBlockhash = blockhash;
+  return transaction;
+}
+
+/**
+ * An unsigned/signed recent-blockhash transaction can no longer land once the
+ * blockhash has expired. When its signature is absent and the keeper's token
+ * balance never increased, abandoning that exact journal entry cannot double
+ * spend. Legacy journals may not contain a last-valid height, so callers can
+ * supply the RPC's direct blockhash-validity result instead.
+ */
+export function pendingSwapIsProvablyExpired({
+  signatureStatus,
+  outputIncreased,
+  currentBlockHeight = null,
+  lastValidBlockHeight = null,
+  blockhashValid = null,
+} = {}) {
+  if (signatureStatus || outputIncreased) return false;
+  if (Number.isSafeInteger(currentBlockHeight)
+      && Number.isSafeInteger(lastValidBlockHeight)) {
+    return currentBlockHeight > lastValidBlockHeight;
+  }
+  return blockhashValid === false;
+}
+
 export function purchasedTokenBaseUnits({ preTokenBalances = [], postTokenBalances = [], mint, owner }) {
   const total = (balances) => balances
     .filter((entry) => entry?.mint === mint && entry?.owner === owner)

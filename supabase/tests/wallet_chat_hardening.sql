@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
 
-select plan(30);
+select plan(34);
 
 select ok(
   to_regclass('public.chat_security_state') is not null,
@@ -74,6 +74,10 @@ select ok(
   to_regprocedure('public.set_chat_admin(text,boolean)') is not null,
   'service-role moderator provisioning RPC exists'
 );
+select ok(
+  to_regprocedure('public.mine_wallet_round_history_v1(text,bigint[])') is not null,
+  'bounded wallet round-history RPC exists'
+);
 
 select ok(
   not has_function_privilege(
@@ -114,6 +118,24 @@ select ok(
     'EXECUTE'
   ),
   'service role can provision moderators'
+);
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.mine_wallet_round_history_v1(text,bigint[])',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'public.mine_wallet_round_history_v1(text,bigint[])',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'service_role',
+    'public.mine_wallet_round_history_v1(text,bigint[])',
+    'EXECUTE'
+  ),
+  'wallet round history is callable only by service-role Edge Functions'
 );
 select ok(
   not has_table_privilege('anon', 'public.chat_feed', 'INSERT'),
@@ -227,6 +249,49 @@ insert into public.mine_round_bets (
     '11111111111111111111111111111111', 3, 2, 1, 2, 0,
     'wallet-chat-test-signature-3', 3
   );
+
+update public.mine_rounds
+set projection_complete = true,
+    winning_square = 0,
+    total_receipts = 2,
+    processed_receipts = 2,
+    closed_receipts = 2
+where round_id = 9000000000000000001;
+
+insert into public.mine_receipt_settlements (
+  round_id, receipt, authority, nonce, status, signature, slot
+) values (
+  9000000000000000001,
+  'wallet-chat-test-receipt-1',
+  '11111111111111111111111111111111',
+  1,
+  'claimed',
+  'wallet-chat-test-claim-signature-1',
+  4
+);
+
+select is(
+  (
+    select concat(position_lamports, ':', claimed::text)
+    from public.mine_wallet_round_history_v1(
+      '11111111111111111111111111111111',
+      array[9000000000000000001, 9000000000000000001]
+    )
+  ),
+  '1:true',
+  'wallet history deduplicates ids and returns the exact processed winning position'
+);
+
+select is_empty(
+  $$
+    select *
+    from public.mine_wallet_round_history_v1(
+      '11111111111111111111111111111111',
+      array[9000000000000000002]
+    )
+  $$,
+  'wallet history excludes an incomplete/unresolved projection'
+);
 
 select is(
   public.wallet_mined_round_count('11111111111111111111111111111111'),

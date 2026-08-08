@@ -19,7 +19,9 @@ import {
   calculateSpend,
   isCompleteBuybackExecution,
   meteoraRouteForProgram,
+  pendingSwapIsProvablyExpired,
   purchasedTokenBaseUnits,
+  refreshUnsignedV0TransactionBlockhash,
   selectIndexedBuybackRound,
   validateJupiterPriorityLevel,
   validateJupiterEndpoint,
@@ -28,6 +30,7 @@ import {
 import {
   requireMatchingSolanaNetwork,
 } from './production-network-policy.mjs';
+import { emitWorkerHeartbeat, runWorkerTick } from './event-driven-loop.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const {
@@ -79,7 +82,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const statePath = process.env.BUYBACK_STATE_PATH || '';
 const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const keeperInstanceId = randomUUID();
+// A supervised replacement on the same replica must be able to renew the
+// previous child's lease immediately. Distinct hosts retain distinct holders.
+const keeperInstanceId = String(process.env.BUYBACK_LEASE_HOLDER || '').trim() || randomUUID();
 const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 
 function base58Encode(bytes) {
@@ -298,6 +303,16 @@ async function inspectSwapTransaction(transaction, {
     );
   }
 
+  // Jupiter's unsigned response can sit behind API/cache latency long enough
+  // for its original blockhash to expire. Refresh only the validated message
+  // blockhash; the exact refreshed message is simulated, signed and then
+  // persisted with its deterministic signature in the durable journal.
+  const latestBlockhash = await provider.connection.getLatestBlockhash(commitment);
+  refreshUnsignedV0TransactionBlockhash(transaction, {
+    expectedPayer: payer.publicKey.toBase58(),
+    blockhash: latestBlockhash.blockhash,
+  });
+
   const beforeLamports = BigInt(await provider.connection.getBalance(payer.publicKey, commitment));
   const simulation = await provider.connection.simulateTransaction(transaction, {
     commitment,
@@ -332,7 +347,7 @@ async function inspectSwapTransaction(transaction, {
     postBaseUnits - beforeBaseUnits >= BigInt(minimumOutputBaseUnits),
     'Swap simulation output is below the quote slippage threshold',
   );
-  return { simulation, spentLamports, postBaseUnits };
+  return { simulation, spentLamports, postBaseUnits, latestBlockhash };
 }
 
 async function ensureMyneAta(mint) {
@@ -518,9 +533,38 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
         current = (await getAccount(provider.connection, ata, 'confirmed', TOKEN_PROGRAM_ID)).amount;
         if (current <= before) {
           const status = await savedSignatureStatus(pending.swapSignature);
+          let provablyExpired = false;
+          if (!status) {
+            if (Number.isSafeInteger(pending.lastValidBlockHeight)) {
+              const currentBlockHeight = await provider.connection.getBlockHeight(commitment);
+              provablyExpired = pendingSwapIsProvablyExpired({
+                signatureStatus: status,
+                outputIncreased: current > before,
+                currentBlockHeight,
+                lastValidBlockHeight: pending.lastValidBlockHeight,
+              });
+            } else {
+              // Backward-compatible recovery for a journal created before the
+              // last-valid height was persisted. The serialized V0 message
+              // still contains the exact blockhash whose validity can be
+              // queried without rebuilding or resigning the transaction.
+              const saved = VersionedTransaction.deserialize(
+                Buffer.from(pending.swapRaw, 'base64'),
+              );
+              const validity = await provider.connection.isBlockhashValid(
+                saved.message.recentBlockhash,
+                { commitment },
+              );
+              provablyExpired = pendingSwapIsProvablyExpired({
+                signatureStatus: status,
+                outputIncreased: current > before,
+                blockhashValid: validity.value,
+              });
+            }
+          }
           const explicitlyAbandoned = process.env.CONFIRM_ABANDONED_BUYBACK
             === `${roundKey}:${pending.swapSignature}`;
-          if (status?.err || explicitlyAbandoned) {
+          if (status?.err || provablyExpired || explicitlyAbandoned) {
             // A finalized transaction error is safe to retry. For an absent or
             // ambiguous RPC status, require an exact round+signature operator
             // acknowledgement; never silently requote and risk a double spend.
@@ -531,6 +575,8 @@ async function recoverPendingBuyback({ state, roundKey, journal, mint, ata }) {
               skipped: true,
               reason: status?.err
                 ? 'pending-swap-finalized-error-retry-next-tick'
+                : provablyExpired
+                  ? 'pending-swap-expired-retry-next-tick'
                 : 'pending-swap-explicitly-abandoned-retry-next-tick',
               detail: String(error),
             };
@@ -782,7 +828,7 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
   const ensuredAta = await ensureMyneAta(configState.mint);
   const before = (await getAccount(provider.connection, ensuredAta, 'confirmed')).amount;
   const swap = await buildSwapTransaction(quote);
-  await inspectSwapTransaction(swap, {
+  const inspected = await inspectSwapTransaction(swap, {
     inputLamports: spend,
     myneAta: ensuredAta,
     beforeBaseUnits: before,
@@ -798,6 +844,7 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
     expectedOutputBaseUnits: checked.outputBaseUnits,
     swapRaw: Buffer.from(swap.serialize()).toString('base64'),
     swapSignature,
+    lastValidBlockHeight: inspected.latestBlockhash.lastValidBlockHeight,
     burnRaw: null,
     burnSignature: null,
   };
@@ -819,10 +866,41 @@ export async function keeperTick({ dryRun = envBool('DRY_RUN', true) } = {}) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const once = process.argv.includes('--once');
   const intervalMs = readInteger(process.env.BUYBACK_INTERVAL_MS || '60000', 'BUYBACK_INTERVAL_MS');
+  const tickTimeoutMs = readInteger(
+    process.env.BUYBACK_TICK_TIMEOUT_MS || '120000',
+    'BUYBACK_TICK_TIMEOUT_MS',
+  );
+  assert.ok(
+    tickTimeoutMs >= 15_000 && tickTimeoutMs <= 600_000,
+    'BUYBACK_TICK_TIMEOUT_MS must be between 15000 and 600000',
+  );
   do {
+    emitWorkerHeartbeat('buyback-keeper', 'tick-start');
     try {
-      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'buyback-tick', ...(await keeperTick()) }));
+      const result = await runWorkerTick({
+        worker: 'buyback-keeper',
+        timeoutMs: tickTimeoutMs,
+        task: keeperTick,
+        onTimeout: (error) => {
+          console.error(JSON.stringify({
+            at: new Date().toISOString(),
+            event: 'worker-tick-timeout',
+            worker: 'buyback-keeper',
+            timeoutMs: tickTimeoutMs,
+            message: error.message,
+          }));
+          emitWorkerHeartbeat('buyback-keeper', 'tick-error', 'tick-timeout');
+          process.exit(75);
+        },
+      });
+      emitWorkerHeartbeat(
+        'buyback-keeper',
+        'tick-complete',
+        result.skipped ? result.reason : 'ok',
+      );
+      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'buyback-tick', ...result }));
     } catch (error) {
+      emitWorkerHeartbeat('buyback-keeper', 'tick-error', error?.code || 'tick-error');
       console.error(JSON.stringify({ at: new Date().toISOString(), event: 'buyback-error', message: error instanceof Error ? error.message : String(error) }));
       if (process.env.FAIL_FAST === '1') {
         process.exitCode = 1;
