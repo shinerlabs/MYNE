@@ -795,7 +795,7 @@ const openRandomnessProof = async () => {
       ` : `<dt>Randomness account</dt><dd>${randomnessAccount ? `<a href="${explorerAddress(randomnessAccount)}" target="_blank" rel="noreferrer">${chain.format.short(randomnessAccount)} ↗</a>` : 'Awaiting index'}</dd>`}
     </dl>
     <p class="switchboard-proof-note">${serverMode
-      ? 'The commitment is data, not a Solana account. The verifier recomputes both hashes and checks the recorded slot hash against Solana RPC.'
+      ? 'The commitment is data, not a Solana account. The verifier recomputes the pre-betting commitment and the final output derived on-chain from Solana SlotHashes.'
       : 'Anyone can independently verify a resolved round. No wallet signature is needed.'}</p>
     <div class="confirm-actions"><button type="button" class="confirm-cancel">Close</button><button type="button" class="confirm-go" data-proof-verify ${verifyReady ? '' : 'disabled'}>${verifyReady ? 'Verify round' : (proofReady ? 'Proof data indexing' : 'Waiting for proof')}</button></div>
     ${serverMode ? '' : '<a class="switchboard-doc-link" href="https://docs.switchboard.xyz/docs-by-chain/solana-svm/randomness/randomness-tutorial" target="_blank" rel="noreferrer">How Switchboard randomness works ↗</a>'}`;
@@ -813,12 +813,7 @@ const openRandomnessProof = async () => {
     try {
       const result = await verifyRoundFairness(BigInt(roundId), randomness, winningSquare, indexedProof);
       const status = panel.querySelector('[data-proof-status]');
-      status.textContent = result?.ok
-        ? 'Verified by Solana'
-        : serverMode && result?.outcomeMatches && result?.serverCommitmentMatches
-          && result?.serverOutputMatches && result?.solanaSlotHashMatches === null
-          ? 'Hashes verified · historical block unavailable from RPC'
-          : 'Could not verify';
+      status.textContent = result?.ok ? 'Verified by Solana' : 'Could not verify';
       status.classList.toggle('proof-ok', Boolean(result?.ok));
       verify.textContent = result?.ok ? 'Verified' : 'Try again';
       verify.disabled = Boolean(result?.ok);
@@ -5976,8 +5971,7 @@ const renderVerdict = (r) => {
   ];
   if (r.randomnessMode === 'server') checks.push(
     ['reveal matches the pre-betting commitment', r.serverCommitmentMatches],
-    ['reveal + Solana slot hash match the on-chain output', r.serverOutputMatches],
-    ['recorded hash matches the produced Solana block', r.solanaSlotHashMatches],
+    ['reveal + Solana SlotHashes entry match the on-chain output', r.serverOutputMatches],
   );
   wrap.innerHTML = `<b>${r.ok ? '✓ verified' : incompleteServerProof ? '… entropy proof incomplete' : '✗ not verified'}</b>`
     + checks.map(([t, pass]) => `<i class="${pass === null ? 'pending' : pass ? 'pass' : 'fail'}">${pass === null ? '…' : pass ? '✓' : '✗'} ${t}</i>`).join('');

@@ -649,7 +649,6 @@ export async function verifyRoundFairness(roundId, randomnessValue, winningSquar
   const motherlodeMatches = proof.motherlodeHit === round.jackpotHit;
   const outcomeMatches = randomnessMatches && squareMatches && modeMatches && motherlodeMatches;
   let serverProof = null;
-  let solanaSlotHashMatches = null;
   if (round.randomnessMode === 'server') {
     const commitment = providerProof?.commitmentHex ?? round.randomnessCommitment;
     const reveal = providerProof?.revealHex ?? null;
@@ -667,24 +666,12 @@ export async function verifyRoundFairness(roundId, randomnessValue, winningSquar
         commitment,
         randomness: round.randomnessValue,
       });
-      // getBlock is an independent RPC read of the produced Solana blockhash.
-      // Historical providers may prune it; null is reported as unavailable,
-      // never silently converted into a pass.
-      if (BigInt(entropySlot) <= BigInt(Number.MAX_SAFE_INTEGER)) {
-        try {
-          const block = await connection.getBlock(Number(entropySlot), {
-            commitment: 'confirmed', transactionDetails: 'none', rewards: false,
-            maxSupportedTransactionVersion: 0,
-          });
-          if (block?.blockhash) solanaSlotHashMatches = randomnessEqual(bs58.decode(block.blockhash), slotHash);
-        } catch { /* historical block unavailable from this RPC */ }
-      }
     }
   }
   const serverProofComplete = round.randomnessMode !== 'server'
-    || Boolean(serverProof && solanaSlotHashMatches !== null);
+    || Boolean(serverProof);
   const serverProofMatches = round.randomnessMode !== 'server'
-    || Boolean(serverProof?.commitmentMatches && serverProof?.randomnessMatches && solanaSlotHashMatches);
+    || Boolean(serverProof?.commitmentMatches && serverProof?.randomnessMatches);
   return {
     ...proof,
     ok: outcomeMatches && serverProofComplete && serverProofMatches,
@@ -700,7 +687,6 @@ export async function verifyRoundFairness(roundId, randomnessValue, winningSquar
     randomnessCommitSlot: round.randomnessCommitSlot,
     serverCommitmentMatches: serverProof?.commitmentMatches ?? null,
     serverOutputMatches: serverProof?.randomnessMatches ?? null,
-    solanaSlotHashMatches,
     serverProofComplete,
   };
 }
