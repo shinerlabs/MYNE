@@ -125,7 +125,8 @@ is tied to a clean public commit and external release manifest:
    `20260808090000_server_randomness_proofs.sql`,
    `20260808113000_burn_stats.sql`,
    `20260808120000_receipt_reward_accrual.sql` and
-   `20260808123000_empty_round_stats.sql`. Deploy the indexer and all three supervised
+   `20260808123000_empty_round_stats.sql`, and
+   `20260808124500_keeper_lease_privileges.sql`. Deploy the indexer and all three supervised
    keepers with durable storage, alerts and restricted service-role credentials. Set
    `ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1` and set
    `REFERRAL_INDEXER_START_SLOT` to the program deployment slot in production.

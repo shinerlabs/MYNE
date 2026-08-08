@@ -29,6 +29,11 @@ and their published winning tiles in the ledger while excluding them from
 mined-round and Motherlode-award counts. Apply it with the claim-vault release
 before deploying the matching frontend.
 
+Migration `20260808124500_keeper_lease_privileges.sql` explicitly removes
+keeper-lease RPC access from `public`, `anon`, and `authenticated`, leaving
+only `service_role`. Apply it before starting any production keeper and require
+the Supabase security advisor to report no public SECURITY DEFINER access.
+
 ## Wallet-only chat
 
 Migration `20260807140000_wallet_chat_hardening.sql` is the wallet-only chat

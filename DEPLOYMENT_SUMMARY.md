@@ -68,7 +68,8 @@ Before Mainnet, apply all Supabase migrations (`20260807090000_round_index.sql`,
 `20260808090000_server_randomness_proofs.sql`,
 `20260808113000_burn_stats.sql`,
 `20260808120000_receipt_reward_accrual.sql`, and
-`20260808123000_empty_round_stats.sql`), rebuild and
+`20260808123000_empty_round_stats.sql`, and
+`20260808124500_keeper_lease_privileges.sql`), rebuild and
 synchronize both IDLs, record a fresh SBF hash,
 and repeat the full Rust, Anchor/local-validator, keeper-policy and frontend test suites. Prior
 version-5 hashes and test output are historical only.

@@ -206,15 +206,18 @@ supabase/migrations/20260808090000_server_randomness_proofs.sql
 supabase/migrations/20260808113000_burn_stats.sql
 supabase/migrations/20260808120000_receipt_reward_accrual.sql
 supabase/migrations/20260808123000_empty_round_stats.sql
+supabase/migrations/20260808124500_keeper_lease_privileges.sql
 ```
 
-The final two migrations are part of the same release as the upgraded program
+The final three migrations are part of the same release as the upgraded program
 and indexer. `receipt_reward_accrual` distinguishes historical direct wallet
 payments from rewards safely processed into the owner claim vault. The
 `empty_round_stats` migration keeps every settled zero-bid winning tile in the
 public ledger while excluding it from mined and Motherlode award totals. Do
-not deploy the upgraded workers or frontend until both migrations are present
+not deploy the upgraded workers or frontend until all three migrations are present
 and the PostgREST schema cache exposes their updated status/view contracts.
+`keeper_lease_privileges` ensures only the service role can fence production
+workers; the Supabase security advisor must report no public execution access.
 
 Before deploying the frontend, query `public.mine_burn_stats` as the anonymous
 role and require exactly one row with an integer

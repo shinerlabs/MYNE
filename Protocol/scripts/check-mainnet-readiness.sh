@@ -235,6 +235,10 @@ grep -q "case 'ReceiptRewardAccruedV1'" scripts/round-indexer.mjs
 grep -q "status: eventName === 'ReceiptRewardAccruedV1'" scripts/round-indexer.mjs
 test -f ../supabase/migrations/20260808123000_empty_round_stats.sql
 grep -q 'total_wager_wei > 0' ../supabase/migrations/20260808123000_empty_round_stats.sql
+grep -q 'security_invoker = true' ../supabase/migrations/20260808123000_empty_round_stats.sql
+test -f ../supabase/migrations/20260808124500_keeper_lease_privileges.sql
+grep -q 'from public, anon, authenticated' ../supabase/migrations/20260808124500_keeper_lease_privileges.sql
+grep -q 'to service_role' ../supabase/migrations/20260808124500_keeper_lease_privileges.sql
 grep -q "status=in.(claimed,accrued,refunded)" scripts/round-indexer.mjs
 
 if [[ -z "${MAINNET_RELEASE_MANIFEST:-}" ]]; then
