@@ -956,15 +956,19 @@ assert.equal(await program.account.round.fetchNullable(round), null);
 // Closing the temporary receipt and round accounts cannot strand or auto-pay
 // the user's durable SOL claim. The owner may withdraw it afterwards, and a
 // different fee payer cannot redirect a single lamport.
-const rogueBalanceBeforeClaim = await provider.connection.getBalance(rogue.publicKey, 'confirmed');
-await program.methods
+const rogueClaimSignature = await program.methods
   .claimStakingRewards()
   .accounts({ stakePool, stakePosition: rogueStakePosition, authority: rogue.publicKey })
   .signers([rogue])
   .rpc();
-const rogueBalanceAfterClaim = await provider.connection.getBalance(rogue.publicKey, 'confirmed');
+const rogueClaimTransaction = await readConfirmedTransaction(rogueClaimSignature);
+assert.ok(rogueClaimTransaction?.meta, 'Owner-signed SOL claim transaction is unavailable');
+const rogueClaimKeys = rogueClaimTransaction.transaction.message.getAccountKeys().staticAccountKeys;
+const rogueClaimBeneficiaryIndex = rogueClaimKeys.findIndex((key) => key.equals(rogue.publicKey));
+assert.notEqual(rogueClaimBeneficiaryIndex, -1, 'SOL claim beneficiary is missing from the transaction');
 assert.equal(
-  BigInt(rogueBalanceAfterClaim - rogueBalanceBeforeClaim),
+  BigInt(rogueClaimTransaction.meta.postBalances[rogueClaimBeneficiaryIndex]
+    - rogueClaimTransaction.meta.preBalances[rogueClaimBeneficiaryIndex]),
   47_666_667n,
   'Only the owner-signed claim transfers the accrued SOL to the beneficiary wallet',
 );

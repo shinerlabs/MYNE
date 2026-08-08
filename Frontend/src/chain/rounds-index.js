@@ -207,7 +207,7 @@ export async function indexAvailable() {
  *
  * @returns {Promise<null|{rows, total, filteredTotal, summary}>} null → caller should use chain
  */
-export async function loadIndexedRounds({ page, pageSize, filter, currentRoundId }) {
+export async function loadIndexedRounds({ page, pageSize, filter }) {
   if (!(await indexAvailable())) return null;
   try {
     const from = page * pageSize;
@@ -225,21 +225,31 @@ export async function loadIndexedRounds({ page, pageSize, filter, currentRoundId
       .select('mined, deployed_wei::text, minted_wei::text, jackpots')
       .single();
 
-    const [list, summary] = await Promise.all([listQuery, summaryQuery]);
-    if (list.error || summary.error) return null;
+    // History counts records that actually exist, not schedule ids derived
+    // from the clock. The latter continues increasing while mining is paused
+    // and made the ROUNDS metric disagree with both the ledger and paginator.
+    // This exact-count query returns at most one row, so it remains constant
+    // size as history grows.
+    const totalQuery = supabase
+      .from('mine_rounds')
+      .select('round_id', { count: 'exact' })
+      .range(0, 0);
+
+    const [list, summary, totalRounds] = await Promise.all([listQuery, summaryQuery, totalQuery]);
+    if (list.error || summary.error || totalRounds.error) return null;
 
     const st = summary.data ?? {};
     const deployed = unwrap(st.deployed_wei);
     const minted = unwrap(st.minted_wei);
     const jackpots = Number(st.jackpots ?? 0);
     const mined = Number(st.mined ?? 0);
+    const total = totalRounds.count ?? 0;
 
     return {
       rows: (list.data ?? []).map(fromRow),
       filteredTotal: list.count ?? 0,
-      // Every elapsed round, indexed or not — keeps numbering continuous with the chain.
-      total: currentRoundId > 0n ? Number(currentRoundId) : 0,
-      summary: { count: currentRoundId > 0n ? Number(currentRoundId) : 0, mined, deployed, minted, jackpots },
+      total,
+      summary: { count: total, mined, deployed, minted, jackpots },
     };
   } catch {
     return null;
