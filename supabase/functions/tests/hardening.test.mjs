@@ -111,6 +111,7 @@ test('MYNE balance verification pins the chain, deployment, account layouts, and
   assert.match(myneBalance, /getGenesisHash/);
   assert.match(myneBalance, /UPGRADEABLE_LOADER_ID/);
   assert.match(myneBalance, /TOKEN_PROGRAM_ID/);
+  assert.match(myneBalance, /MYNE deployment overrides are permitted only with a loopback RPC/);
   assert.match(myneBalance, /getTokenAccountsByOwner/);
   assert.match(myneBalance, /getMultipleAccounts/);
   assert.match(myneBalance, /minContextSlot/);

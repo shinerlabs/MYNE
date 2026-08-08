@@ -60,18 +60,24 @@ const configuredDeployment = (): Deployment => {
   if (parsed.protocol !== 'https:' && !(loopback && parsed.protocol === 'http:')) {
     throw new Error('CHAT_SOLANA_RPC_URL must use HTTPS outside loopback development');
   }
+  const genesisOverride = Deno.env.get('CHAT_SOLANA_GENESIS_HASH')?.trim();
+  const programOverride = Deno.env.get('CHAT_MYNE_PROGRAM_ID')?.trim();
+  const mintOverride = Deno.env.get('CHAT_MYNE_MINT_ADDRESS')?.trim();
+  if (!loopback && (genesisOverride || programOverride || mintOverride)) {
+    throw new Error('MYNE deployment overrides are permitted only with a loopback RPC');
+  }
   return {
     rpcUrl: parsed.toString(),
     genesisHash: canonicalPublicKey(
-      Deno.env.get('CHAT_SOLANA_GENESIS_HASH')?.trim() || MAINNET_GENESIS_HASH,
+      genesisOverride || MAINNET_GENESIS_HASH,
       'CHAT_SOLANA_GENESIS_HASH',
     ).toBase58(),
     program: canonicalPublicKey(
-      Deno.env.get('CHAT_MYNE_PROGRAM_ID')?.trim() || MYNE_PROGRAM_ID,
+      programOverride || MYNE_PROGRAM_ID,
       'CHAT_MYNE_PROGRAM_ID',
     ),
     mint: canonicalPublicKey(
-      Deno.env.get('CHAT_MYNE_MINT_ADDRESS')?.trim() || MYNE_MINT_ADDRESS,
+      mintOverride || MYNE_MINT_ADDRESS,
       'CHAT_MYNE_MINT_ADDRESS',
     ),
   };

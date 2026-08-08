@@ -323,12 +323,6 @@ export async function loadMyBetRounds(address) {
   }
 }
 
-/** Fast account activity check used by mainnet social access policy. */
-export async function countMyBetRounds(address) {
-  const rounds = await loadMyBetRounds(address);
-  return rounds?.ids ? rounds.ids.size : null;
-}
-
 const STAKING_WINDOW_CACHE_MS = 30_000;
 const ROUND_CADENCE_SECONDS = Number(ROUND_DURATION);
 let stakingWindowCache = null;

@@ -70,7 +70,8 @@ This is an on-chain eligibility check, not a browser claim. Set the server-only
 Mainnet genesis, production program, production mint, PDA owners,
 discriminators, wallet authorities, and token-account layouts before accepting
 the balance. `CHAT_MYNE_PROGRAM_ID`, `CHAT_MYNE_MINT_ADDRESS`, and
-`CHAT_SOLANA_GENESIS_HASH` exist only for explicit non-production testing.
+`CHAT_SOLANA_GENESIS_HASH` exist only for explicit loopback testing and are
+rejected when the RPC is not loopback.
 Successful wallet snapshots are cached for ten seconds; failures are not.
 
 For one release, an existing `CHAT_REQUIRE_MINED_ROUNDS=true` setting also

@@ -56,7 +56,6 @@ export function mountSocial(host) {
     setRoute: host.setRoute,
     copyText: host.copyText,
     requireWallet,
-    chatRequiresMinedRounds: Boolean(host.chatRequiresMinedRounds),
   };
 
   configureSession({ getConnectedWallet: host.getAccount, notify: host.notify });
@@ -81,19 +80,11 @@ export function mountSocial(host) {
     const previous = lastAccount;
     lastAccount = key;
 
-    // Every chat message is wallet-authenticated on every cluster so moderation can identify
-    // and block the sender. Once the production mining gate is enabled, five mined rounds are
-    // required in addition to the wallet connection.
-    let chatAllowed = Boolean(account);
-    let chatGate = '';
-    if (account && host.chatRequiresMinedRounds) {
-      const mined = await host.getMinedRoundCount?.(account);
-      chatAllowed = Number.isFinite(mined) && mined >= 5;
-      if (!chatAllowed) chatGate = mined == null
-        ? 'Your mined-round history could not be verified yet.'
-        : `Mine ${Math.max(0, 5 - mined)} more round${5 - mined === 1 ? '' : 's'} to unlock chat.`;
-    }
-    setChatComposeEnabled(chatAllowed, undefined, chatGate);
+    // Keep the composer available to every connected wallet. The chat-send Edge Function is the
+    // authority for the 0.01 MYNE rule and verifies liquid, mining-reward, and staking balances
+    // directly from one finalized on-chain snapshot. Duplicating that policy in the browser can
+    // incorrectly lock out valid holders when an indexer is delayed.
+    setChatComposeEnabled(Boolean(account));
 
     if (!account) {
       setChatAdmin(false);
@@ -119,13 +110,6 @@ export function mountSocial(host) {
 
   void syncAccount({ force: true });
   host.subscribe?.(() => { void syncAccount(); });
-  // A connected mainnet miner can cross the five-round threshold while remaining on the page.
-  // Recheck periodically without tying an RPC/index query to every chain clock tick.
-  if (host.chatRequiresMinedRounds) {
-    window.setInterval(() => {
-      if (host.getAccount()) void syncAccount({ force: true });
-    }, 60_000);
-  }
 
   return {
     syncAccount,
