@@ -235,12 +235,15 @@ test('connected miners get an unmistakable primary Mine action', () => {
   assert.match(fitStyles, /#deploy\.mine-available:not\(:disabled\)[\s\S]*\.mine-button-mark img[\s\S]*filter:\s*none !important/);
 });
 
-test('Rounds and About reserve the fixed footer and own their internal overflow', () => {
-  assert.match(fitStyles, /\.feature-shell\[data-page="rounds"\]\.page-view\.active \{[\s\S]*grid-template-rows:[\s\S]*minmax\(0, 1fr\) !important/);
-  assert.match(fitStyles, /body\[data-route="rounds"\] \.feature-shell\[data-page="rounds"\]\.page-view\.active \{[\s\S]*clamp\(64px, 9dvh, 78px\)[\s\S]*row-gap:\s*12px !important/);
-  assert.match(fitStyles, /body\[data-route="rounds"\] \.feature-shell\[data-page="rounds"\] > \.feature-metrics article \{[\s\S]*min-height:\s*0 !important;[\s\S]*height:\s*100% !important/);
-  assert.match(fitStyles, /body\[data-route="rounds"\] \.feature-shell\[data-page="rounds"\] > \.feature-metrics\.supply-metrics \{[\s\S]*margin-top:\s*0 !important/);
-  assert.match(fitStyles, /body\[data-route="rounds"\] \.round-list \{[\s\S]*overflow-y:\s*auto !important/);
+test('Rounds is a flat 50-row page while About retains its reading scroller', () => {
+  const flatHistory = fitStyles.slice(fitStyles.indexOf('/* Flat History ledger'));
+  assert.match(source, /<section class="ledger-panel" aria-label="Round history">/);
+  assert.doesNotMatch(source, /<section class="ledger-panel panel"/);
+  assert.match(source, /pageSize:\s*ROUND_PAGE_SIZE/);
+  assert.match(flatHistory, /body\[data-route="rounds"\] \{[\s\S]*height:\s*auto !important;[\s\S]*overflow-y:\s*auto !important/);
+  assert.match(flatHistory, /\.feature-shell\[data-page="rounds"\]\.page-view\.active \{[\s\S]*grid-template-rows:\s*auto auto auto auto !important;[\s\S]*overflow:\s*visible !important/);
+  assert.match(flatHistory, /\.round-list \{[\s\S]*max-height:\s*none !important;[\s\S]*overflow:\s*visible !important/);
+  assert.doesNotMatch(flatHistory, /overflow-y:\s*auto !important;[\s\S]*overscroll-behavior:\s*contain/);
   assert.match(fitStyles, /\.about-shell\.page-view\.active \{[\s\S]*grid-template-rows:[\s\S]*minmax\(0, 1fr\) !important/);
   assert.match(fitStyles, /body\[data-route="about"\] \.about-shell\.page-view\.active \{[\s\S]*grid-template-rows:\s*clamp\(72px, 11dvh, 102px\) minmax\(0, 1fr\) !important/);
   assert.match(fitStyles, /body\[data-route="about"\] \.about-shell\.page-view\.active > \.feature-hero\.route-header \{[\s\S]*grid-row:\s*1 !important/);

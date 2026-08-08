@@ -44,6 +44,24 @@ test('production indexer acquires an atomic lease before each tick', async () =>
   assert.match(source, /if \(!\(await acquireIndexerLease\(\)\)\)/);
 });
 
+test('settled Round PDAs repair stale unresolved index rows from their canonical transaction', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const reconciliation = source.slice(
+    source.indexOf('async function replayCanonicalSettlement'),
+    source.indexOf('async function archiveReadyRounds'),
+  );
+  assert.match(reconciliation, /resolved=eq\.false/);
+  assert.match(reconciliation, /settles_at=lte\.\$\{chainNow\}/);
+  assert.match(reconciliation, /limit=32/);
+  assert.match(reconciliation, /program\.account\.round\.fetchNullable\(address\)/);
+  assert.match(reconciliation, /roundState\?\.settled/);
+  assert.match(reconciliation, /getSignaturesForAddress\(address/);
+  assert.match(reconciliation, /normalizeAnchorEventName\(event\.name\) !== 'RoundSettled'/);
+  assert.match(reconciliation, /for \(const event of events\) await processEvent\(event, row\.signature, transaction\.slot\)/);
+  assert.match(source, /const reconciled = await reconcileSettledRounds\(\);[\s\S]*return \{ indexed, reconciled, archived, referralsIndexed \}/);
+  assert.doesNotMatch(reconciliation, /getProgramAccounts|\.all\s*\(/);
+});
+
 test('observing RoundArchived never downgrades canonical archive verification', async () => {
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   const archivedCase = source.slice(

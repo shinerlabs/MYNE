@@ -18,7 +18,7 @@ import {
   loadRoundBets, loadIndexedRounds, loadIndexedRoundStats,
   loadRoundRandomnessProof,
 } from './chain/rounds-index.js';
-import { loadRoundHistory } from './chain/rounds-page.js';
+import { loadRoundHistory, ROUND_PAGE_SIZE } from './chain/rounds-page.js';
 import {
   readReferralStats, readReferrerOf, setReferrer, readLeaderboard,
   readMyReferrals, resolveReferrerReference,
@@ -40,7 +40,9 @@ import {
   confirmedMinerRoundKey, confirmedMinerSource, isConfirmedEmptyRound, previousRoundMinerRoster,
   shouldRefreshConfirmedMiners,
 } from './chain/previous-miners.js';
-import { displayedMotherlodeSol, settledSolReward, winningTileShareBps } from './chain/round-rewards.js';
+import {
+  displayedMotherlodeSol, motherlodeSolEquivalent, settledSolReward, winningTileShareBps,
+} from './chain/round-rewards.js';
 import { displayedPausedRoundId, displayedWinningRound, roundCountdownView } from './chain/round.js';
 import { readSupplyStats } from './chain/supply.js';
 import { formatMyneBaseUnits } from './chain/burn-accounting.js';
@@ -318,7 +320,7 @@ document.querySelector('#app').innerHTML = `
     <aside class="control-column"><section class="round-summary panel"><div class="summary-stat"><span>DEPLOYED</span><strong>${solIcon('summary-eth')} 0.00</strong><small>≈— USDC</small></div><div class="summary-stat"><span>MOTHERLODE</span><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong><small>MYNE</small></div><div class="summary-stat"><span>TIME</span><strong>—</strong><small>Round #—</small></div></section><section class="deploy-panel panel"><div class="deploy-head"><div><span class="eyebrow">MINT MYNE</span><h2>Configure mine</h2></div><div class="refine-chip" id="mined-chip"><span>${isPremine ? 'MINED · LOCKED' : 'UNCLAIMED'}</span><b><img src="/myne-token-icon.svg" alt=""/> <em id="mined-chip-value">0.000</em></b></div></div><button class="last-round" data-route="rounds"><span>Last round</span><aside>${icon('grid')} #— <b>—</b> ${icon('chevron')}</aside></button><div class="amount-label-bar"><label class="amount-label" for="amount"><span>SOL per tile</span><small>Balance — SOL</small></label><button class="mine-currency-toggle" id="mine-currency-toggle" type="button" aria-pressed="false" aria-label="Show mining values in USDC"><span>SOL</span><i></i><b><span>USDC</span></b></button></div><div class="amount-display"><i class="extraction-field" aria-hidden="true"></i>${solIcon('amount-eth mine-sol-mark')}${usdcIcon('amount-usd-mark mine-usdc-mark')}<input id="amount" value="" placeholder="0.00" inputmode="decimal" aria-label="SOL per tile" autocomplete="off" autocorrect="off" spellcheck="false"/><span>SOL</span></div><div class="quick-amounts"><button data-add="0.0001">+0.0001</button><button data-add="0.001">+0.001</button><button data-add="0.01">+0.01</button><button data-add="0.1">+0.1</button></div><small class="amount-min" hidden></small><div class="configuration"><div class="config-row"><div><b>Tiles</b><small id="tile-helper">No tiles selected</small></div><div class="stepper"><button id="all">ALL</button><button id="tiles-minus" aria-label="Remove tile">${icon('minus')}</button><strong id="tile-count">0</strong><button id="tiles-plus" aria-label="Add tile">${icon('plus')}</button></div></div><div class="config-row auto-row"><div><b>Auto-round</b><small id="auto-helper">Manually enter each round</small></div><button class="auto-toggle" id="auto-round" role="switch" aria-checked="false"><span></span><b>Off</b></button></div><div class="config-row rounds-config"><div><b>Rounds</b><small id="round-helper">Repeat deployment</small></div><div class="stepper compact"><button id="rounds-minus" aria-label="Remove round">${icon('minus')}</button><strong id="round-count">1</strong><button id="rounds-plus" aria-label="Add round">${icon('plus')}</button></div><button class="until-balance-toggle" id="until-balance" role="switch" aria-checked="false" title="Fund as many rounds as your wallet balance allows"><span></span><b>Max</b></button></div><div class="config-row auto-claim-row" hidden><div><b>Auto-claim</b><small>Settle and reclaim after each round</small></div><button class="auto-toggle" id="auto-claim" role="switch" aria-checked="true"><span></span><b>On</b></button></div></div><div class="total-row per-round-row" id="per-round-row" hidden><div><span>Total per round</span></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('per-round-eth mine-sol-mark')}${usdcIcon('per-round-usdc mine-usdc-mark')}</span><em id="per-round-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="total-row"><div><span>Total deployment</span><small id="total-detail">0 tiles × 0.00 SOL × 1 round</small></div><strong class="mine-total-value"><span class="mine-total-mark">${solIcon('total-eth mine-sol-mark')}${usdcIcon('total-usdc mine-usdc-mark')}</span><em id="total-amount">0.00</em><span class="mine-total-unit">SOL</span></strong></div><div class="auto-plan" id="auto-plan" hidden></div><button class="deploy" id="deploy"><i class="mine-button-mark"><img src="/myne-token-icon.svg" alt=""/></i><span>MINE</span><b aria-hidden="true">→</b></button><div class="security-note">${icon('shield')} Transactions settle on Solana</div></section><section class="miners round-results panel" hidden aria-live="polite"><div class="miners-head"><div><span class="eyebrow">CONFIRMED ROUND · #—</span><h2>Miners</h2></div><button data-route="rounds">History</button></div><div class="settlement-result"><span><small>WINNING TILE</small><strong>#—</strong></span><span><small>OUTCOME · 50/50</small><strong>${solIcon()} 0.00</strong></span><span><small>REWARD</small><strong><img src="/myne-token-icon.svg" alt=""/> 0.00</strong></span></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="miner"><i>${icon('user')}</i><b>—</b><span>${icon('grid')} 0</span><strong>${solIcon()} 0.00</strong></div><div class="next-round"><span>NEXT ROUND</span><b>—</b></div></section></aside>
   </main>
 
-  <main class="feature-shell page-view" data-page="rounds"><header class="feature-hero route-header"><div><span class="eyebrow">ROUNDS</span><h1>History.</h1></div></header><section class="feature-metrics"><article><span>ROUNDS</span><strong>—</strong><small></small></article><article><span>DEPLOYED</span><strong>${solIcon()} 0.00</strong></article><article><span>AVG DEPLOYED</span><strong>${solIcon()} 0.00</strong><small>per mined round</small></article><article><span>MOTHERLODES</span><strong>0</strong></article></section><section class="ledger-panel panel"><div class="ledger-head"><div class="round-filters" role="tablist" aria-label="Filter round history"><button class="active" role="tab" aria-selected="true" data-round-filter="all">All</button><button role="tab" aria-selected="false" data-round-filter="split">Split</button><button role="tab" aria-selected="false" data-round-filter="solo">Solo</button><button role="tab" aria-selected="false" data-round-filter="motherlode">Motherlode</button></div></div><div class="round-table-head"><span>ROUND</span><span>TILE</span><span>MODE</span><span>SOL DEPLOYED</span><span>WINNERS</span><span>TIME</span><span></span></div><div class="round-list">${roundRows}</div></section></main>
+  <main class="feature-shell page-view" data-page="rounds"><header class="feature-hero route-header"><div><span class="eyebrow">ROUNDS</span><h1>History.</h1></div></header><section class="feature-metrics"><article><span>ROUNDS</span><strong>—</strong><small></small></article><article><span>DEPLOYED</span><strong>${solIcon()} 0.00</strong></article><article><span>AVG DEPLOYED</span><strong>${solIcon()} 0.00</strong><small>per mined round</small></article><article><span>MOTHERLODES</span><strong>0</strong></article></section><section class="ledger-panel" aria-label="Round history"><div class="ledger-head"><div class="round-filters" role="tablist" aria-label="Filter round history"><button class="active" role="tab" aria-selected="true" data-round-filter="all">All</button><button role="tab" aria-selected="false" data-round-filter="split">Split</button><button role="tab" aria-selected="false" data-round-filter="solo">Solo</button><button role="tab" aria-selected="false" data-round-filter="motherlode">Motherlode</button></div></div><div class="round-table-head"><span>ROUND</span><span>TILE</span><span>MODE</span><span>SOL DEPLOYED</span><span>WINNERS</span><span>TIME</span><span></span></div><div class="round-list">${roundRows}</div></section></main>
 
   <main class="feature-shell page-view" data-page="referrals">
     <header class="feature-hero route-header referrals-hero"><div><span class="eyebrow">EARN MYNE</span><h1>Referrals.</h1><p class="referrals-hero-subtitle">Earn 1% whenever a permanently referred miner claims MYNE.</p></div></header>
@@ -540,7 +542,7 @@ const motherlodeHeading = motherlodeStat.querySelector(':scope > span');
 const motherlodeTokenValue = motherlodeStat.querySelector('strong');
 const motherlodeTokenLabel = motherlodeStat.querySelector('small');
 motherlodeStat.classList.add('motherlode-stat');
-motherlodeHeading.dataset.usdLabel = '≈— USDC';
+motherlodeHeading.dataset.usdLabel = 'TOTAL ≈— USDC';
 motherlodeStat.setAttribute('aria-label', 'Motherlode SOL payment plus staking bonus MYNE, burned and staked at 5× reward weight');
 motherlodeTokenValue.classList.add('motherlode-token-value');
 motherlodeTokenValue.innerHTML = `<img src="/myne-token-icon.svg" alt=""/><em class="motherlode-primary-value">0.00</em><b class="motherlode-unit">MYNE</b>`;
@@ -2938,10 +2940,10 @@ const randomizeSelectedTiles = () => {
 // Desktop gives About and Rounds their own bounded scroll regions. Compact layouts hand scrolling
 // back to the document, so changing a chapter, filter or page must reset both possible owners.
 // The second reset is deferred until any dropdown/list reflow has completed.
-const resetResponsiveSurfaceScroll = (scrollRegion) => {
+const resetResponsiveSurfaceScroll = (scrollRegion, { pageOwnsScroll = summaryBreakpoint.matches } = {}) => {
   if (!scrollRegion) return;
   scrollRegion.scrollTop = 0;
-  if (!summaryBreakpoint.matches) return;
+  if (!pageOwnsScroll) return;
   window.requestAnimationFrame(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
   });
@@ -4248,14 +4250,24 @@ const renderChain = (state) => {
     Boolean(state.currentRound?.resolved),
   );
   const motherlodeEthText = chain.format.ethSmart(displayedMotherlodeNative);
-  rollMotherlodeValue(motherlodePrimaryValue, Number(state.jackpot.bullion) / 1e9, motherlodeGldText);
-  rollMotherlodeValue(motherlodeEthValue, Number(displayedMotherlodeNative) / 1e9, motherlodeEthText);
-  const motherlodeUsdText = usdcValueFor(Number(displayedMotherlodeNative) / 1e9) ?? '—';
+  const motherlodeMyne = Number(state.jackpot.bullion) / 1e9;
+  const motherlodeSol = Number(displayedMotherlodeNative) / 1e9;
+  rollMotherlodeValue(motherlodePrimaryValue, motherlodeMyne, motherlodeGldText);
+  rollMotherlodeValue(motherlodeEthValue, motherlodeSol, motherlodeEthText);
+  const totalMotherlodeSol = motherlodeSolEquivalent(
+    motherlodeSol,
+    motherlodeMyne,
+    getLiveMynePerSol(),
+  );
+  const motherlodeUsdText = totalMotherlodeSol == null ? '—' : (usdcValueFor(totalMotherlodeSol) ?? '—');
   motherlodeUsdcNumber.textContent = motherlodeUsdText;
   motherlodeHeading.dataset.solLabel = `≈${motherlodeEthText} SOL`;
-  motherlodeHeading.dataset.usdLabel = `≈${motherlodeUsdText} USDC`;
+  motherlodeHeading.dataset.usdLabel = `TOTAL ≈${motherlodeUsdText} USDC`;
   syncSummaryHoverLabels();
-  motherlodeStat.setAttribute('aria-label', `Motherlode SOL payment ${motherlodeEthText} SOL plus staking bonus ${motherlodeGldText} MYNE, burned and staked at 5× reward weight; 1 in 650 chance per round`);
+  const combinedValueLabel = motherlodeUsdText === '—'
+    ? 'combined market value unavailable'
+    : `combined market value approximately ${motherlodeUsdText} USDC`;
+  motherlodeStat.setAttribute('aria-label', `Motherlode ${motherlodeEthText} SOL plus ${motherlodeGldText} MYNE, permanently burned and staked at 5× reward weight; ${combinedValueLabel}; 1 in 650 chance per round`);
 
   paintMineBalance();
 
@@ -5665,6 +5677,7 @@ const refreshRoundHistory = async ({ force = false } = {}) => {
   try {
     const res = await loadRoundHistory({
       page: roundPage,
+      pageSize: ROUND_PAGE_SIZE,
       filter: roundFilter,
       account: requestedAccount,
       force,
@@ -5706,7 +5719,7 @@ const goToRoundPage = (target) => {
     : target === 'next' ? roundPage + 1
       : Number(target);
   roundPage = Math.min(Math.max(0, next), roundPages - 1);
-  resetResponsiveSurfaceScroll(roundList);
+  resetResponsiveSurfaceScroll(roundList, { pageOwnsScroll: true });
   refreshRoundHistory();
 };
 
@@ -5839,7 +5852,7 @@ document.querySelectorAll('[data-round-filter]').forEach((button) => button.addE
     item.setAttribute('aria-selected', String(active));
   });
   roundPage = 0; // a new filter changes the page count; start at the newest page
-  resetResponsiveSurfaceScroll(roundList);
+  resetResponsiveSurfaceScroll(roundList, { pageOwnsScroll: true });
   refreshRoundHistory();
 }));
 document.querySelector('#round-pagination')?.addEventListener('click', (event) => {

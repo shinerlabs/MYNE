@@ -44,3 +44,19 @@ export function displayedMotherlodeSol(storedLamports, currentGrossLamports, cur
   const gross = BigInt(currentGrossLamports);
   return stored + (currentRoundSettled ? 0n : (gross * 200n) / 10_000n);
 }
+
+/**
+ * Total Motherlode value expressed in SOL, including the permanently burn-staked MYNE leg.
+ *
+ * `mynePerSol` is the live registered-pool quote (MYNE received for one SOL). A non-zero MYNE
+ * balance must never be silently omitted when that quote is unavailable, so this fails closed.
+ */
+export function motherlodeSolEquivalent(solAmount, myneAmount, mynePerSol) {
+  const sol = Number(solAmount);
+  const myne = Number(myneAmount);
+  const quote = Number(mynePerSol);
+  if (!Number.isFinite(sol) || sol < 0 || !Number.isFinite(myne) || myne < 0) return null;
+  if (myne === 0) return sol;
+  if (!Number.isFinite(quote) || quote <= 0) return null;
+  return sol + (myne / quote);
+}

@@ -729,6 +729,66 @@ async function indexReferralTransactions() {
   return rows.length;
 }
 
+/**
+ * Recover a settlement event when the global program-signature cursor missed a
+ * transaction but the canonical Round PDA already records `settled = true`.
+ *
+ * The repair remains bounded: only recent indexed unresolved rows are probed,
+ * and each exact Round PDA has a small signature history. Replaying the real
+ * transaction preserves the winning wallet, fee event and server proof; those
+ * facts must never be guessed from an incomplete database row.
+ */
+async function replayCanonicalSettlement(roundId, address) {
+  const signatures = await provider.connection.getSignaturesForAddress(address, {
+    limit: 64,
+  }, 'finalized');
+  for (const row of signatures) {
+    if (row.err) continue;
+    const transaction = await provider.connection.getTransaction(row.signature, {
+      commitment: 'finalized', maxSupportedTransactionVersion: 0,
+    });
+    if (!transaction?.meta?.logMessages || transaction.meta.err) continue;
+    const events = [...parser.parseLogs(transaction.meta.logMessages)];
+    const isSettlement = events.some((event) => {
+      if (normalizeAnchorEventName(event.name) !== 'RoundSettled') return false;
+      const data = normalizeAnchorEventData(event.data);
+      return asString(data.roundId) === asString(roundId);
+    });
+    if (!isSettlement) continue;
+    for (const event of events) await processEvent(event, row.signature, transaction.slot);
+    return row.signature;
+  }
+  return null;
+}
+
+async function reconcileSettledRounds() {
+  const chainNow = await finalizedChainTimeSeconds();
+  const candidates = await rest(
+    'mine_rounds?closed_signature=is.null&resolved=eq.false'
+      + `&settles_at=lte.${chainNow}`
+      + '&select=round_id&order=round_id.desc&limit=32',
+  );
+  let reconciled = 0;
+  const missing = [];
+  for (const candidate of candidates || []) {
+    const address = roundPda(candidate.round_id);
+    const roundState = await program.account.round.fetchNullable(address);
+    if (!roundState?.settled) continue;
+    const signature = await replayCanonicalSettlement(candidate.round_id, address);
+    if (!signature) {
+      missing.push(asString(candidate.round_id));
+      continue;
+    }
+    reconciled += 1;
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `Settled Round PDA(s) lack a recoverable settlement transaction: ${missing.join(', ')}`,
+  );
+  return reconciled;
+}
+
 async function archiveReadyRounds() {
   // Do not let old settled rounds awaiting buyback evidence starve newer
   // zero-volume or refund-only rounds that are already archival-ready. Each
@@ -857,6 +917,7 @@ export async function indexerTick() {
   if (!(await acquireIndexerLease())) {
     return {
       indexed: 0,
+      reconciled: 0,
       archived: 0,
       referralsIndexed: 0,
       skipped: true,
@@ -864,9 +925,10 @@ export async function indexerTick() {
     };
   }
   const indexed = await indexTransactions();
+  const reconciled = await reconcileSettledRounds();
   const archived = await archiveReadyRounds();
   const referralsIndexed = await indexReferralTransactions();
-  return { indexed, archived, referralsIndexed };
+  return { indexed, reconciled, archived, referralsIndexed };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

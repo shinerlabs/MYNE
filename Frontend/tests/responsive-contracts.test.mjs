@@ -184,13 +184,13 @@ test('About dropdown overlays the article, stays capped and preserves readable a
   assert.match(phoneAuthority, /body\[data-route="about"\] \.about-nav\s*\{[^}]*top:\s*calc\(56px \+ var\(--premine-banner-h,\s*0px\)\)\s*!important/);
 });
 
-test('About and Rounds reset whichever scroll surface owns the compact viewport', () => {
-  assert.match(source, /const resetResponsiveSurfaceScroll = \(scrollRegion\)/);
+test('About and Rounds reset whichever scroll surface owns their viewport', () => {
+  assert.match(source, /const resetResponsiveSurfaceScroll = \(scrollRegion, \{ pageOwnsScroll = summaryBreakpoint\.matches \} = \{\}\)/);
   assert.match(source, /scrollRegion\.scrollTop = 0/);
-  assert.match(source, /if \(!summaryBreakpoint\.matches\) return/);
+  assert.match(source, /if \(!pageOwnsScroll\) return/);
   assert.match(source, /window\.scrollTo\(\{ top: 0, behavior: 'auto' \}\)/);
   assert.match(source, /resetResponsiveSurfaceScroll\(aboutContent\)/);
-  assert.equal((source.match(/resetResponsiveSurfaceScroll\(roundList\)/g) ?? []).length, 2);
+  assert.equal((source.match(/resetResponsiveSurfaceScroll\(roundList, \{ pageOwnsScroll: true \}\)/g) ?? []).length, 2);
 });
 
 test('About fees stay a two-column comparison on desktop', () => {

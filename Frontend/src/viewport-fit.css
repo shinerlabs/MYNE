@@ -4306,3 +4306,76 @@ body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-calculat
 html body[data-route="mine"] .deploy-panel > #deploy[hidden] {
   display: none !important;
 }
+
+/* Flat History ledger -----------------------------------------------------------------------
+   History is a page, not a dashboard widget. Keep the existing 50-row data page, but let the
+   document own scrolling so every row is part of the page instead of being trapped in a card. */
+body[data-route="rounds"] .feature-shell[data-page="rounds"] .ledger-panel {
+  width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  margin: 4px 0 0 !important;
+  padding: 0 0 48px !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+body[data-route="rounds"] .feature-shell[data-page="rounds"] .ledger-head {
+  min-height: 58px !important;
+  padding: 0 !important;
+}
+
+body[data-route="rounds"] .feature-shell[data-page="rounds"] .round-list {
+  max-height: none !important;
+  overflow: visible !important;
+  overscroll-behavior: auto;
+  scrollbar-width: auto;
+}
+
+@media (min-width: 901px) {
+  body[data-route="rounds"] {
+    height: auto !important;
+    min-height: 100dvh !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    padding-bottom: 24px !important;
+  }
+
+  body[data-route="rounds"] #app {
+    height: auto !important;
+    min-height: 100dvh !important;
+    overflow: visible !important;
+  }
+
+  body[data-route="rounds"] .feature-shell[data-page="rounds"].page-view.active {
+    width: min(1180px, calc(100% - 48px)) !important;
+    max-width: 1180px !important;
+    height: auto !important;
+    min-height: calc(100dvh - var(--premine-banner-h, 0px) - 76px - 24px) !important;
+    grid-template-rows: auto auto auto auto !important;
+    align-content: start !important;
+    row-gap: 12px !important;
+    padding: 10px 0 48px !important;
+    overflow: visible !important;
+  }
+
+  body[data-route="rounds"] .feature-shell[data-page="rounds"] > :is(.route-header, .feature-metrics) {
+    height: auto !important;
+  }
+
+  body[data-route="rounds"] .feature-shell[data-page="rounds"] > .route-header {
+    min-height: 72px !important;
+  }
+
+  body[data-route="rounds"] .feature-shell[data-page="rounds"] > .feature-metrics {
+    min-height: 72px !important;
+  }
+
+  body[data-route="rounds"] .feature-shell[data-page="rounds"] > .feature-metrics article {
+    min-height: 72px !important;
+    height: auto !important;
+  }
+}

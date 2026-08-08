@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  displayedMotherlodeSol, intervalReward, settledSolReward, sharedRoundReward, winningTileShareBps,
+  displayedMotherlodeSol, intervalReward, motherlodeSolEquivalent, settledSolReward,
+  sharedRoundReward, winningTileShareBps,
 } from '../src/chain/round-rewards.js';
 
 test('winning miners share the settled 88% SOL prize pool by winning-tile stake', () => {
@@ -65,6 +66,14 @@ test('Motherlode displays exactly 2% of total deployed mining while a round is o
   assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_000n, false), 18_800_000n);
   assert.equal(displayedMotherlodeSol(10_000_000n, 440_000_099n, false), 18_800_001n);
   assert.equal(displayedMotherlodeSol(18_800_000n, 440_000_000n, true), 18_800_000n);
+});
+
+test('Motherlode market value includes both its SOL and burn-staked MYNE legs', () => {
+  assert.equal(motherlodeSolEquivalent(2, 40, 20), 4);
+  assert.equal(motherlodeSolEquivalent(2, 0, null), 2);
+  assert.equal(motherlodeSolEquivalent(2, 40, null), null);
+  assert.equal(motherlodeSolEquivalent(2, 40, 0), null);
+  assert.equal(motherlodeSolEquivalent(-1, 40, 20), null);
 });
 
 test('Motherlode payout is shared by total round deployment, not the winning tile', () => {
