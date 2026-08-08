@@ -130,24 +130,27 @@ export function savedTransactionSendOptions(minContextSlot, { commitment }) {
 }
 
 /**
- * web3.js 1.x does not expose getFeeForMessage's RPC minContextSlot even
- * though the RPC method supports it. Retry only the transient blockhash
- * propagation failure after a context-pinned simulation; all other errors
- * remain immediate and fail closed.
+ * A load-balanced RPC can briefly route a pinned request to a backend that
+ * has not observed the blockhash context yet. Retry only those exact context
+ * propagation failures; authorization, simulation and program errors remain
+ * immediate and fail closed.
  */
-export async function retryTransientBlockhashRead(read, {
-  attempts = 4,
+export async function retryTransientRpcContext(read, {
+  attempts = 6,
   wait = async () => {},
 } = {}) {
-  assert.equal(typeof read, 'function', 'Blockhash read callback is required');
+  assert.equal(typeof read, 'function', 'RPC context callback is required');
   assert.ok(Number.isSafeInteger(attempts) && attempts >= 1 && attempts <= 10, 'Retry attempts are invalid');
-  assert.equal(typeof wait, 'function', 'Blockhash retry wait callback is required');
+  assert.equal(typeof wait, 'function', 'RPC context retry wait callback is required');
   let lastError = null;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       return await read();
     } catch (error) {
-      if (!/blockhash/i.test(error instanceof Error ? error.message : String(error))) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/(?:blockhash\s+(?:not found|expired)|minimum context slot (?:has not been reached|not reached))/i.test(message)) {
+        throw error;
+      }
       lastError = error;
       if (attempt < attempts) await wait(attempt);
     }

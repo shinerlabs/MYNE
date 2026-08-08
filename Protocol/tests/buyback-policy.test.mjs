@@ -15,7 +15,7 @@ import {
   pinLatestBlockhashContext,
   purchasedTokenBaseUnits,
   refreshUnsignedV0TransactionBlockhash,
-  retryTransientBlockhashRead,
+  retryTransientRpcContext,
   savedTransactionSendOptions,
   selectIndexedBuybackRound,
   validateJupiterEndpoint,
@@ -185,10 +185,10 @@ test('saved transaction recovery accepts a signed legacy journal without rewriti
   assert.deepEqual(Buffer.from(recovered.serialize()), raw);
 });
 
-test('fee inspection retries only transient blockhash propagation failures', async () => {
+test('pinned RPC calls retry only transient context propagation failures', async () => {
   let reads = 0;
   const waits = [];
-  const result = await retryTransientBlockhashRead(async () => {
+  const result = await retryTransientRpcContext(async () => {
     reads += 1;
     if (reads < 3) throw new Error('Blockhash not found');
     return { value: 5_000 };
@@ -200,9 +200,18 @@ test('fee inspection retries only transient blockhash propagation failures', asy
   assert.equal(reads, 3);
   assert.deepEqual(waits, [1, 2]);
 
+  let contextReads = 0;
+  const contextResult = await retryTransientRpcContext(async () => {
+    contextReads += 1;
+    if (contextReads < 2) throw new Error('Minimum context slot has not been reached');
+    return { value: 'ready' };
+  });
+  assert.deepEqual(contextResult, { value: 'ready' });
+  assert.equal(contextReads, 2);
+
   let nonBlockhashReads = 0;
   await assert.rejects(
-    retryTransientBlockhashRead(async () => {
+    retryTransientRpcContext(async () => {
       nonBlockhashReads += 1;
       throw new Error('RPC authorization failed');
     }),

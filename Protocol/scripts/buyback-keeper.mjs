@@ -23,7 +23,7 @@ import {
   pinLatestBlockhashContext,
   purchasedTokenBaseUnits,
   refreshUnsignedV0TransactionBlockhash,
-  retryTransientBlockhashRead,
+  retryTransientRpcContext,
   savedTransactionSendOptions,
   selectIndexedBuybackRound,
   validateJupiterPriorityLevel,
@@ -82,6 +82,10 @@ const [liquidityGate] = PublicKey.findProgramAddressSync([Buffer.from('liquidity
 const lamports = (sol) => Math.max(0, Math.floor(Number(sol) * LAMPORTS_PER_SOL));
 const envBool = (name, fallback) => process.env[name] == null ? fallback : process.env[name] === '1';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const retryPinnedRpc = (read) => retryTransientRpcContext(read, {
+  attempts: 6,
+  wait: (attempt) => sleep(Math.min(1_500, attempt * 250)),
+});
 const statePath = process.env.BUYBACK_STATE_PATH || '';
 const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -288,10 +292,10 @@ async function inspectSwapTransaction(transaction, {
   );
   const lookupTables = [];
   for (const lookup of transaction.message.addressTableLookups) {
-    const response = await provider.connection.getAddressLookupTable(
+    const response = await retryPinnedRpc(() => provider.connection.getAddressLookupTable(
       lookup.accountKey,
       contextConfig,
-    );
+    ));
     assert.ok(response.value, `Jupiter lookup table is unavailable: ${lookup.accountKey.toBase58()}`);
     lookupTables.push(response.value);
   }
@@ -322,18 +326,18 @@ async function inspectSwapTransaction(transaction, {
     blockhash: latestBlockhash.blockhash,
   });
 
-  const beforeLamports = BigInt(await provider.connection.getBalance(
+  const beforeLamports = BigInt(await retryPinnedRpc(() => provider.connection.getBalance(
     payer.publicKey,
     contextConfig,
-  ));
-  const simulation = await provider.connection.simulateTransaction(transaction, {
+  )));
+  const simulation = await retryPinnedRpc(() => provider.connection.simulateTransaction(transaction, {
     ...contextConfig,
     sigVerify: false,
     accounts: {
       encoding: 'base64',
       addresses: [payer.publicKey.toBase58(), myneAta.toBase58()],
     },
-  });
+  }));
   assert.equal(
     simulation.value.err,
     null,
@@ -346,9 +350,9 @@ async function inspectSwapTransaction(transaction, {
   // @solana/web3.js 1.98 cannot pass minContextSlot to getFeeForMessage.
   // The preceding pinned simulation proves the message valid at that slot;
   // retry only a lagging backend's transient blockhash response.
-  const feeResponse = await retryTransientBlockhashRead(
+  const feeResponse = await retryTransientRpcContext(
     () => provider.connection.getFeeForMessage(transaction.message, commitment),
-    { wait: (attempt) => sleep(attempt * 200) },
+    { wait: (attempt) => sleep(Math.min(1_500, attempt * 250)) },
   );
   assert.ok(
     Number.isSafeInteger(feeResponse.value) && feeResponse.value >= 0,
@@ -418,10 +422,10 @@ async function buildBurnAmountTransaction(mint, ata, delta) {
     }).compileToV0Message(),
   );
   simulationTransaction.sign([payer]);
-  const simulation = await provider.connection.simulateTransaction(simulationTransaction, {
+  const simulation = await retryPinnedRpc(() => provider.connection.simulateTransaction(simulationTransaction, {
     ...contextConfig,
     sigVerify: true,
-  });
+  }));
   assert.equal(simulation.value.err, null, `MYNE burn simulation failed: ${JSON.stringify(simulation.value.err)}`);
   const measured = Math.max(50_000, Number(simulation.value.unitsConsumed || 200_000));
   const priority = Math.min(
@@ -489,10 +493,10 @@ async function sendSavedTransaction(rawBase64, {
   const raw = Buffer.from(rawBase64, 'base64');
   const saved = VersionedTransaction.deserialize(raw);
   const expectedSignature = base58Encode(saved.signatures[0]);
-  const signature = await provider.connection.sendRawTransaction(
+  const signature = await retryPinnedRpc(() => provider.connection.sendRawTransaction(
     raw,
     savedTransactionSendOptions(minContextSlot, { commitment }),
-  );
+  ));
   assert.equal(signature, expectedSignature, 'Submitted saved transaction signature changed');
   const confirmation = await provider.connection.confirmTransaction(
     lastValidBlockHeight == null
@@ -538,10 +542,10 @@ async function markRoundBuybackComplete(roundAddress, roundState) {
     }).compileToV0Message(),
   );
   simulationTx.sign([payer]);
-  const simulation = await provider.connection.simulateTransaction(simulationTx, {
+  const simulation = await retryPinnedRpc(() => provider.connection.simulateTransaction(simulationTx, {
     ...contextConfig,
     sigVerify: true,
-  });
+  }));
   assert.equal(simulation.value.err, null, `Buyback completion simulation failed: ${JSON.stringify(simulation.value.err)}`);
   const measured = Math.max(50_000, Number(simulation.value.unitsConsumed || 200_000));
   const transaction = new VersionedTransaction(
