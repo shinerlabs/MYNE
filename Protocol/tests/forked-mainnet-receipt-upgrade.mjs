@@ -7,11 +7,17 @@ const { AnchorProvider, Program, setProvider } = anchor;
 const { PublicKey } = web3;
 
 const PROGRAM_ID = new PublicKey('D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
-const EXPECTED_RECEIPTS = 16;
-const EXPECTED_SOL_LAMPORTS = 3_212_000_000n;
-const EXPECTED_MYNE_BASE_UNITS = 8_000_000_000n;
+const snapshot = JSON.parse(await readFile(
+  new URL('./fixtures/mainnet-receipt-upgrade-snapshot.json', import.meta.url),
+  'utf8',
+));
+assert.equal(snapshot.programId, PROGRAM_ID.toBase58());
+const EXPECTED_RECEIPTS = snapshot.receipts.length;
+const EXPECTED_SOL_LAMPORTS = BigInt(snapshot.expectedSolLamports);
+const EXPECTED_MYNE_BASE_UNITS = BigInt(snapshot.expectedMyneBaseUnits);
 
-const receiptAddresses = process.argv.slice(2).map((value) => new PublicKey(value));
+const receiptAddresses = (process.argv.length > 2 ? process.argv.slice(2) : snapshot.receipts)
+  .map((value) => new PublicKey(value));
 assert.equal(receiptAddresses.length, EXPECTED_RECEIPTS, 'Expected the frozen set of 16 live receipts');
 
 const provider = AnchorProvider.env();
