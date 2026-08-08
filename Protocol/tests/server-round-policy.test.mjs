@@ -9,6 +9,7 @@ import {
   SERVER_RANDOMNESS_SLOT_FLAG,
   decodeServerEntropySlot,
   loadOrCreateServerReveal,
+  serverEntropyAvailable,
   serverRandomnessCommitment,
 } from '../scripts/server-randomness-policy.mjs';
 
@@ -48,6 +49,19 @@ test('server entropy encoding rejects pending and legacy Switchboard slots', () 
   assert.equal(decodeServerEntropySlot(SERVER_RANDOMNESS_SLOT_FLAG | 42n), 42n);
 });
 
+test('keeper detects the first retained entropy slot without waiting an extra slot', () => {
+  const data = Buffer.alloc(8 + 3 * 40);
+  data.writeBigUInt64LE(3n, 0);
+  for (const [index, slot] of [105n, 103n, 100n].entries()) {
+    data.writeBigUInt64LE(slot, 8 + index * 40);
+    data.fill(index + 1, 16 + index * 40, 48 + index * 40);
+  }
+  assert.equal(serverEntropyAvailable(data, 101n), true);
+  assert.equal(serverEntropyAvailable(data, 106n), false);
+  assert.throws(() => serverEntropyAvailable(data, 99n), /aged out/);
+  assert.throws(() => serverEntropyAvailable(data.subarray(0, -1), 101n), /truncated/);
+});
+
 test('server keeper binds before start, preserves the future-slot mix, and settles empty rounds', async () => {
   const source = await readFile(
     new URL('../scripts/server-round-keeper.mjs', import.meta.url),
@@ -61,7 +75,7 @@ test('server keeper binds before start, preserves the future-slot mix, and settl
   const auto = source.indexOf('.executeAutoPlan(ROUND_ID_BN');
   const bettingClose = source.indexOf('waitForChainTimestamp(bettingEndsAt)');
   const lock = source.indexOf('.lockRoundServerEntropy(ROUND_ID_BN)');
-  const futureSlot = source.indexOf('connection.getSlot(commitment)) <= targetSlot + 1n');
+  const futureSlot = source.indexOf('serverEntropyAvailable(slotHashes.data, targetSlot)');
   const settle = source.indexOf('.settleRoundServer(Array.from(reveal))');
 
   for (const [label, index] of Object.entries({

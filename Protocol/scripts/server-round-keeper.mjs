@@ -32,6 +32,7 @@ import {
   SERVER_RANDOMNESS_PENDING,
   decodeServerEntropySlot,
   loadOrCreateServerReveal,
+  serverEntropyAvailable,
   serverRandomnessCommitment,
 } from './server-randomness-policy.mjs';
 import { executeAutoPlansDuringWindow } from './auto-plan-executor.mjs';
@@ -335,9 +336,11 @@ if (roundState.settled) {
 }
 assert.ok((await chainTimeSeconds()) < refundAt, 'Round reached its refund window before server settlement');
 const targetSlot = decodeServerEntropySlot(roundState.randomnessCommitSlot);
-while (BigInt(await connection.getSlot(commitment)) <= targetSlot + 1n) {
+for (;;) {
   assert.ok((await chainTimeSeconds()) < refundAt, 'Future entropy slot was not retained before refund');
-  await sleep(400);
+  const slotHashes = await connection.getAccountInfo(SYSVAR_SLOT_HASHES_PUBKEY, commitment);
+  if (slotHashes && serverEntropyAvailable(slotHashes.data, targetSlot)) break;
+  await sleep(150);
 }
 
 const gateState = await program.account.liquidityGate.fetch(liquidityGate);

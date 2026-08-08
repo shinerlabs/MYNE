@@ -85,3 +85,32 @@ export function decodeServerEntropySlot(value) {
   assert.ok(slot > 0n, 'Encoded server entropy slot is invalid');
   return slot;
 }
+
+/**
+ * Mirrors the program's bounded SlotHashes scan and reports when deterministic
+ * entropy is ready. Reading the sysvar directly lets the keeper settle in the
+ * first eligible bank instead of waiting an arbitrary extra slot. A skipped
+ * target remains safe: the first produced slot after it becomes eligible.
+ */
+export function serverEntropyAvailable(data, targetSlot) {
+  const bytes = Buffer.from(data ?? []);
+  const target = BigInt(targetSlot);
+  assert.ok(target > 0n, 'Server entropy target must be positive');
+  assert.ok(bytes.length >= 8, 'SlotHashes sysvar header is missing');
+  const count = bytes.readBigUInt64LE(0);
+  assert.ok(count <= 512n, 'SlotHashes sysvar entry count is invalid');
+  const requiredLength = 8n + count * 40n;
+  assert.ok(requiredLength <= BigInt(bytes.length), 'SlotHashes sysvar data is truncated');
+
+  let oldest = null;
+  let selected = null;
+  for (let index = 0n; index < count; index += 1n) {
+    const offset = Number(8n + index * 40n);
+    const slot = bytes.readBigUInt64LE(offset);
+    oldest = oldest === null || slot < oldest ? slot : oldest;
+    if (slot >= target && (selected === null || slot < selected)) selected = slot;
+  }
+  assert.notEqual(oldest, null, 'SlotHashes sysvar contains no entries');
+  assert.ok(target >= oldest, 'Server entropy target has aged out of SlotHashes');
+  return selected !== null;
+}
