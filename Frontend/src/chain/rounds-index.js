@@ -5,6 +5,7 @@ import { selectLatestVerifiedStakingRewardWindow } from './staking-apy.js';
 import {
   commitmentHexFromAccount, describeRandomnessRound, normalizeProofHex,
 } from './randomness-mode.js';
+import { intervalReward } from './round-rewards.js';
 
 /**
  * Round history read from the Supabase index maintained by Protocol/scripts/round-indexer.mjs.
@@ -33,7 +34,8 @@ import {
 const ROUND_COLUMNS = [
   'round_id', 'resolved', 'winning_square', 'jackpot_hit', 'single_miner_round', 'winner',
   'total_wager_wei::text', 'winner_total_wei::text', 'pot_for_winners_wei::text',
-  'bullion_for_winners_wei::text', 'payout_mul_wad::text',
+  'bullion_for_winners_wei::text', 'payout_mul_wad::text', 'solo_sample::text',
+  'total_receipts',
   // The randomness that decided the round — what the fairness row displays.
   'randomness_id', 'randomness_value::text', 'randomness_hex', 'randomness_commit_slot',
 ].join(', ');
@@ -64,6 +66,8 @@ function fromRow(r) {
     potForWinners: unwrap(r.pot_for_winners_wei),
     bullionForWinners: unwrap(r.bullion_for_winners_wei),
     payoutMulWad: unwrap(r.payout_mul_wad),
+    soloSample: unwrap(r.solo_sample),
+    totalReceipts: unwrap(r.total_receipts),
     randomnessId: randomnessMeta.mode === 'server' ? null : (r.randomness_id || null),
     randomnessMode: randomnessMeta.mode,
     randomnessState: randomnessMeta.state,

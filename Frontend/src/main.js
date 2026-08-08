@@ -4067,7 +4067,8 @@ const renderGridWinner = (state) => {
     // Result is also the setup window for the NEXT round. Keep every tile interactive while the
     // confirmed winner overlay takes visual priority over selection.
     tile.disabled = false;
-    const paid = state.phase === 'betting' && tileHasConfirmedBet(tile.dataset.slot, state);
+    const paid = tileHasConfirmedBet(tile.dataset.slot, state)
+      || tile.classList.contains('has-position');
     const picked = paid || selected.has(tile.dataset.slot);
     tile.classList.toggle('selected', picked);
     tile.setAttribute('aria-pressed', String(picked));
@@ -4192,7 +4193,13 @@ const tileHasConfirmedBet = (slotId, state = chain.state) => (
   (state.myBets?.[Number(slotId) - 1] ?? 0n) > 0n
 );
 
-const tileLocked = (slotId) => chain.state.phase === 'betting' && tileHasConfirmedBet(slotId);
+const tileLocked = (slotId) => (
+  tileHasConfirmedBet(slotId)
+  // Keep a confirmed tile locked through a phase/render boundary until the
+  // next round has replaced the board state. This avoids a click stripping
+  // its spectrum edge in the short interval before the receipt refresh wins.
+  || Boolean(document.querySelector(`.slot[data-slot="${slotId}"]`)?.classList.contains('has-position'))
+);
 
 const renderTiles = (state) => {
   document.querySelectorAll('.slot').forEach((tile) => {
