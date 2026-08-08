@@ -296,8 +296,7 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(staking, /const \[pool, config\] = await Promise\.all/);
   assert.match(staking, /allowStale: protocolPaused/);
   assert.doesNotMatch(main, /TOTAL SOL EARNED|TOTAL SOL RECEIVED|Claimed \+ available/);
-  assert.match(main, /CLAIMED SOL/);
-  assert.match(main, /History not indexed/);
+  assert.doesNotMatch(main, /CLAIMED SOL|History not indexed|stake-lifetime-eth/);
   assert.match(main, /EST\. WEEKLY/);
   assert.match(main, /EST\. ANNUAL/);
   assert.match(main, /EST\. WEEKLY SOL/);

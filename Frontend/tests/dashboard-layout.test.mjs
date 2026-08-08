@@ -87,7 +87,9 @@ test('staking history lives only in About while Stake stays operational', () => 
 
 test('claimable SOL actions stack below the primary balance without collisions', () => {
   assert.match(styles, /\.staking-dashboard \.eth-claim-actions \{[\s\S]*grid-template-rows:\s*auto 44px !important/);
-  assert.match(fitStyles, /\.eth-claim-actions > #claim-stake-rewards \{[\s\S]*grid-column:\s*2 !important;[\s\S]*grid-row:\s*1 !important/);
+  assert.doesNotMatch(source, /CLAIMED SOL|History not indexed|stake-lifetime-eth/);
+  assert.match(fitStyles, /Final Stake action placement:[\s\S]*\.eth-claim-actions > #claim-stake-rewards \{[\s\S]*grid-column:\s*1 !important;[\s\S]*grid-row:\s*1 !important/);
+  assert.match(fitStyles, /Final Stake action placement:[\s\S]*\.eth-claim-actions > \.staking-share-group \{[\s\S]*grid-column:\s*2 !important;[\s\S]*grid-row:\s*1 !important/);
   assert.match(fitStyles, /\.eth-claim-actions > \.stake-calculator-trigger \{[\s\S]*grid-column:\s*1 \/ -1 !important;[\s\S]*grid-row:\s*2 !important/);
 });
 

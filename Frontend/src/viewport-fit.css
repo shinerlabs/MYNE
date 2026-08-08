@@ -1138,6 +1138,7 @@ body .staking-calculator-overlay > .staking-calculator::before {
 }
 
 .staking-calculator-overlay .calculator-head {
+  z-index: 6 !important;
   min-height: 0 !important;
   margin: 0 0 18px !important;
   padding: 0 0 18px !important;
@@ -1321,6 +1322,7 @@ body .staking-calculator-overlay > .staking-calculator::before {
 
   .staking-calculator-overlay .projection-period {
     position: absolute;
+    z-index: 5;
     top: 90px;
     right: 14px;
     left: 14px;
@@ -4116,23 +4118,18 @@ body[data-route="stake"] .staking-dashboard .stake-reward-estimate > small {
 
 /* Final Stake action placement: later than the legacy responsive experiments above. */
 body[data-route="stake"] .staking-dashboard .eth-claim-actions {
-  grid-template-columns: minmax(0, 1fr) minmax(142px, .62fr) auto !important;
-  grid-template-rows: auto 44px !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-template-rows: 44px 44px !important;
   gap: 10px !important;
 }
 
-body[data-route="stake"] .staking-dashboard .eth-claim-actions > .eth-lifetime {
+body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
   grid-column: 1 !important;
   grid-row: 1 !important;
 }
 
-body[data-route="stake"] .staking-dashboard .eth-claim-actions > #claim-stake-rewards {
-  grid-column: 2 !important;
-  grid-row: 1 !important;
-}
-
 body[data-route="stake"] .staking-dashboard .eth-claim-actions > .staking-share-group {
-  grid-column: 3 !important;
+  grid-column: 2 !important;
   grid-row: 1 !important;
 }
 

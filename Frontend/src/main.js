@@ -354,7 +354,6 @@ document.querySelector('#app').innerHTML = `
         <div><span class="eyebrow" id="eth-claim-title">CLAIMABLE SOL</span><strong id="stake-claimable-eth"><img class="sol-icon stake-claim-hover-mark" src="/solana-mark.svg" alt="" aria-hidden="true"/><span data-sol-readout-value>0.00</span></strong><small id="stake-reward-updated">Connect a wallet to see your rewards</small></div>
       </div>
       <div class="eth-claim-actions">
-        <div class="eth-lifetime"><span>CLAIMED SOL</span><strong id="stake-lifetime-eth">—</strong><small>History not indexed</small></div>
         <button id="claim-stake-rewards">Connect to claim</button>
         <div class="staking-share-group"><div><button id="stake-flex-card" class="stake-flex-trigger" type="button">FLEX</button></div></div>
         <button id="open-stake-calculator" class="stake-calculator-trigger" type="button" aria-haspopup="dialog" aria-controls="stake-calculator">CALCULATOR</button>
@@ -1780,10 +1779,6 @@ const renderStakingRewards = () => {
   // Staker revenue accrues in SOL from the 7.2% net share of the 8% gross staking allocation.
   const eth_ = s ? chain.format.ethSmart(s.pendingEth) : '0.00';
   animateSolReadout('#stake-claimable-eth', eth_);
-  // StakePosition has no lifetime-claimed counter. Until the versioned event
-  // index exists, show that boundary explicitly rather than repeating pending
-  // SOL or inventing a zero received total.
-  setMetric('#stake-lifetime-eth', '—');
   const updatedEl = document.querySelector('#stake-reward-updated');
   if (updatedEl) updatedEl.textContent = chain.state.account
     ? `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · updates live`
