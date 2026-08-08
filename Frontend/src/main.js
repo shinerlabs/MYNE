@@ -5958,7 +5958,7 @@ const loadFairness = async (detail) => {
     </div>
     <div class="fair-proof-grid">${proofGrid}</div>
     <div class="fair-footer">
-      <span class="fair-note">${serverMode ? 'Committed before betting · Solana entropy selected after betting closed' : 'Legacy provider proof retained for transparency'}</span>
+      <p class="fair-note">${serverMode ? 'Committed before betting · Solana entropy selected after betting closed' : 'Legacy provider proof retained for transparency'}</p>
       ${!serverMode && randomnessAccount ? `<a class="fair-link" href="${explorerAddress(randomnessAccount)}" target="_blank" rel="noreferrer">Open randomness account ↗</a>` : ''}
       ${randomness ? '<button type="button" class="fair-verify">Verify proof</button>' : ''}
     </div>`;
@@ -5981,7 +5981,7 @@ const loadFairness = async (detail) => {
  * against the contract.
  */
 const renderVerdict = (r) => {
-  const wrap = document.createElement('span');
+  const wrap = document.createElement('div');
   const incompleteServerProof = r.randomnessMode === 'server' && r.outcomeMatches && !r.serverProofComplete;
   wrap.className = `fair-verdict ${r.ok ? 'ok' : incompleteServerProof ? 'pending' : 'bad'}`;
   const checks = [
