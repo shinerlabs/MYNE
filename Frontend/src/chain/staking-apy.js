@@ -48,7 +48,7 @@ export const stakingApyVariants = (standardApyPct) => ({
  * Keeping this separate from the live metric object prevents a maintenance
  * period from silently changing the last APY users saw before mining stopped.
  */
-export const stakingApySnapshot = (metrics, capturedAt = Date.now()) => {
+export const stakingApySnapshot = (metrics, capturedAt = metrics?.capturedAt ?? Date.now()) => {
   if (!metrics || !Number.isFinite(metrics.apyStandardPct) || metrics.apyStandardPct < 0
     || !Number.isFinite(metrics.apyBurnPct) || metrics.apyBurnPct < 0
     || !Number.isSafeInteger(capturedAt) || capturedAt <= 0) return null;
@@ -60,6 +60,14 @@ export const stakingApySnapshot = (metrics, capturedAt = Date.now()) => {
     aprAsOf: Number.isSafeInteger(metrics.aprAsOf) ? metrics.aprAsOf : null,
     capturedAt,
   };
+};
+
+/** Keep the last displayed APY only for the same final reward window. */
+export const selectPausedApySnapshot = (currentMetrics, previousSnapshot) => {
+  if (currentMetrics?.protocolPaused !== true) return null;
+  const current = stakingApySnapshot(currentMetrics);
+  const previous = stakingApySnapshot(previousSnapshot);
+  return previous?.aprAsOf === current?.aprAsOf ? previous : current;
 };
 
 /** A personal position has no meaningful APY until it has positive principal and weight. */

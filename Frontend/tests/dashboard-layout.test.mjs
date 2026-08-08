@@ -203,6 +203,9 @@ test('collapsing Social preserves Mine board and control tracks', () => {
 
 test('Rounds and About reserve the fixed footer and own their internal overflow', () => {
   assert.match(fitStyles, /\.feature-shell\[data-page="rounds"\]\.page-view\.active \{[\s\S]*grid-template-rows:[\s\S]*minmax\(0, 1fr\) !important/);
+  assert.match(fitStyles, /body\[data-route="rounds"\] \.feature-shell\[data-page="rounds"\]\.page-view\.active \{[\s\S]*clamp\(64px, 9dvh, 78px\)[\s\S]*row-gap:\s*12px !important/);
+  assert.match(fitStyles, /body\[data-route="rounds"\] \.feature-shell\[data-page="rounds"\] > \.feature-metrics article \{[\s\S]*min-height:\s*0 !important;[\s\S]*height:\s*100% !important/);
+  assert.match(fitStyles, /body\[data-route="rounds"\] \.feature-shell\[data-page="rounds"\] > \.feature-metrics\.supply-metrics \{[\s\S]*margin-top:\s*0 !important/);
   assert.match(fitStyles, /body\[data-route="rounds"\] \.round-list \{[\s\S]*overflow-y:\s*auto !important/);
   assert.match(fitStyles, /\.about-shell\.page-view\.active \{[\s\S]*grid-template-rows:[\s\S]*minmax\(0, 1fr\) !important/);
   assert.match(fitStyles, /body\[data-route="about"\] \.about-layout \{[\s\S]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(210px, 240px\) !important/);

@@ -189,11 +189,20 @@ export async function claimStakingRewards() {
   return signature;
 }
 
-export async function readStakingMetrics({ allowStaleWindow = false } = {}) {
-  const [pool, rewardWindow] = await Promise.all([
+export async function readStakingMetrics() {
+  // Read the authoritative pause flag on the Stake route itself. Mine's round
+  // poll is intentionally suspended off-route, so its cached pause state is
+  // not reliable enough to decide whether an APY window may be frozen.
+  const [pool, config] = await Promise.all([
     readStakePool(),
-    loadStakingRewardWindow(APY_WINDOW_MINUTES, undefined, { allowStale: allowStaleWindow }),
+    getProtocolConfig(),
   ]);
+  const protocolPaused = Boolean(config.paused);
+  const rewardWindow = await loadStakingRewardWindow(
+    APY_WINDOW_MINUTES,
+    undefined,
+    { allowStale: protocolPaused },
+  );
   const standard = baseUnitsToTokens(pool?.totalStandard);
   const burn = baseUnitsToTokens(pool?.totalBurn);
   const totalStakedPrincipal = totalStakedMyne(pool?.totalStandard, pool?.totalBurn);
@@ -227,6 +236,7 @@ export async function readStakingMetrics({ allowStaleWindow = false } = {}) {
     rewardsToStakersEth: rewardPerMinuteSol * 1440,
     aprWindowRounds: rewardWindow?.rounds ?? 0,
     aprAsOf: rewardWindow?.complete ? rewardWindow.lastSettlesAt : null,
+    protocolPaused,
   };
 }
 export async function readStakingHistory() {

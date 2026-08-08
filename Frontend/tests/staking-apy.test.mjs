@@ -6,6 +6,7 @@ import {
   apyPercent,
   formatApyPercent,
   positionApyPercent,
+  selectPausedApySnapshot,
   stakingApyVariants,
   stakingApySnapshot,
   summariseStakingRewardWindow,
@@ -70,6 +71,14 @@ test('a protocol pause retains one validated APY snapshot', () => {
     capturedAt: 1_700_000_100,
   });
   assert.equal(stakingApySnapshot({ apyStandardPct: null, apyBurnPct: null }), null);
+
+  const paused = { ...snapshot, protocolPaused: true, apyStandardPct: 9, apyBurnPct: 45 };
+  assert.deepEqual(selectPausedApySnapshot(paused, snapshot), snapshot);
+  assert.equal(selectPausedApySnapshot({ ...paused, protocolPaused: false }, snapshot), null);
+  assert.equal(
+    selectPausedApySnapshot({ ...paused, aprAsOf: snapshot.aprAsOf + 65 }, snapshot)?.apyStandardPct,
+    9,
+  );
 });
 
 test('staking reward window sums exact indexed lamports only when coverage is complete', () => {
@@ -146,7 +155,8 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   ]);
 
   assert.match(staking, /claimedEth:\s*null,\s*lifetimeEth:\s*null/);
-  assert.match(staking, /readStakingMetrics\(\{ allowStaleWindow = false \} = \{\}\)/);
+  assert.match(staking, /const \[pool, config\] = await Promise\.all/);
+  assert.match(staking, /allowStale: protocolPaused/);
   assert.doesNotMatch(main, /TOTAL SOL EARNED|TOTAL SOL RECEIVED|Claimed \+ available/);
   assert.match(main, /CLAIMED SOL/);
   assert.match(main, /History not indexed/);
@@ -161,9 +171,9 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.doesNotMatch(main, /const projectionRates/);
   assert.match(main, /stakingMetricsState = null;[\s\S]*#header-staking-apr[\s\S]*updateStakeFlexCard\(\)/);
   assert.match(main, /requestId !== stakingMetricsRefreshId/);
-  assert.match(main, /chain\.state\.protocolPaused === true/);
+  assert.match(main, /const paused = current\.protocolPaused === true/);
   assert.match(main, /PAUSED SNAPSHOT · LAST VERIFIED 30M/);
-  assert.match(main, /stakingApySnapshot\(stakingMetricsState\) \?\? loadStakingApySnapshot\(\)/);
+  assert.match(main, /selectPausedApySnapshot\(current, previousApy\)/);
   assert.match(main, /ctx\.fillText\('POSITION APY'/);
   assert.match(main, /if \(data\.apy == null\) return null/);
   assert.doesNotMatch(main, /rewardsToStakersEth \/ metrics\.aprWindowDays/);

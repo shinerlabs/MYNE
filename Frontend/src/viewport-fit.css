@@ -3265,3 +3265,25 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
     gap: 4px 6px !important;
   }
 }
+
+/* Desktop History stat rails must stay inside their grid tracks. The generic metric-card
+   minimum height used to overflow the compact supply row and visually collide with the ledger. */
+@media (min-width: 901px) {
+  body[data-route="rounds"] .feature-shell[data-page="rounds"].page-view.active {
+    grid-template-rows:
+      clamp(66px, 10dvh, 84px)
+      clamp(64px, 9dvh, 78px)
+      clamp(64px, 9dvh, 78px)
+      minmax(0, 1fr) !important;
+    row-gap: 12px !important;
+  }
+
+  body[data-route="rounds"] .feature-shell[data-page="rounds"] > .feature-metrics article {
+    min-height: 0 !important;
+    height: 100% !important;
+  }
+
+  body[data-route="rounds"] .feature-shell[data-page="rounds"] > .feature-metrics.supply-metrics {
+    margin-top: 0 !important;
+  }
+}

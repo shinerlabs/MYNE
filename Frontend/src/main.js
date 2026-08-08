@@ -30,7 +30,9 @@ import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/confi
 import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, invalidateReceiptCache } from './chain/lottery.js';
 import { randomnessHex } from './chain/randomness-proof.js';
 import { isServerRandomnessProgram } from './chain/randomness-mode.js';
-import { formatApyPercent, positionApyPercent, stakingApySnapshot } from './chain/staking-apy.js';
+import {
+  formatApyPercent, positionApyPercent, selectPausedApySnapshot, stakingApySnapshot,
+} from './chain/staking-apy.js';
 import {
   affordableAutoPlanRounds, maxAutoPlanFundingLamports, requiredDeposit,
 } from './chain/autocommit.js';
@@ -1907,16 +1909,17 @@ const refreshStakingHistory = async () => {
  */
 const refreshStakingMetrics = async () => {
   const requestId = ++stakingMetricsRefreshId;
-  const paused = chain.state.protocolPaused === true;
   // Prefer the exact last live value already on screen. A persisted snapshot
   // keeps that same value through a reload during maintenance.
-  const frozenApy = paused
-    ? (stakingApySnapshot(stakingMetricsState) ?? loadStakingApySnapshot())
-    : null;
+  const previousApy = stakingApySnapshot(stakingMetricsState) ?? loadStakingApySnapshot();
   try {
-    const current = await readStakingMetrics({ allowStaleWindow: paused && !frozenApy });
+    const current = await readStakingMetrics();
     if (requestId !== stakingMetricsRefreshId) return;
-    const captured = frozenApy ?? (paused ? stakingApySnapshot(current) : null);
+    const paused = current.protocolPaused === true;
+    // A stored snapshot is valid for this pause only when it describes the
+    // same final indexed reward window. Otherwise compute one from the final
+    // verified window now instead of reviving an older maintenance value.
+    const captured = selectPausedApySnapshot(current, previousApy);
     const m = captured
       ? { ...current, ...captured, aprPct: captured.apyStandardPct, aprStatus: 'paused' }
       : current;
@@ -1992,8 +1995,8 @@ const refreshStakingMetrics = async () => {
   } catch (error) {
     if (requestId !== stakingMetricsRefreshId) return;
     console.warn('staking metrics failed', error);
-    if (paused && frozenApy) {
-      const snapshot = { ...(stakingMetricsState ?? {}), ...frozenApy, aprPct: frozenApy.apyStandardPct, aprStatus: 'paused' };
+    if (chain.state.protocolPaused === true && previousApy) {
+      const snapshot = { ...(stakingMetricsState ?? {}), ...previousApy, aprPct: previousApy.apyStandardPct, aprStatus: 'paused' };
       stakingMetricsState = snapshot;
       const aprText = formatApyPercent(snapshot.apyStandardPct);
       setMetric('#metric-apr', aprText);
