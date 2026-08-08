@@ -357,14 +357,14 @@ document.querySelector('#app').innerHTML = `
         <div class="eth-lifetime"><span>CLAIMED SOL</span><strong id="stake-lifetime-eth">—</strong><small>History not indexed</small></div>
         <div class="staking-share-group"><div><button id="stake-flex-card" class="stake-flex-trigger" type="button">FLEX</button></div></div>
         <button id="claim-stake-rewards">Connect to claim</button>
-        <aside class="stake-reward-estimate" aria-live="polite">
-          <div class="stake-estimate-values">
-            <div><span>EST. WEEKLY</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-weekly">—</b><small>SOL</small></strong><em id="stake-estimated-weekly-usd">≈ $—</em></div>
-            <div><span>EST. ANNUAL</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-annual">—</b><small>SOL</small></strong><em id="stake-estimated-annual-usd">≈ $—</em></div>
-          </div>
-          <small id="stake-estimate-basis">Connect a wallet to estimate rewards</small>
-        </aside>
       </div>
+      <aside class="stake-reward-estimate" aria-live="polite">
+        <div class="stake-estimate-values">
+          <div><span>EST. WEEKLY</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-weekly">—</b><small>SOL</small></strong><em id="stake-estimated-weekly-usd">≈ $—</em></div>
+          <div><span>EST. ANNUAL</span><strong><img src="/solana-mark.svg" alt=""/><b id="stake-estimated-annual">—</b><small>SOL</small></strong><em id="stake-estimated-annual-usd">≈ $—</em></div>
+        </div>
+        <small id="stake-estimate-basis">Connect a wallet to estimate rewards</small>
+      </aside>
       <div class="stock-reward-basket" hidden><header><span>LEGACY STOCK REWARDS</span><b></b></header></div>
       <div class="unstake-status" id="unstake-status" hidden></div>
         </section>

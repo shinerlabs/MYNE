@@ -145,6 +145,9 @@ test('server randomness provider cutover is paused, drained, simulated, and expl
   assert.match(source, /configState\.admin\.equals\(payer\.publicKey\)/);
   assert.match(source, /CONFIRM_SWITCHBOARD_ROUNDS_DRAINED/);
   assert.match(source, /resolved=eq\.false/);
+  assert.match(source, /closed_signature=is\.null/);
+  assert.match(source, /select=round_id,randomness_id,randomness_commit_slot/);
+  assert.doesNotMatch(source, /select=round_id,randomness_account/);
   assert.match(source, /CONFIRM_SERVER_RANDOMNESS_PROGRAM/);
   assert.match(source, /CONFIRM_MAINNET_RANDOMNESS_AUTHORITY/);
   assert.match(source, /configState\.randomnessAuthority\.equals\(randomnessAuthority\)/);

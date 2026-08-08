@@ -92,7 +92,7 @@ assert.ok(
 );
 
 const unresolvedResponse = await fetch(
-  `${supabaseUrl}/rest/v1/mine_rounds?resolved=eq.false&select=round_id,randomness_account,randomness_commit_slot&order=round_id.asc&limit=10`,
+  `${supabaseUrl}/rest/v1/mine_rounds?resolved=eq.false&closed_signature=is.null&select=round_id,randomness_id,randomness_commit_slot&order=round_id.asc&limit=10`,
   { headers: { apikey: serviceRole, Authorization: `Bearer ${serviceRole}` } },
 );
 const unresolvedText = await unresolvedResponse.text();
