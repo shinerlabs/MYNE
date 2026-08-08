@@ -2875,6 +2875,9 @@ const updateMine = () => {
   deploy.classList.toggle('ready', ready);
   deploy.classList.toggle('auto-plan-status', planOwnsAction && protocolReady && !protocolPaused);
   deploy.classList.toggle('auto-plan-stalled', planOwnsAction && planStalled);
+  // The plan card owns the workflow once an Auto-mine/Auto-burn plan exists. Hiding the separate
+  // Mine action prevents the panel from presenting a second, impossible auto-plan entry point.
+  deploy.hidden = planOwnsAction;
   // Clickable even when "not ready", so mine() can explain what's missing via a toast
   // instead of the button silently doing nothing.
   // An existing plan owns this slot: its top-up and cancel controls are the only valid actions,
@@ -4980,10 +4983,29 @@ document.querySelector('#deploy').addEventListener('click', () => chain.mine({
   rewardMode: autoRound ? autoRewardMode : 'accumulate',
 }));
 // Delegated: the plan panel is re-rendered on every state change.
-document.querySelector('#auto-plan').addEventListener('click', (event) => {
-  if (event.target.closest('#cancel-plan')) chain.cancelAutoPlan();
-  if (event.target.closest('#topup-plan')) chain.topUpPlan(10);
-  if (event.target.closest('#approve-delegate')) chain.approveAutoClaim();
+document.querySelector('#auto-plan').addEventListener('click', async (event) => {
+  if (event.target.closest('#cancel-plan')) return chain.cancelAutoPlan();
+  if (event.target.closest('#topup-plan-max')) {
+    const input = document.querySelector('#auto-plan-topup-amount');
+    const maximum = event.target.closest('#topup-plan-max').dataset.maxSol;
+    if (input && maximum) {
+      input.value = maximum;
+      input.focus();
+    }
+    return;
+  }
+  if (event.target.closest('#topup-plan')) {
+    const input = document.querySelector('#auto-plan-topup-amount');
+    return chain.topUpPlan(input?.value ?? '');
+  }
+  if (event.target.closest('#approve-delegate')) return chain.approveAutoClaim();
+});
+
+document.querySelector('#auto-plan').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' && event.target.matches('#auto-plan-topup-amount')) {
+    event.preventDefault();
+    document.querySelector('#topup-plan')?.click();
+  }
 });
 
 // Reward actions are delegated because their balances and disabled states update after every
@@ -5695,6 +5717,7 @@ const goToRoundPage = (target) => {
 const renderPlan = (state) => {
   const box = document.querySelector('#auto-plan');
   if (!box) return;
+  const previousTopUpValue = box.querySelector('#auto-plan-topup-amount')?.value ?? '';
   const plan = state.plan;
   box.hidden = !plan;
   if (!plan) {
@@ -5732,6 +5755,11 @@ const renderPlan = (state) => {
   const rounds = affordable == null
     ? '—'
     : plan.unlimited ? `~${affordable}` : String(plan.playsRemaining);
+  const maximumTopUp = maxAutoPlanFundingLamports(
+    state.balance ?? 0n,
+    state.autoPlanFundingReserve ?? 0n,
+  );
+  const maximumTopUpSol = chain.format.eth(maximumTopUp, 9).replace(/0+$/, '').replace(/\.$/, '') || '0';
   box.innerHTML = `
     <div class="auto-plan-head">
       <span class="auto-plan-live${stalled ? ' stalled' : ''}"><i></i>${planModeLabel} ${stalled ? 'PAUSED' : 'ACTIVE'}</span>
@@ -5747,10 +5775,20 @@ const renderPlan = (state) => {
         : '⚠ Auto-claim needs delegate approval — winnings are not being claimed.'}</p>`
       : ''}
     ${plan.autoClaim && !plan.canClaim ? '<button class="auto-plan-approve" id="approve-delegate">Approve auto-claim</button>' : ''}
+    <div class="auto-plan-topup-entry">
+      <label for="auto-plan-topup-amount"><span>TOP UP BALANCE</span><small>Up to ${maximumTopUpSol} SOL · 10% stays in wallet</small></label>
+      <div class="auto-plan-topup-input">
+        <input id="auto-plan-topup-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" aria-label="SOL amount to add to Auto-round"/>
+        <span>SOL</span>
+        <button id="topup-plan-max" type="button" data-max-sol="${maximumTopUpSol}" aria-label="Use maximum safe top-up amount">MAX</button>
+      </div>
+    </div>
     <div class="auto-plan-actions">
-      <button class="auto-plan-topup" id="topup-plan">+10 rounds</button>
+      <button class="auto-plan-topup" id="topup-plan">Top up</button>
       <button class="auto-plan-cancel" id="cancel-plan">Cancel &amp; withdraw</button>
     </div>`;
+  const topUpInput = box.querySelector('#auto-plan-topup-amount');
+  if (topUpInput) topUpInput.value = previousTopUpValue;
 };
 
 /**

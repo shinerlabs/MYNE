@@ -522,22 +522,26 @@ async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoCla
 }
 
 /**
- * Add funds to a running plan. An unlimited plan keeps going as long as its balance covers
- * the next wager plus the executor-fee reserve, so topping up is how you extend it.
+ * Add a user-selected SOL amount to a running plan. An unlimited plan keeps going as long as its
+ * balance covers the next wager plus the executor-fee reserve, so topping up extends it without
+ * creating or reconfiguring a second plan.
  */
-export async function topUpPlan(rounds = 10) {
+export async function topUpPlan(amountSol) {
   if (!getAccount()) return connectWallet();
   if (!state.plan) return notify('No active plan');
 
-  const { maxFee, transactionFeeReserve } = await readFeeParams();
-  const value = state.plan.amountPerPlay * BigInt(rounds) + maxFee * BigInt(rounds);
-  if (value > state.balance) return notify(`Need ${formatEther(value)} SOL to add ${rounds} rounds`);
+  let value;
+  try { value = parseEther(amountSol); } catch (error) { return notify(error.message); }
+  if (value <= 0n) return notify('Enter the SOL amount you want to add');
+
+  const { transactionFeeReserve } = await readFeeParams();
+  if (value > state.balance) return notify(`Need ${formatEther(value)} SOL for this top-up`);
   const maximumFunding = maxAutoPlanFundingLamports(state.balance, transactionFeeReserve);
   if (value > maximumFunding) {
     return notify(`Auto-round top-ups can use at most ${formatEther(maximumFunding)} SOL (90% of your wallet balance)`);
   }
 
-  await runTx(`Adding ~${rounds} rounds…`, () => depositToPlan(value), async () => {
+  await runTx(`Adding ${formatEther(value)} SOL to Auto-round…`, () => depositToPlan(value), async () => {
     await Promise.all([refreshPlan(), refreshMiner()]);
   });
 }
