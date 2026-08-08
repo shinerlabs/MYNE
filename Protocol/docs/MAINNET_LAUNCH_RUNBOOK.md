@@ -207,6 +207,7 @@ supabase/migrations/20260808113000_burn_stats.sql
 supabase/migrations/20260808120000_receipt_reward_accrual.sql
 supabase/migrations/20260808123000_empty_round_stats.sql
 supabase/migrations/20260808124500_keeper_lease_privileges.sql
+supabase/migrations/20260808130000_round_realtime.sql
 ```
 
 The final three migrations are part of the same release as the upgraded program

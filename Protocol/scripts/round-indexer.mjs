@@ -29,6 +29,7 @@ import {
   myneClaimProjection,
 } from './referral-index-policy.mjs';
 import { normalizeAnchorEventData, normalizeAnchorEventName } from './anchor-event-data.mjs';
+import { attachProgramWake, createWakeSignal } from './event-driven-loop.mjs';
 
 const { AnchorProvider, EventParser, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -944,6 +945,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(0);
   }
   const once = process.argv.includes('--once');
+  const wake = createWakeSignal();
+  if (!once) {
+    try {
+      await attachProgramWake({ connection: provider.connection, programId: PROGRAM_ID, wake });
+      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer-realtime-ready' }));
+    } catch (error) {
+      console.warn(JSON.stringify({
+        at: new Date().toISOString(), event: 'round-indexer-realtime-unavailable', message: String(error),
+      }));
+    }
+  }
   do {
     try {
       console.log(JSON.stringify({ at: new Date().toISOString(), event: 'round-indexer', ...(await indexerTick()) }));
@@ -954,6 +966,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         break;
       }
     }
-    if (!once) await sleep(intervalMs);
+    if (!once) await wake.wait(intervalMs);
   } while (!once);
 }

@@ -6494,29 +6494,148 @@ img.icon-hammer { width: 16px; height: 16px; object-fit: contain; vertical-align
 .account-stat-mark { width: 13px; height: 13px; border-radius: 50%; flex: 0 0 13px; }
 .account-stat-plus { color: #9c9c9c; font-style: normal; padding: 0 3px; }
 
-/* Fairness strip in the expanded round row: winning square, deployed, the bound Switchboard
-   account, and the deterministic on-chain derivation result. */
-.round-fairness { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px; padding-top: 12px; box-shadow: inset 0 1px rgba(255,255,255,0.102); }
-.round-fairness .fair-chip { padding: 5px 11px; border-radius: 999px; background: rgba(255,255,255,0.0765); color: #cdcdcd; font-size: 11px; }
-.round-fairness .fair-chip b { color: #f6f6f6; font-weight: 650; }
-.round-fairness .fair-item { color: #b2b2b2; font-size: 11px; }
-.round-fairness .fair-item b { color: #f2f2f2; font-weight: 650; }
-.round-fairness .fair-item code { color: #bdbdbd; font: 400 11px var(--font-mono); }
-.round-fairness .fair-hash { display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; user-select: all; }
-.round-fairness .fair-link { color: #b9b9b9; font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
-.round-fairness .fair-link:hover { color: #dadada; }
-.round-fairness .fair-note { color: #a0a0a0; font-size: 10px; font-style: italic; }
-.round-fairness .fair-verify { padding: 4px 12px; border: 0; border-radius: 999px; background: rgba(255,255,255,0.119); color: #ededed; font-size: 11px; font-weight: 600; cursor: pointer; }
-.round-fairness .fair-verify:hover { background: rgba(255,255,255,0.204); }
-.round-fairness .fair-verify:disabled { opacity: .6; cursor: default; }
-.fair-verdict { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; }
-.fair-verdict b { font-weight: 700; }
-.fair-verdict.ok b { color: #c1dbb1; }
+/* Branded proof card in the expanded round row. The colour spectrum is structural—the proof
+   values stay quiet and readable while the provider/result identity carries MYNE colour. */
+.round-fairness {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding: 15px;
+  border: 1px solid transparent;
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, #141416 0%, #0c0c0e 72%) padding-box,
+    var(--gld-spectrum) border-box;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .22);
+}
+.round-fairness .fair-overview {
+  display: flex;
+  align-items: center;
+  gap: 10px 18px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+.round-fairness .fair-chip {
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: var(--gld-spectrum);
+  color: #09090b;
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: .04em;
+}
+.round-fairness .fair-chip b { color: inherit; font-weight: 820; }
+.round-fairness .fair-deployed {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #f5f5f7;
+  font-size: 13px;
+}
+.round-fairness .fair-sol-mark { width: 17px; height: 17px; }
+.round-fairness .fair-deployed small {
+  color: #818187;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .13em;
+}
+.round-fairness .fair-provider {
+  margin-left: auto;
+  background: var(--gld-spectrum);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: .16em;
+}
+.round-fairness .fair-proof-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.round-fairness .fair-proof {
+  min-width: 0;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .035);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .055);
+}
+.round-fairness .fair-proof small {
+  display: block;
+  margin-bottom: 7px;
+  color: #77777f;
+  font-size: 7.5px;
+  font-weight: 760;
+  letter-spacing: .12em;
+}
+.round-fairness .fair-proof :is(b, code) {
+  display: block;
+  overflow: hidden;
+  color: #d8d8dc;
+  font: 500 10.5px var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.round-fairness .fair-hash { max-width: 100%; user-select: all; }
+.round-fairness .fair-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.round-fairness .fair-note {
+  flex: 1;
+  color: #85858c;
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+.round-fairness .fair-link {
+  color: #c7c7cb;
+  font-size: 10px;
+  text-decoration: none;
+}
+.round-fairness .fair-link:hover { color: #fff; }
+.round-fairness .fair-verify {
+  min-width: 124px;
+  min-height: 42px;
+  padding: 0 17px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: linear-gradient(#f4f4f5, #dedee1) padding-box, var(--gld-spectrum) border-box;
+  color: #09090b;
+  font-size: 10px;
+  font-weight: 780;
+  cursor: pointer;
+}
+.round-fairness .fair-verify:hover { filter: brightness(1.06); }
+.round-fairness .fair-verify:disabled { opacity: .62; cursor: default; }
+.fair-verdict { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px 12px; font-size: 10px; }
+.fair-verdict b { font-weight: 800; }
+.fair-verdict.ok b {
+  background: var(--gld-spectrum);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
 .fair-verdict.pending b, .fair-verdict i.pending { color: #c8bd91; }
 .fair-verdict.bad b { color: #e0aea8; }
-.fair-verdict i { font-style: normal; color: #a2a2a2; font-size: 10px; }
-.fair-verdict i.pass { color: #b5c5aa; }
+.fair-verdict i { color: #9c9ca3; font-size: 9px; font-style: normal; }
+.fair-verdict i.pass { color: #c2c2c7; }
 .fair-verdict i.fail { color: #d1a8a4; }
+
+@media (max-width: 1000px) {
+  .round-fairness .fair-proof-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .round-fairness { padding: 13px; }
+  .round-fairness .fair-overview { align-items: flex-start; flex-wrap: wrap; }
+  .round-fairness .fair-provider { width: 100%; margin-left: 0; }
+  .round-fairness .fair-proof-grid { grid-template-columns: minmax(0, 1fr); }
+  .round-fairness .fair-footer { align-items: stretch; flex-direction: column; }
+  .round-fairness .fair-verify { width: 100%; min-height: 44px; }
+}
 
 /* Claim check incomplete — a network failure, not an empty result. Amber rather than red: the
    user's funds are fine, only our ability to read them right now is not. */

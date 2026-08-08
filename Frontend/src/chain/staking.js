@@ -39,6 +39,8 @@ const invalidateStakePoolCache = () => {
   stakePoolRequest = null;
 };
 
+export const invalidateStakingCache = invalidateStakePoolCache;
+
 async function readStakePool({ force = false } = {}) {
   if (force) invalidateStakePoolCache();
   if (stakePoolCache && Date.now() - stakePoolCacheAt < STAKE_POOL_CACHE_MS) return stakePoolCache;

@@ -395,11 +395,11 @@
       "docs": [
         "Converts every accumulated mining reward into permanent 5x burn-stake weight.",
         "",
-        "The MYNE represented by `miner.unclaimed_myne` has not been minted yet, so this path",
-        "records the same permanent virtual burn used by Auto-burn instead of minting tokens only",
-        "to burn them in a second instruction. No claim fee is taken: no liquid MYNE leaves the",
-        "protocol, and the authority can only increase its own canonical stake position. This is",
-        "an earned-reward exit, so an emergency mining pause must not trap it."
+        "The MYNE represented by the miner's outstanding reward shares has not been minted yet, so",
+        "this path records the same permanent virtual burn used by Auto-burn instead of minting",
+        "tokens only to burn them in a second instruction. No claim fee is taken: no liquid MYNE",
+        "leaves the protocol, and the authority can only increase its own canonical stake position.",
+        "This is an earned-reward exit, so an emergency mining pause must not trap it."
       ],
       "discriminator": [
         93,
@@ -5801,7 +5801,10 @@
           {
             "name": "unclaimed_myne",
             "docs": [
-              "Cached share value, refreshed whenever this miner touches the program."
+              "Outstanding non-passive reward basis. The authoritative claimable total",
+              "is still the value of `passive_reward_debt` shares; retaining this basis",
+              "separately makes the passive increase independently auditable without",
+              "changing the account layout."
             ],
             "type": "u64"
           },

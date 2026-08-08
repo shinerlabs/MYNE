@@ -4572,7 +4572,7 @@ body[data-route="rounds"] .round-entry.expanded .round-record {
 }
 
 body[data-route="rounds"] .round-detail {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto !important;
   gap: 14px 24px !important;
   margin: 0 !important;
   padding: 14px 20px 16px !important;
@@ -4608,9 +4608,17 @@ body[data-route="rounds"] .round-explorer {
   white-space: nowrap;
 }
 
+body[data-route="rounds"] .round-tx-link[hidden] {
+  display: none !important;
+}
+
 body[data-route="rounds"] .round-detail-extra,
 body[data-route="rounds"] :is(.round-fairness, .round-miners) {
   grid-column: 1 / -1;
+}
+
+body[data-route="rounds"] .round-fairness span {
+  margin-bottom: 0 !important;
 }
 
 /* ── Stake reward actions: stable stat, FLEX entry, one clear claim CTA ── */

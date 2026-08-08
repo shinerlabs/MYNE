@@ -23,6 +23,7 @@ import {
   nextHistoricalLifecycleCursor,
   processLifecycleRoundQueue,
 } from './lifecycle-queue-policy.mjs';
+import { attachProgramWake, createWakeSignal } from './event-driven-loop.mjs';
 
 const { AnchorProvider, Program, setProvider } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID
@@ -325,6 +326,25 @@ export async function lifecycleTick() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const once = process.argv.includes('--once');
+  const wake = createWakeSignal();
+  if (!once) {
+    try {
+      await attachProgramWake({
+        connection: provider.connection,
+        programId: PROGRAM_ID,
+        wake,
+        commitment,
+        // The indexer is event-driven too, but its durable Supabase write can finish just after
+        // this worker's first read. Follow-ups keep rewards responsive without a busy loop.
+        followUpDelays: [750, 2_000],
+      });
+      console.log(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-realtime-ready' }));
+    } catch (error) {
+      console.warn(JSON.stringify({
+        at: new Date().toISOString(), event: 'lifecycle-realtime-unavailable', message: String(error),
+      }));
+    }
+  }
   do {
     try {
       console.log(JSON.stringify({ at: new Date().toISOString(), event: 'lifecycle-tick', results: await lifecycleTick() }));
@@ -335,6 +355,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         break;
       }
     }
-    if (!once) await sleep(intervalMs);
+    if (!once) await wake.wait(intervalMs);
   } while (!once);
 }

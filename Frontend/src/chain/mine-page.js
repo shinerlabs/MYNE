@@ -1,4 +1,5 @@
 import { formatEther, parseEther } from './units.js';
+import { PublicKey } from '@solana/web3.js';
 
 import {
   UNLIMITED_PLAYS, approveClaimDelegate, cancelPlan, configurePlan, depositToPlan,
@@ -17,7 +18,11 @@ import {
   verifyFeeEconomics, verifyPremine, verifyRoundTiming, waitForTx, withdrawUnrefined,
   burnUnclaimedMyne, claimManyEthOnly, syncRoundGenesis,
 } from './lottery.js';
-import { getProtocolConfig } from './anchor-client.js';
+import {
+  derivePda, getProtocolConfig, invalidateProtocolConfig, protocolPdas, u64Seed,
+} from './anchor-client.js';
+import { minerPda, stakePositionPda } from './miner-registration.js';
+import { subscribeAccountActivity } from './protocol-realtime.js';
 import {
   loadLatestIndexedRoundId, loadLatestPlayedSettledRoundId, loadLatestSettledRoundId,
 } from './rounds-index.js';
@@ -270,6 +275,7 @@ function tick() {
 
   if (rolled) {
     state.roundId = next.roundId;
+    syncRoundRealtime(next.roundId);
     // Use the new chain round as the anchor. If the tab was backgrounded, `state.roundId` may
     // be multiple rounds behind and is not necessarily the previous round anymore.
     const previous = next.roundId > 0n ? next.roundId - 1n : null;
@@ -295,6 +301,63 @@ function tick() {
   }
   emit();
 }
+
+let stopRoundRealtime = null;
+let realtimeRoundId = null;
+let walletRealtimeStops = [];
+let globalRealtimeStops = [];
+
+const clearWalletRealtime = () => {
+  for (const stop of walletRealtimeStops) stop();
+  walletRealtimeStops = [];
+};
+
+const syncWalletRealtime = (account) => {
+  clearWalletRealtime();
+  if (!account) return;
+  const authority = new PublicKey(account);
+  const onRewardAccountChange = () => {
+    if (!document.hidden) void refreshMiner();
+  };
+  walletRealtimeStops = [
+    subscribeAccountActivity(minerPda(authority), onRewardAccountChange),
+    subscribeAccountActivity(stakePositionPda(authority), onRewardAccountChange),
+    subscribeAccountActivity(derivePda('auto_plan', authority), () => {
+      if (!document.hidden) void refreshPlan();
+    }),
+  ];
+};
+
+const syncRoundRealtime = (roundId) => {
+  const id = BigInt(roundId);
+  if (realtimeRoundId === id) return;
+  stopRoundRealtime?.();
+  realtimeRoundId = id;
+  stopRoundRealtime = subscribeAccountActivity(derivePda('round', u64Seed(id)), () => {
+    if (!document.hidden && live) void refreshRound();
+  });
+};
+
+const startGlobalRealtime = () => {
+  if (globalRealtimeStops.length) return;
+  globalRealtimeStops = [
+    // Pause/provider/admin changes are rare, but when they happen the Mine controls must reflect
+    // the authoritative config immediately rather than waiting for its 15-second cache.
+    subscribeAccountActivity(protocolPdas.config, () => {
+      invalidateProtocolConfig();
+      if (!document.hidden && live) void refreshRound();
+      if (!document.hidden) void refreshJackpot();
+    }),
+    // Passive MYNE and pending SOL can change when somebody else claims or a round distributes its
+    // staking allocation. Both affect this wallet even when its own PDA bytes do not change.
+    subscribeAccountActivity(protocolPdas.miningPool, () => {
+      if (!document.hidden && state.account) void refreshMiner();
+    }),
+    subscribeAccountActivity(protocolPdas.stakePool, () => {
+      if (!document.hidden && state.account) void refreshMiner();
+    }),
+  ];
+};
 
 /**
  * At rollover the previous round should already be settled. Retry briefly if RPC confirmation
@@ -762,6 +825,7 @@ export function start() {
       console.info(`[clock] device is ${skew > 0 ? 'behind' : 'ahead of'} chain by ${Math.abs(skew).toFixed(1)}s — corrected`);
     }
     state.roundId = roundState().roundId;
+    syncRoundRealtime(state.roundId);
     tick();
     if (live) refreshRound();
     // refreshRound() only sets `lastResolved` if the CURRENT round is already resolved, which is
@@ -773,9 +837,12 @@ export function start() {
   }).catch(() => {});
 
   state.roundId = roundState().roundId;
+  syncRoundRealtime(state.roundId);
+  startGlobalRealtime();
 
   onAccountChange((account) => {
     state.account = account;
+    syncWalletRealtime(account);
     // Invalidate in-flight reads and remove the previous wallet's actionable
     // balances synchronously, before the replacement RPC read completes.
     minerRefreshId += 1;

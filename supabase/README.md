@@ -34,6 +34,12 @@ keeper-lease RPC access from `public`, `anon`, and `authenticated`, leaving
 only `service_role`. Apply it before starting any production keeper and require
 the Supabase security advisor to report no public SECURITY DEFINER access.
 
+Migration `20260808130000_round_realtime.sql` publishes only the public
+`mine_rounds` read model through Supabase Realtime. Apply it before deploying
+the event-driven frontend. Private receipt settlements, keeper leases, and
+indexer cursors remain unpublished; the existing timed reads remain a recovery
+path if Realtime is unavailable.
+
 ## Wallet-only chat
 
 Migration `20260807140000_wallet_chat_hardening.sql` is the wallet-only chat

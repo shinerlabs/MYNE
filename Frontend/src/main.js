@@ -12,6 +12,9 @@ import { LINKS, NETWORK, PRODUCT, PROGRAMS } from './app-config.js';
 import {
   fetchProtocolAccount, getProtocolConfig, protocolPdas, protocolProgramId,
 } from './chain/anchor-client.js';
+import { stakePositionPda } from './chain/miner-registration.js';
+import { subscribeAccountActivity } from './chain/protocol-realtime.js';
+import { subscribeRoundIndexChanges } from './chain/round-index-realtime.js';
 import * as chain from './chain/mine-page.js';
 import { WALLET_LOGOS } from './wallet-logos.js';
 import {
@@ -62,7 +65,7 @@ import { isPremine } from './chain/config.js';
 import { readableError } from './chain/client.js';
 import {
   readStaking, readStakingMetrics, readStakingHistory, readStakeAllowance, approveStake, stake as stakeTx, requestUnstake,
-  withdrawUnstaked, claimStakingRewards, toWei, TIER_FLEX, TIER_BURN,
+  withdrawUnstaked, claimStakingRewards, invalidateStakingCache, toWei, TIER_FLEX, TIER_BURN,
 } from './chain/staking.js';
 import {
   addresses, solanaNetwork, BETTING_DURATION, WINNER_DISPLAY_DURATION, protocolReady,
@@ -4458,7 +4461,23 @@ const renderChain = (state) => {
 
 chain.setNotifier(notify);
 let offRouteRenderKey = '';
+let realtimeStakeAccount = null;
+let stopStakePositionRealtime = null;
+
+const syncStakePositionRealtime = (account) => {
+  if (account === realtimeStakeAccount) return;
+  stopStakePositionRealtime?.();
+  stopStakePositionRealtime = null;
+  realtimeStakeAccount = account;
+  if (!account) return;
+  stopStakePositionRealtime = subscribeAccountActivity(stakePositionPda(account), () => {
+    invalidateStakingCache();
+    if (!document.hidden && document.body.dataset.route === 'stake') void refreshStaking();
+  });
+};
+
 chain.subscribe((state) => {
+  syncStakePositionRealtime(state.account);
   // The local clock emits every second. Only Mine needs a 25-tile DOM traversal at that cadence;
   // other routes redraw on meaningful account/round/phase/result changes and on re-entry.
   const key = `${state.account || ''}:${state.roundId}:${state.phase}:${state.protocolPaused}:${state.lastResolved?.roundId || ''}`;
@@ -5601,9 +5620,8 @@ const renderRoundHistory = () => {
       </button>
       <div class="round-detail" hidden data-round-id="${r.roundId}" data-square="${r.winningSquare}" data-prize="${r.potForWinners}" data-winner-total="${r.winnerTotal}" data-solo="${r.singleMinerRound ? '1' : ''}" data-winner="${r.singleMinerWinner || ''}" data-randomness="${r.randomnessValue == null ? '' : randomnessHex(r.randomnessValue)}" data-randomness-mode="${r.randomnessMode ?? 'switchboard'}" data-randomness-state="${r.randomnessState ?? 'settled'}" data-randomness-account="${r.randomnessId ?? ''}" data-randomness-commitment="${r.randomnessCommitment ?? ''}" data-randomness-commit-slot="${r.randomnessCommitSlot ?? ''}" data-wager="${r.totalWager}">
         <div><span>RESULT</span><strong>${result}</strong></div>
-        <div><span>SETTLEMENT</span><strong class="round-settlement">—</strong></div>
         <div><span>NETWORK</span><strong>Solana</strong></div>
-        <a class="round-explorer round-tx-link" href="${explorerContract}" target="_blank" rel="noreferrer">View transaction ↗</a>
+        <a class="round-explorer round-tx-link" href="${explorerContract}" target="_blank" rel="noreferrer" hidden>View on Solana ↗</a>
         ${extra}
         <div class="round-fairness" hidden></div>
         <div class="round-miners" hidden></div>
@@ -5620,7 +5638,7 @@ const renderRoundHistory = () => {
     detail.hidden = false;
     entry.classList.add('expanded');
     entry.querySelector('.round-record')?.setAttribute('aria-expanded', 'true');
-    loadSettlement(detail);
+    loadRoundTransaction(detail);
     loadFairness(detail);
     loadMiners(detail);
   }
@@ -5857,29 +5875,27 @@ roundList.addEventListener('click', async (event) => {
   // Tracking it here rather than reading the DOM back means the re-render can restore it.
   const id = record.parentElement.dataset.roundId;
   if (id) { if (open) expandedRounds.add(id); else expandedRounds.delete(id); }
-  if (open) { loadSettlement(detail); loadFairness(detail); loadMiners(detail); }
+  if (open) { loadRoundTransaction(detail); loadFairness(detail); loadMiners(detail); }
 });
 
-// Lazily fill a round's SETTLEMENT tx hash + "View transaction" link when its row is expanded.
-// Cached per round so re-expanding is instant. Only settled rounds carry a data-round-id.
-const loadSettlement = async (detail) => {
+// Resolve the round transaction only for the Explorer action. The expanded row no longer exposes
+// a redundant settlement field (or a misleading "not found" value) beside the actual result.
+const loadRoundTransaction = async (detail) => {
   const roundId = detail.dataset.roundId;
-  const el = detail.querySelector('.round-settlement');
-  if (!roundId || !el || el.dataset.loaded) return;
-  el.dataset.loaded = '1';
   const link = detail.querySelector('.round-tx-link');
+  if (!roundId || !link || link.dataset.loaded) return;
+  link.dataset.loaded = '1';
   let tx = settlementTxCache.get(roundId);
   if (tx === undefined) {
-    el.textContent = 'loading…';
     tx = await readSettlementTx(BigInt(roundId)).catch(() => null);
     settlementTxCache.set(roundId, tx);
   }
   if (tx) {
-    el.textContent = chain.format.short(tx);
-    if (link) link.href = explorerTx(tx);
+    link.href = explorerTx(tx);
+    link.hidden = false;
   } else {
-    el.textContent = 'not found';
-    delete el.dataset.loaded; // let a later expand retry
+    link.hidden = true;
+    delete link.dataset.loaded; // let a later expand retry
   }
 };
 /**
@@ -5917,30 +5933,35 @@ const loadFairness = async (detail) => {
   const deployed = detail.dataset.wager ? chain.format.ethSmart(BigInt(detail.dataset.wager)) : null;
   host.hidden = false;
 
-  host.innerHTML = [
-    `<span class="fair-chip">Winning square <b>#${square + 1}</b></span>`,
-    deployed
-      ? `<span class="fair-item">Total deployed <b>${deployed}</b></span>`
-      : '',
-    serverMode
-      ? `<span class="fair-item">Server commitment ${commitment ? `<code class="fair-hash">${commitment}</code>` : '<b>pending index</b>'}</span>`
-      : randomnessAccount
-        ? `<a class="fair-link" href="${explorerAddress(randomnessAccount)}" target="_blank" rel="noreferrer">Switchboard account ↗</a>`
-        : '<span class="fair-pending muted">Switchboard account pending index</span>',
-    serverMode
-      ? `<span class="fair-item">Solana entropy slot <b>${entropySlot ?? 'pending'}</b></span>`
-      : commitSlot ? `<span class="fair-item">Committed at slot <b>${commitSlot}</b></span>` : '',
-    serverMode && indexedProof?.revealHex
-      ? `<span class="fair-item">Reveal <code class="fair-hash">${indexedProof.revealHex}</code></span>`
-      : '',
-    serverMode && indexedProof?.slotHashHex
-      ? `<span class="fair-item">Slot hash <code class="fair-hash">${indexedProof.slotHashHex}</code></span>`
-      : '',
-    `<span class="fair-note"></span>`,
-    randomness
-      ? `<button type="button" class="fair-verify">verify</button>`
-      : '',
-  ].filter(Boolean).join('');
+  const proofFields = serverMode ? [
+    ['PRE-BET COMMITMENT', commitment, true],
+    ['SOLANA ENTROPY SLOT', entropySlot ?? 'Pending', false],
+    ['SERVER REVEAL', indexedProof?.revealHex ?? 'Pending index', true],
+    ['SOLANA SLOT HASH', indexedProof?.slotHashHex ?? 'Pending index', true],
+  ] : [
+    ['RANDOMNESS ACCOUNT', randomnessAccount ?? 'Pending index', true],
+    ['COMMITTED SLOT', commitSlot || 'Pending index', false],
+  ];
+  const proofGrid = proofFields.map(([label, value, hash]) => {
+    const text = String(value);
+    const rendered = hash
+      ? `<code class="fair-hash" title="${text}">${text}</code>`
+      : `<b>${text}</b>`;
+    return `<span class="fair-proof"><small>${label}</small>${rendered}</span>`;
+  }).join('');
+
+  host.innerHTML = `
+    <div class="fair-overview">
+      <span class="fair-chip">Winning tile <b>#${square + 1}</b></span>
+      ${deployed ? `<span class="fair-deployed">${solIcon('fair-sol-mark')}<b>${deployed}</b><small>DEPLOYED</small></span>` : ''}
+      <span class="fair-provider">${serverMode ? 'MYNE SERVER RNG' : 'LEGACY SWITCHBOARD'}</span>
+    </div>
+    <div class="fair-proof-grid">${proofGrid}</div>
+    <div class="fair-footer">
+      <span class="fair-note">${serverMode ? 'Committed before betting · Solana entropy selected after betting closed' : 'Legacy provider proof retained for transparency'}</span>
+      ${!serverMode && randomnessAccount ? `<a class="fair-link" href="${explorerAddress(randomnessAccount)}" target="_blank" rel="noreferrer">Open randomness account ↗</a>` : ''}
+      ${randomness ? '<button type="button" class="fair-verify">Verify proof</button>' : ''}
+    </div>`;
 
   const btn = host.querySelector('.fair-verify');
   btn?.addEventListener('click', async () => {
@@ -6052,6 +6073,59 @@ if (document.body.dataset.route === 'mine') void ensureSocial();
 // the landing page from flashing the full in-app menu while the module bootstraps.
 document.querySelector('#app')?.classList.add('app-ready');
 chain.start();
+
+// Account and index subscriptions make confirmed protocol changes visible immediately. Polls
+// above remain as reconciliation for background tabs and transient WebSocket outages.
+let realtimeSurfaceTimer = 0;
+let realtimeIndexedDirty = false;
+let realtimeStakingDirty = false;
+let realtimeGlobalDirty = false;
+const scheduleRealtimeSurfaceRefresh = ({ indexed = false, staking = false, global = false } = {}) => {
+  realtimeIndexedDirty ||= indexed;
+  realtimeStakingDirty ||= staking;
+  realtimeGlobalDirty ||= global;
+  if (document.hidden || realtimeSurfaceTimer) return;
+  realtimeSurfaceTimer = window.setTimeout(() => {
+    realtimeSurfaceTimer = 0;
+    const route = document.body.dataset.route;
+    const refreshIndexed = realtimeIndexedDirty;
+    const refreshStake = realtimeStakingDirty;
+    const refreshGlobal = realtimeGlobalDirty;
+    realtimeIndexedDirty = false;
+    realtimeStakingDirty = false;
+    realtimeGlobalDirty = false;
+
+    if (route === 'rounds' && (refreshIndexed || refreshGlobal)) {
+      invalidateReceiptCache();
+      void refreshRoundStats();
+      void refreshRoundHistory({ force: true });
+    } else if (route === 'mine' && refreshIndexed) {
+      invalidateReceiptCache();
+      void refreshRoundHistory({ force: true });
+    }
+    if (route === 'stake' && (refreshStake || refreshIndexed)) void refreshStaking();
+    if (route === 'about' && refreshGlobal
+      && document.querySelector('[data-about-panel="stats"].active')) {
+      void refreshProtocolStats();
+    }
+  }, 100);
+};
+
+subscribeRoundIndexChanges(() => {
+  // The indexer has now committed the row, so this refresh cannot race the database tail poll.
+  scheduleRealtimeSurfaceRefresh({ indexed: true, staking: true, global: true });
+});
+subscribeAccountActivity(protocolPdas.stakePool, () => {
+  invalidateStakingCache();
+  scheduleRealtimeSurfaceRefresh({ staking: true, global: true });
+});
+subscribeAccountActivity(protocolPdas.miningPool, () => {
+  scheduleRealtimeSurfaceRefresh({ global: true });
+});
+subscribeAccountActivity(protocolPdas.config, () => {
+  scheduleRealtimeSurfaceRefresh({ staking: true, global: true });
+});
+
 // Price the MYNE leg immediately on load, not on the first 10s poll tick — otherwise the first
 // thing a visitor sees is a Motherlode missing most of its value.
 if (protocolReady) refreshGldPrice(true);
