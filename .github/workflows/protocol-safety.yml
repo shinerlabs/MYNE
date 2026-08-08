@@ -40,13 +40,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: Protocol/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm test:dependency-safety
-      - run: pnpm test:buyback-policy
-      - run: pnpm test:archive-policy
-      - run: pnpm test:indexed-rpc-policy
-      - run: pnpm test:production-network-policy
-      - run: pnpm test:production-lifecycle-policy
-      - run: pnpm test:switchboard-round-policy
+      - name: Run full policy and resilience suite
+        run: node --test tests/*.test.mjs
       - run: bash -n scripts/*.sh
 
   rust-safety:

@@ -927,21 +927,24 @@ const chunkRounds = (ids, size = CLAIM_CHUNK) =>
  * available for the next click.
  */
 async function claimBatched(roundIds, send, verb) {
-  const batches = chunkRounds(roundIds);
-  let claimed = 0;
+  const requestedRoundIds = [
+    ...new Map(roundIds.map((roundId) => [BigInt(roundId).toString(), roundId])).values(),
+  ];
+  const batches = chunkRounds(requestedRoundIds);
+  const processedRoundKeys = new Set();
+  let interrupted = null;
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i];
     const step = batches.length > 1 ? ` · batch ${i + 1} of ${batches.length}` : '';
-    let ok = false;
+    let outcome;
     try {
       notify(`${verb} ${batch.length} round${batch.length === 1 ? '' : 's'}…${step}`);
-      const hash = await send(batch);
-      notify('Submitted — waiting for confirmation…');
-      const receipt = await waitForTx(hash);
-      if (receipt.status !== 'success') notify('Transaction reverted');
-      else {
-        notify(`Confirmed · ${explorerTx(hash).split('/').pop().slice(0, 10)}…`);
-        ok = true;
+      outcome = await send(batch);
+      if (outcome.signature) {
+        // The shared sender confirms every inner transaction before returning.
+        // A second status request here could fail after durable progress and
+        // incorrectly turn confirmed chunks back into a zero-progress result.
+        notify(`Confirmed · ${explorerTx(outcome.signature).split('/').pop().slice(0, 10)}…`);
       }
     } catch (error) {
       if (error?.code === NO_UNCLAIMED_RECEIPTS) {
@@ -949,27 +952,89 @@ async function claimBatched(roundIds, send, verb) {
         // reward is already in the durable wallet ledger, so this batch is
         // complete and the owner-signed withdrawal below must still proceed.
         notify('Rewards already processed — refreshing your claim balance…');
-        ok = true;
+        outcome = { status: 'complete', processedRoundIds: batch };
       } else {
         notify(readableError(error));
+        interrupted = { failure: error, reconciled: false, confirmedReceiptCount: 0 };
+        break;
       }
     }
-    if (!ok) break;
-    claimed += batch.length;
+
+    for (const roundId of outcome.processedRoundIds ?? []) {
+      processedRoundKeys.add(BigInt(roundId).toString());
+    }
+    if (outcome.status === 'complete') {
+      if (outcome.failure) notify('Rewards already processed — refreshing your claim balance…');
+      continue;
+    }
+
+    const processed = processedRoundKeys.size;
+    const remaining = requestedRoundIds.length - processed;
+    if (!outcome.reconciled) {
+      const confirmed = Number(outcome.confirmedReceiptCount ?? 0);
+      const knownProgress = processed > 0
+        ? `At least ${processed} of ${requestedRoundIds.length} rounds processed`
+        : null;
+      const confirmedProgress = confirmed > 0
+        ? `${confirmed} receipt${confirmed === 1 ? '' : 's'} confirmed in the interrupted batch`
+        : null;
+      notify(knownProgress || confirmedProgress
+        ? `${[knownProgress, confirmedProgress].filter(Boolean).join(' · ')} · reward refresh failed, so other rounds were not assumed complete`
+        : readableError(outcome.failure ?? outcome.reconciliationError));
+    } else if (processed > 0) {
+      notify(`Processed ${processed} of ${requestedRoundIds.length} rounds · ${remaining} remain · ${readableError(outcome.failure)}`);
+    } else {
+      notify(readableError(outcome.failure));
+    }
+    interrupted = outcome;
+    break;
   }
-  if (claimed) await refreshMiner();
-  return claimed;
+  if (processedRoundKeys.size) await refreshMiner();
+  return {
+    processedRounds: processedRoundKeys.size,
+    requestedRounds: requestedRoundIds.length,
+    remainingRounds: requestedRoundIds.length - processedRoundKeys.size,
+    complete: processedRoundKeys.size === requestedRoundIds.length,
+    failure: interrupted?.failure ?? null,
+    reconciliationError: interrupted?.reconciliationError ?? null,
+    reconciled: interrupted?.reconciled ?? true,
+    confirmedReceiptCount: Number(interrupted?.confirmedReceiptCount ?? 0),
+  };
 }
+
+const noClaimProgress = () => ({
+  processedRounds: 0,
+  requestedRounds: 0,
+  remainingRounds: 0,
+  complete: true,
+  failure: null,
+  reconciliationError: null,
+  reconciled: true,
+  confirmedReceiptCount: 0,
+});
+
+const incompleteClaimMessage = (progress, completedPrefix = 'Claimed available rewards') => {
+  const reason = readableError(progress.failure ?? progress.reconciliationError);
+  if (!progress.reconciled && (progress.processedRounds > 0 || progress.confirmedReceiptCount > 0)) {
+    const knownProgress = progress.processedRounds > 0
+      ? `at least ${progress.processedRounds} of ${progress.requestedRounds} rounds processed`
+      : null;
+    const confirmedProgress = progress.confirmedReceiptCount > 0
+      ? `${progress.confirmedReceiptCount} receipt${progress.confirmedReceiptCount === 1 ? '' : 's'} confirmed in the interrupted batch`
+      : null;
+    return `${completedPrefix} · ${[knownProgress, confirmedProgress].filter(Boolean).join(' · ')} · other rounds were not assumed complete`;
+  }
+  if (progress.processedRounds > 0) {
+    return `${completedPrefix} · processed ${progress.processedRounds} of ${progress.requestedRounds} rounds · ${progress.remainingRounds} remain · ${reason}`;
+  }
+  return `Claim incomplete · ${progress.remainingRounds} round${progress.remainingRounds === 1 ? '' : 's'} remain · ${reason}`;
+};
 
 /** Claim every supplied round, batched so a large backlog still fits in a transaction. */
 export async function claimMany(roundIds) {
   if (!getAccount()) return connectWallet();
-  if (!roundIds.length) return 0;
-  const claimed = await claimBatched(roundIds, claimManyRounds, 'Claiming');
-  if (claimed && claimed < roundIds.length) {
-    notify(`Claimed ${claimed} of ${roundIds.length} rounds — press Claim again for the rest`);
-  }
-  return claimed;
+  if (!roundIds.length) return noClaimProgress();
+  return claimBatched(roundIds, claimManyRounds, 'Claiming');
 }
 
 /**
@@ -977,22 +1042,22 @@ export async function claimMany(roundIds) {
  */
 export async function claimEthOnly(roundIds) {
   if (!getAccount()) return connectWallet();
-  const processed = roundIds.length
+  const progress = roundIds.length
     ? await claimBatched(roundIds, claimManyEthOnly, 'Processing')
-    : 0;
+    : noClaimProgress();
   // A keeper may process a receipt between the pre-click refresh and this
   // transaction. Re-read the durable ledger even when no receipt instruction
   // landed locally, then withdraw only through the owner-signed claim path.
   await refreshMiner();
   if (state.claimableSol <= 0n) {
-    if (roundIds.length && processed !== roundIds.length) return false;
+    if (roundIds.length && !progress.complete) return false;
     // The original v6 Mainnet receipt processor transfers SOL directly when
     // the owner signs claimReceipt. The later claim-vault release instead
     // leaves the same amount in StakePosition.pendingSol for a second,
     // owner-signed withdrawal. Support both deployed semantics without
     // pretending a successful direct claim failed just because no pending
     // ledger balance remains afterwards.
-    if (processed > 0) {
+    if (progress.processedRounds > 0) {
       notify('Claimed SOL to your wallet');
       return true;
     }
@@ -1000,8 +1065,8 @@ export async function claimEthOnly(roundIds) {
     return false;
   }
   const withdrawn = await runTx('Claiming SOL…', withdrawClaimableSol, refreshMiner);
-  if (withdrawn && processed < roundIds.length) {
-    notify(`Claimed accrued SOL · ${roundIds.length - processed} round${roundIds.length - processed === 1 ? '' : 's'} still processing`);
+  if (withdrawn && !progress.complete) {
+    notify(incompleteClaimMessage(progress, 'Claimed accrued SOL'));
   }
   return withdrawn;
 }
@@ -1037,10 +1102,11 @@ export async function claimAll(roundIds) {
   }
   let handled = false;
   let allReceiptsProcessed = true;
+  let claimProgress = noClaimProgress();
   if (roundIds.length > 0) {
-    const claimed = await claimMany(roundIds);
-    allReceiptsProcessed = claimed === roundIds.length;
-    handled = claimed > 0;
+    claimProgress = await claimMany(roundIds);
+    allReceiptsProcessed = claimProgress.complete;
+    handled = claimProgress.processedRounds > 0;
   }
   const miner = roundIds.length > 0 ? await freshRewardAccount(account) : initialMiner;
   if (!miner) return false;
@@ -1051,11 +1117,11 @@ export async function claimAll(roundIds) {
   }
   if (miner.rewardsBullion > 0n) {
     const refined = await refine();
-    if (!allReceiptsProcessed) notify('Claimed available rewards · some receipts still need processing');
+    if (refined && !allReceiptsProcessed) notify(incompleteClaimMessage(claimProgress));
     return refined && allReceiptsProcessed;
   }
   if (!allReceiptsProcessed) {
-    notify('Claimed available rewards · some receipts still need processing');
+    notify(incompleteClaimMessage(claimProgress));
     return false;
   }
   if (handled) return true;
@@ -1074,9 +1140,10 @@ export async function stakeAndBurnRewards(roundIds) {
     return false;
   }
   let allReceiptsProcessed = true;
+  let claimProgress = noClaimProgress();
   if (roundIds.length > 0) {
-    const claimed = await claimMany(roundIds);
-    allReceiptsProcessed = claimed === roundIds.length;
+    claimProgress = await claimMany(roundIds);
+    allReceiptsProcessed = claimProgress.complete;
     if (!allReceiptsProcessed) {
       // Already-confirmed receipt accrual remains withdrawable/burnable. Do not
       // strand it merely because a later receipt or wallet prompt failed.
@@ -1093,7 +1160,10 @@ export async function stakeAndBurnRewards(roundIds) {
     if (!withdrawn) return false;
   }
   if (miner.rewardsBullion === 0n) {
-    if (!allReceiptsProcessed) return false;
+    if (!allReceiptsProcessed) {
+      notify(incompleteClaimMessage(claimProgress, 'Processed available rewards'));
+      return false;
+    }
     return notify('No MYNE available to stake and burn');
   }
   if (!miner.hasPosition) {
@@ -1102,7 +1172,7 @@ export async function stakeAndBurnRewards(roundIds) {
   }
   const burned = await runTx('Staking + burning MYNE…', burnUnclaimedMyne, refreshMiner);
   if (burned && !allReceiptsProcessed) {
-    notify('Staked + burned available MYNE · some receipts still need processing');
+    notify(incompleteClaimMessage(claimProgress, 'Staked + burned available MYNE'));
     return false;
   }
   return burned;

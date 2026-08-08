@@ -4,7 +4,9 @@ import {
   PROVIDER_PREPARATION_LEAD_SECONDS,
   PROVIDER_PREPARATION_SAFETY_MARGIN_SECONDS,
   firstSafeResumeRoundId,
+  requireExactSettlementWindow,
   roundIdsToPrepare,
+  settlementConfirmedWithinResultWindow,
 } from '../scripts/round-schedule-policy.mjs';
 
 const schedule = (now) => roundIdsToPrepare({
@@ -28,6 +30,36 @@ test('provider preparation mirrors the on-chain 60-second bounded lead', () => {
   assert.deepEqual(schedule(1_065), [1]);
   assert.deepEqual(schedule(1_070), [1]);
   assert.deepEqual(schedule(1_072), [1, 2]);
+});
+
+test('settlement policy exactly matches the five-second result window', () => {
+  assert.equal(requireExactSettlementWindow({
+    roundDurationSeconds: 65,
+    bettingDurationSeconds: 60,
+    settlementLateSeconds: 5,
+  }), 5);
+  for (const settlementLateSeconds of [4, 6, 120]) {
+    assert.throws(() => requireExactSettlementWindow({
+      roundDurationSeconds: 65,
+      bettingDurationSeconds: 60,
+      settlementLateSeconds,
+    }), /must equal the 5-second result window/);
+  }
+});
+
+test('settlement confirmation must precede the exclusive next-round boundary', () => {
+  assert.equal(settlementConfirmedWithinResultWindow({
+    confirmedAt: 1_064,
+    resultDeadlineAt: 1_065,
+  }), true);
+  assert.equal(settlementConfirmedWithinResultWindow({
+    confirmedAt: 1_065,
+    resultDeadlineAt: 1_065,
+  }), false);
+  assert.equal(settlementConfirmedWithinResultWindow({
+    confirmedAt: 1_066,
+    resultDeadlineAt: 1_065,
+  }), false);
 });
 
 test('invalid scheduling parameters fail closed', () => {

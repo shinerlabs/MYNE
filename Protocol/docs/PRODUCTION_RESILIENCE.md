@@ -83,6 +83,12 @@ healthy. Process existence by itself is insufficient.
 - reconciliation has no outstanding invariant failure in the canary window;
 - worker lease/fencing identity is current.
 
+Any round deadline violation is a durable live-host incident, not an ephemeral process error. The
+mounted-volume latch remains visible in `/healthz.roundDeadlineIncidents` and keeps health failed
+after worker or deployment restart and after a late Round eventually settles. It can be cleared
+only by an exact incident-id acknowledgement while the protocol is paused; it is never cleared by
+time, successful retry or a later `tick-complete` heartbeat.
+
 Hung RPC/HTTP/confirmation calls have bounded deadlines. The supervisor first
 terminates, then force-kills and restarts a stale child. Durable cursors,
 commitments and buyback journals make restart idempotent.

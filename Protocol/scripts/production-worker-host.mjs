@@ -21,8 +21,13 @@ import {
   ROUND_KEEPER_DEFERRED_EXIT_CODE,
   ROUND_KEEPER_MISSED_EXIT_CODE,
   firstSafeResumeRoundId,
+  requireExactSettlementWindow,
   roundIdsToPrepare,
 } from './round-schedule-policy.mjs';
+import {
+  ROUND_DEADLINE_VIOLATION_STAGES,
+  createRoundDeadlineIncidentLatch,
+} from './round-deadline-incident-latch.mjs';
 import { recordWorkerHeartbeat, workerHeartbeatFresh } from './event-driven-loop.mjs';
 import { SERVER_RANDOMNESS_PENDING } from './server-randomness-policy.mjs';
 
@@ -238,12 +243,13 @@ export function workerSuccessFreshnessMs(env = {}) {
     return [name, freshnessMs];
   }));
 }
-const ROUND_DEADLINE_VIOLATION_STAGES = new Set([
-  'prepare-deadline-missed',
-  'next-prebind-deadline-missed',
-  'lock-deadline-missed',
-  'settlement-deadline-missed',
-]);
+const ROUND_HEALTH_CONDITION_STAGE = Object.freeze({
+  'prepare-late': 'prepare-deadline-missed',
+  'next-prebind-late': 'next-prebind-deadline-missed',
+  'lock-late': 'lock-deadline-missed',
+  'settlement-late': 'settlement-deadline-missed',
+  'funded-settlement-late': 'settlement-deadline-missed',
+});
 
 export function canonicalRoundDeadlines({
   roundId,
@@ -264,7 +270,11 @@ export function canonicalRoundDeadlines({
     settlementLateSeconds,
   })) assert.ok(Number.isSafeInteger(value), `${name} must be a safe integer`);
   assert.ok(roundId >= 0, 'roundId must be non-negative');
-  assert.ok(roundDurationSeconds > bettingDurationSeconds, 'Round duration must exceed betting duration');
+  requireExactSettlementWindow({
+    roundDurationSeconds,
+    bettingDurationSeconds,
+    settlementLateSeconds,
+  });
   assert.ok(
     preparationSafetyMarginSeconds >= 0
       && nextRoundPrebindGraceSeconds > 0
@@ -274,7 +284,10 @@ export function canonicalRoundDeadlines({
   assert.ok(settlementLateSeconds > 0, 'Settlement lateness threshold must be positive');
   const openedAt = initializedAt + roundId * roundDurationSeconds;
   const bettingEndsAt = openedAt + bettingDurationSeconds;
-  const settlesAt = openedAt + roundDurationSeconds;
+  // Protocol v6 stores `Round.settles_at` at the betting boundary. The rest
+  // of the 65-second schedule is the five-second winner-display interval in
+  // which the keeper must lock future entropy and publish the settlement.
+  const settlesAt = bettingEndsAt;
   return {
     preparationStartsAt: openedAt - bettingDurationSeconds + preparationSafetyMarginSeconds,
     prebindAt: openedAt
@@ -368,11 +381,13 @@ export function assessRoundScheduleHealth({
       condition = 'next-prebind-late';
       errors.push(`Next round ${roundId} was not prebound by ${deadlines.prebindAt}`);
     }
-    if (!protocolPaused && prepared && !settled && now > deadlines.lockAt && !entropyLocked) {
+    // Entropy cannot be locked before `lockAt` (the betting boundary). It is
+    // late only after the bounded winner interval has elapsed.
+    if (!protocolPaused && prepared && !settled && now >= deadlines.settleAt && !entropyLocked) {
       condition = 'lock-late';
-      errors.push(`Round ${roundId} entropy lock missed ${deadlines.lockAt}`);
+      errors.push(`Round ${roundId} entropy lock missed ${deadlines.settleAt}`);
     }
-    if (!protocolPaused && prepared && !settled && now > deadlines.settleAt) {
+    if (!protocolPaused && prepared && !settled && now >= deadlines.settleAt) {
       condition = funded ? 'funded-settlement-late' : 'settlement-late';
       errors.push(`${funded ? 'Funded r' : 'R'}ound ${roundId} settlement missed ${deadlines.settleAt}`);
     }
@@ -480,6 +495,12 @@ export function publicHealth(state) {
     ));
   const roundDeadlinesMet = state.mode !== 'live'
     || managedRoundProgress.every((progress) => !progress?.deadlineViolation);
+  const durableRoundDeadlineIncidents = state.mode === 'live'
+    && Array.isArray(state.roundDeadlineIncidents)
+    ? state.roundDeadlineIncidents
+    : [];
+  const durableRoundDeadlinesClear = state.mode !== 'live'
+    || durableRoundDeadlineIncidents.length === 0;
   const roundScheduleHealthy = state.mode !== 'live'
     || state.protocolPaused === true
     || state.roundHealth?.ok === true;
@@ -496,6 +517,7 @@ export function publicHealth(state) {
       && observeProjectionFresh
       && roundTickErrorsAbsent
       && roundDeadlinesMet
+      && durableRoundDeadlinesClear
       && roundScheduleHealthy
       && resumeActivationReady,
     degraded: !auxiliaryWorkersHealthy,
@@ -519,6 +541,7 @@ export function publicHealth(state) {
       ? state.minimumManagedRoundId
       : null,
     resumeActivation: state.resumeActivation ? { ...state.resumeActivation } : null,
+    roundDeadlineIncidents: durableRoundDeadlineIncidents.map((incident) => ({ ...incident })),
     rounds: state.roundHealth
       ? {
         ...state.roundHealth,
@@ -638,6 +661,24 @@ export async function main(env = process.env) {
   }
 
   const dataDir = safeDataDir(env, mode);
+  const incidentClearAcknowledgement = String(
+    env.MYNE_CLEAR_ROUND_DEADLINE_INCIDENT || '',
+  );
+  assert.equal(
+    incidentClearAcknowledgement,
+    incidentClearAcknowledgement.trim(),
+    'MYNE_CLEAR_ROUND_DEADLINE_INCIDENT must not contain surrounding whitespace',
+  );
+  if (mode !== 'live') {
+    assert.equal(
+      incidentClearAcknowledgement,
+      '',
+      'MYNE_CLEAR_ROUND_DEADLINE_INCIDENT is accepted only in live mode',
+    );
+  }
+  const roundDeadlineIncidentLatch = mode === 'live'
+    ? await createRoundDeadlineIncidentLatch({ dataDir, programId: programIdText })
+    : null;
   const secretDir = '/tmp/myne-worker-secrets';
   const hostExternalTimeoutMs = Number(env.WORKER_HOST_EXTERNAL_TIMEOUT_MS || 8_000);
   assert.ok(
@@ -659,10 +700,8 @@ export async function main(env = process.env) {
     env.ROUND_KEEPER_SETTLEMENT_LATE_SECONDS || DEFAULT_ROUND_SETTLEMENT_LATE_SECONDS,
   );
   assert.ok(
-    Number.isSafeInteger(settlementLateSeconds)
-      && settlementLateSeconds >= 2
-      && settlementLateSeconds <= 120,
-    'ROUND_KEEPER_SETTLEMENT_LATE_SECONDS must be between 2 and 120',
+    Number.isSafeInteger(settlementLateSeconds) && settlementLateSeconds > 0,
+    'ROUND_KEEPER_SETTLEMENT_LATE_SECONDS must be a positive integer',
   );
   const nextRoundPrebindGraceSeconds = Number(
     env.ROUND_KEEPER_PREBIND_GRACE_SECONDS || DEFAULT_NEXT_ROUND_PREBIND_GRACE_SECONDS,
@@ -711,6 +750,7 @@ export async function main(env = process.env) {
     resumeActivation: null,
     roundHealth: null,
     roundProgress: new Map(),
+    roundDeadlineIncidents: roundDeadlineIncidentLatch?.activeIncidents() || [],
     workers: new Map(WORKER_NAMES.map((name) => [name, {
       running: false,
       restarts: 0,
@@ -720,6 +760,64 @@ export async function main(env = process.env) {
       lastSuccessfulAt: null,
       consecutiveErrors: 0,
     }])),
+  };
+
+  const durableIncidentError = () => {
+    const active = roundDeadlineIncidentLatch?.activeIncidents() || [];
+    if (active.length === 0) return null;
+    return `Durable round deadline incident requires review: ${active.map(({ id }) => id).join(', ')}`;
+  };
+  const applyDurableIncidentState = () => {
+    state.roundDeadlineIncidents = roundDeadlineIncidentLatch?.activeIncidents() || [];
+    const error = durableIncidentError();
+    if (!error) return false;
+    state.ready = false;
+    state.error = error;
+    state.checkedAt = new Date().toISOString();
+    return true;
+  };
+  const durableIncidentKey = ({ roundId, stage }) => `${roundId}:${stage}`;
+  const durablyLatchedIncidentKeys = new Set(
+    (roundDeadlineIncidentLatch?.activeIncidents() || []).map(durableIncidentKey),
+  );
+  const incidentWrites = new Map();
+  const recordDurableRoundIncident = ({ roundId, stage, outcome }) => {
+    if (!roundDeadlineIncidentLatch) return Promise.resolve(null);
+    const key = durableIncidentKey({ roundId, stage });
+    if (durablyLatchedIncidentKeys.has(key)) return Promise.resolve(null);
+    if (incidentWrites.has(key)) return incidentWrites.get(key);
+    const {
+      incident, created, persisted,
+    } = roundDeadlineIncidentLatch.record({ roundId, stage, outcome });
+    applyDurableIncidentState();
+    if (created) {
+      console.error(JSON.stringify({
+        event: 'round-deadline-incident-latched',
+        incident,
+      }));
+    }
+    const write = persisted
+      .then(() => {
+        durablyLatchedIncidentKeys.add(key);
+        return incident;
+      })
+      .catch((error) => {
+        state.ready = false;
+        state.error = `Round deadline incident persistence failed: ${error instanceof Error ? error.message : String(error)}`;
+        state.checkedAt = new Date().toISOString();
+        console.error(JSON.stringify({
+          event: 'round-deadline-incident-persistence-error',
+          incident,
+          message: state.error,
+        }));
+        schedule(() => {
+          if (!stopping) void recordDurableRoundIncident({ roundId, stage, outcome });
+        }, 2_000);
+        return null;
+      })
+      .finally(() => incidentWrites.delete(key));
+    incidentWrites.set(key, write);
+    return write;
   };
 
   const boundedHostRequest = (label, operation) => withOperationTimeout(
@@ -794,6 +892,11 @@ export async function main(env = process.env) {
         && roundDurationSeconds > PROVIDER_PREPARATION_LEAD_SECONDS,
       'Configured round duration is invalid',
     );
+    requireExactSettlementWindow({
+      roundDurationSeconds,
+      bettingDurationSeconds,
+      settlementLateSeconds,
+    });
     assert.ok(Number.isSafeInteger(initializedAt), 'Configured genesis timestamp is invalid');
     validatedRandomnessMode = serverRandomness ? 'server' : 'switchboard';
     validatedRoundSchedule = { initializedAt, roundDurationSeconds };
@@ -814,9 +917,24 @@ export async function main(env = process.env) {
       serviceRole,
       timeoutMs: hostExternalTimeoutMs,
     });
+    if (incidentClearAcknowledgement) {
+      assert.equal(
+        config.paused,
+        true,
+        'A round deadline incident can be cleared only while the protocol is paused',
+      );
+      const cleared = await roundDeadlineIncidentLatch.clearExact(incidentClearAcknowledgement);
+      durablyLatchedIncidentKeys.delete(durableIncidentKey(cleared));
+      state.roundDeadlineIncidents = roundDeadlineIncidentLatch.activeIncidents();
+      console.log(JSON.stringify({
+        event: 'round-deadline-incident-cleared',
+        incident: cleared,
+      }));
+    }
     state.ready = true;
     state.error = null;
     state.checkedAt = new Date().toISOString();
+    applyDurableIncidentState();
   };
 
   const validateSafely = async () => {
@@ -1173,6 +1291,7 @@ export async function main(env = process.env) {
             if (state.error === recoveredFatalError) {
               state.ready = true;
               state.error = null;
+              applyDurableIncidentState();
             }
           }
           console.log(JSON.stringify({
@@ -1186,9 +1305,16 @@ export async function main(env = process.env) {
       }
       for (const entry of nextRoundHealth.entries) {
         if (!entry.condition.endsWith('-late')) continue;
+        const incidentStage = ROUND_HEALTH_CONDITION_STAGE[entry.condition];
+        assert.ok(incidentStage, `Unmapped round deadline condition: ${entry.condition}`);
+        await recordDurableRoundIncident({
+          roundId: entry.roundId,
+          stage: incidentStage,
+          outcome: entry.condition,
+        });
         const progress = state.roundProgress.get(String(entry.roundId));
-        if (progress && progress.deadlineViolation !== entry.condition) {
-          progress.deadlineViolation = entry.condition;
+        if (progress && progress.deadlineViolation !== incidentStage) {
+          progress.deadlineViolation = incidentStage;
           progress.lastOutcome = entry.condition;
           progress.consecutiveErrors += 1;
           console.error(JSON.stringify({
@@ -1425,6 +1551,11 @@ export async function main(env = process.env) {
           status.consecutiveErrors += 1;
           if (ROUND_DEADLINE_VIOLATION_STAGES.has(message.stage)) {
             progress.deadlineViolation = message.stage;
+            void recordDurableRoundIncident({
+              roundId: numericRoundId,
+              stage: message.stage,
+              outcome: message.outcome,
+            });
           }
         }
         if (message.phase === 'tick-complete') {
@@ -1472,6 +1603,12 @@ export async function main(env = process.env) {
             }));
             return;
           }
+          progress.deadlineViolation = 'prepare-deadline-missed';
+          void recordDurableRoundIncident({
+            roundId: numericRoundId,
+            stage: 'prepare-deadline-missed',
+            outcome: 'round-worker-window-missed',
+          });
           fatalRoundError = `Round ${id} was not prepared before its scheduled opened_at`;
           fatalRoundId = Number(id);
           state.ready = false;
@@ -1555,6 +1692,7 @@ export async function main(env = process.env) {
         if (!fatalRoundError) {
           state.ready = true;
           state.error = null;
+          applyDurableIncidentState();
         }
         return true;
       } catch (error) {
@@ -1645,8 +1783,21 @@ export async function main(env = process.env) {
     for (const child of children.values()) {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     }
+    let exitCode = 0;
+    if (roundDeadlineIncidentLatch) {
+      await Promise.allSettled([...incidentWrites.values()]);
+      try {
+        await roundDeadlineIncidentLatch.flush();
+      } catch (error) {
+        exitCode = 1;
+        console.error(JSON.stringify({
+          event: 'round-deadline-incident-shutdown-flush-error',
+          message: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    }
     await rm(secretDir, { recursive: true, force: true });
-    process.exit(0);
+    process.exit(exitCode);
   };
   process.once('SIGTERM', () => void shutdown('SIGTERM'));
   process.once('SIGINT', () => void shutdown('SIGINT'));

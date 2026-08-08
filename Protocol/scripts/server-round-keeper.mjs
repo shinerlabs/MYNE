@@ -28,6 +28,8 @@ import {
   PROVIDER_PREPARATION_SAFETY_MARGIN_SECONDS,
   ROUND_KEEPER_DEFERRED_EXIT_CODE,
   ROUND_KEEPER_MISSED_EXIT_CODE,
+  requireExactSettlementWindow,
+  settlementConfirmedWithinResultWindow,
 } from './round-schedule-policy.mjs';
 import {
   SERVER_RANDOMNESS_PENDING,
@@ -45,7 +47,14 @@ import {
   createWorkerHeartbeat,
 } from './event-driven-loop.mjs';
 
-const { AnchorProvider, Program, Wallet } = anchor;
+import {
+  classifyFinalizedRoundSettlementEvidence,
+  findFinalizedRoundSettlementEvidence,
+} from './round-settlement-evidence.mjs';
+
+const {
+  AnchorProvider, EventParser, Program, Wallet,
+} = anchor;
 const PROGRAM_ID = new PublicKey(
   process.env.MYNE_PROGRAM_ID || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e',
 );
@@ -75,6 +84,7 @@ const connection = new Connection(rpcUrl, { commitment });
 const provider = new AnchorProvider(connection, new Wallet(keypair), { commitment });
 const idl = JSON.parse(await readFile(new URL('../target/idl/myne_protocol.json', import.meta.url), 'utf8'));
 const program = new Program(idl, provider);
+const eventParser = new EventParser(PROGRAM_ID, program.coder);
 
 const explicitRoundId = requiredEnv('MYNE_ROUND_ID');
 assert.match(explicitRoundId, /^\d+$/, 'MYNE_ROUND_ID must be an unsigned integer');
@@ -122,12 +132,10 @@ const autoPlanOperationTimeoutMs = boundedInteger(
   30_000,
   'AUTO_PLAN_OPERATION_TIMEOUT_MS',
 );
-const settlementLateSeconds = boundedInteger(
-  process.env.ROUND_KEEPER_SETTLEMENT_LATE_SECONDS,
-  5,
-  2,
-  120,
-  'ROUND_KEEPER_SETTLEMENT_LATE_SECONDS',
+const settlementLateSeconds = Number(process.env.ROUND_KEEPER_SETTLEMENT_LATE_SECONDS ?? 5);
+assert.ok(
+  Number.isSafeInteger(settlementLateSeconds) && settlementLateSeconds > 0,
+  'ROUND_KEEPER_SETTLEMENT_LATE_SECONDS must be a positive integer',
 );
 const prebindGraceSeconds = boundedInteger(
   process.env.ROUND_KEEPER_PREBIND_GRACE_SECONDS,
@@ -155,6 +163,22 @@ const emitRoundHeartbeat = (phase, stage = heartbeatStage, outcome = null) => {
   };
   if (typeof process.send === 'function' && process.connected !== false) {
     try { process.send(message, () => {}); } catch { /* Host may be shutting down. */ }
+  }
+  return message;
+};
+const emitTerminalRoundHeartbeat = async (phase, stage = heartbeatStage, outcome = null) => {
+  heartbeatStage = stage;
+  const message = {
+    ...createWorkerHeartbeat('round-keeper', phase, outcome),
+    type: WORKER_HEARTBEAT_TYPE,
+    roundId: ROUND_ID.toString(),
+    stage,
+    deadlines: heartbeatDeadlines,
+  };
+  if (typeof process.send === 'function' && process.connected !== false) {
+    await new Promise((resolve) => {
+      try { process.send(message, () => resolve()); } catch { resolve(); }
+    });
   }
   return message;
 };
@@ -192,6 +216,11 @@ assert.ok(
   configState.randomnessAuthority.equals(keypair.publicKey),
   'Keeper wallet must equal config.randomness_authority',
 );
+requireExactSettlementWindow({
+  roundDurationSeconds: Number(configState.roundDurationSeconds.toString()),
+  bettingDurationSeconds: Number(configState.bettingDurationSeconds.toString()),
+  settlementLateSeconds,
+});
 requireMatchingSolanaNetwork({
   genesisHash: await boundedRpc('Genesis hash read', () => connection.getGenesisHash()),
   randomnessProgram: configState.randomnessProgram.toBase58(),
@@ -204,8 +233,10 @@ const scheduledOpenedAt = Number(configState.initializedAt.toString())
   + roundIdNumber * Number(configState.roundDurationSeconds.toString());
 const scheduledBettingEndsAt = scheduledOpenedAt
   + Number(configState.bettingDurationSeconds.toString());
-const scheduledSettlesAt = scheduledOpenedAt
-  + Number(configState.roundDurationSeconds.toString());
+// v6 settlement becomes eligible exactly when betting closes. The remaining
+// difference between round_duration_seconds (65) and betting_duration_seconds
+// (60) is the winner-display interval, not an additional settlement delay.
+const scheduledSettlesAt = scheduledBettingEndsAt;
 heartbeatDeadlines = {
   prebindAt: scheduledOpenedAt
     - Number(configState.bettingDurationSeconds.toString())
@@ -283,6 +314,74 @@ const fetchRoundWithRetry = async (predicate, label) => {
   }
   const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
   throw new Error(`${label} did not become visible${detail}`);
+};
+
+const finalizedTransactionTimeSeconds = async (signature, label) => {
+  let lastError = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    emitRoundHeartbeat(
+      'tick-start',
+      'awaiting-settlement-finality',
+      `${label}:attempt-${attempt + 1}`,
+    );
+    try {
+      const transaction = await boundedRpc(
+        `${label} finalized transaction read`,
+        () => connection.getTransaction(signature, {
+          commitment: 'finalized',
+          maxSupportedTransactionVersion: 0,
+        }),
+      );
+      if (Number.isSafeInteger(transaction?.blockTime)) return transaction.blockTime;
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(Math.min(1_500, 250 * (2 ** Math.min(attempt, 3))));
+  }
+  const detail = lastError instanceof Error ? `: ${lastError.message}` : '';
+  throw new Error(`${label} finalized chain time is unavailable${detail}`);
+};
+const auditRecoveredSettlement = async (recoveryReason) => {
+  let evidence = null;
+  let evidenceError = null;
+  try {
+    evidence = await findFinalizedRoundSettlementEvidence({
+      connection,
+      eventParser,
+      roundAddress: round,
+      roundId: ROUND_ID,
+      rpcCall: boundedRpc,
+    });
+  } catch (error) {
+    evidenceError = error instanceof Error ? error.message : String(error);
+  }
+  const result = classifyFinalizedRoundSettlementEvidence({
+    evidence,
+    roundId: ROUND_ID,
+    resultDeadlineAt: heartbeatDeadlines.settleAt,
+  });
+  const outcome = evidenceError
+    ? `finalized-settlement-evidence-unavailable:${evidenceError};deadline-exclusive:${heartbeatDeadlines.settleAt}`
+    : result.outcome;
+  if (result.deadlineMet) {
+    await emitTerminalRoundHeartbeat('tick-complete', 'settled', outcome);
+  } else {
+    // Recovery is not allowed to turn a missed winner interval into success.
+    // Await IPC delivery before exiting so the host can fsync its incident.
+    await emitTerminalRoundHeartbeat('tick-error', 'settlement-deadline-missed', outcome);
+  }
+  console[result.deadlineMet ? 'log' : 'error'](JSON.stringify({
+    ok: result.deadlineMet,
+    event: 'server-round-settlement-recovered',
+    round: ROUND_ID.toString(),
+    recoveryReason,
+    settlementSignature: evidence?.signature || null,
+    finalizedSettlementAt: evidence?.blockTime ?? null,
+    resultDeadlineAt: heartbeatDeadlines.settleAt,
+    settlementDeadlineMet: result.deadlineMet,
+    message: evidenceError,
+  }));
+  return result.deadlineMet;
 };
 const indexedRows = async (path) => {
   emitRoundHeartbeat('tick-start', 'auto-plan-index', 'reading-active-plans');
@@ -395,8 +494,7 @@ let roundState = await boundedRpc(
   () => program.account.round.fetchNullable(round),
 );
 if (roundState?.settled) {
-  emitRoundHeartbeat('tick-complete', 'settled', 'already-settled');
-  console.log(JSON.stringify({ ok: true, event: 'server-round-already-settled', round: ROUND_ID.toString() }));
+  await auditRecoveredSettlement('already-settled-at-startup');
   process.exit(0);
 }
 
@@ -565,7 +663,10 @@ if (!roundState.settled && asBigInt(roundState.randomnessCommitSlot) === SERVER_
     'Future server entropy slot lock',
   );
   const lockCompletedAt = await chainTimeSeconds();
-  if (lockCompletedAt > heartbeatDeadlines.lockAt) {
+  // Locking only becomes legal at `settles_at`. Allow the bounded result
+  // interval for confirmation; treating the first legal second as already
+  // late would permanently poison health on every normal round.
+  if (lockCompletedAt >= heartbeatDeadlines.settleAt) {
     emitRoundHeartbeat(
       'tick-error',
       'lock-deadline-missed',
@@ -580,8 +681,7 @@ if (!roundState.settled && asBigInt(roundState.randomnessCommitSlot) === SERVER_
   emitRoundHeartbeat('tick-start', 'entropy-locked', lockSignature);
 }
 if (roundState.settled) {
-  emitRoundHeartbeat('tick-complete', 'settled', 'settled-during-recovery');
-  console.log(JSON.stringify({ ok: true, event: 'server-round-settled', round: ROUND_ID.toString() }));
+  await auditRecoveredSettlement('settled-during-lock-recovery');
   process.exit(0);
 }
 assert.ok((await chainTimeSeconds()) < refundAt, 'Round reached its refund window before server settlement');
@@ -604,7 +704,7 @@ for (;;) {
 heartbeatStage = 'awaiting-settlement-window';
 await waitForChainTimestamp(settlesAt);
 const settlementStartedAt = await chainTimeSeconds();
-if (settlementStartedAt > heartbeatDeadlines.settleAt) {
+if (settlementStartedAt >= heartbeatDeadlines.settleAt) {
   emitRoundHeartbeat(
     'tick-error',
     'settlement-deadline-missed',
@@ -640,10 +740,44 @@ const settlementSignature = (await sendKeeperInstructions(
   'Server round settlement',
 )).signature;
 roundState = await fetchRoundWithRetry((state) => state.settled, 'Server round settlement');
-emitRoundHeartbeat('tick-complete', 'settled', settlementSignature);
+let finalizedSettlementAt = null;
+let settlementDeadlineError = null;
+try {
+  finalizedSettlementAt = await finalizedTransactionTimeSeconds(
+    settlementSignature,
+    'Server round settlement',
+  );
+} catch (error) {
+  settlementDeadlineError = error instanceof Error ? error.message : String(error);
+}
+const settlementDeadlineMet = finalizedSettlementAt !== null
+  && settlementConfirmedWithinResultWindow({
+    confirmedAt: finalizedSettlementAt,
+    resultDeadlineAt: heartbeatDeadlines.settleAt,
+  });
+if (settlementDeadlineMet) {
+  emitRoundHeartbeat('tick-complete', 'settled', settlementSignature);
+} else {
+  const outcome = settlementDeadlineError
+    ? `finalized-time-unavailable:${settlementDeadlineError}`
+    : `confirmed-at:${finalizedSettlementAt};deadline-exclusive:${heartbeatDeadlines.settleAt}`;
+  // Do not follow this with tick-complete: the host must retain the missed
+  // winner interval as a deadline violation even though settlement succeeded.
+  await emitTerminalRoundHeartbeat('tick-error', 'settlement-deadline-missed', outcome);
+  console.error(JSON.stringify({
+    event: 'server-round-settlement-deadline-missed',
+    round: ROUND_ID.toString(),
+    finalizedSettlementAt,
+    resultDeadlineAt: heartbeatDeadlines.settleAt,
+    message: settlementDeadlineError,
+  }));
+}
 console.log(JSON.stringify({
-  ok: true,
+  ok: settlementDeadlineMet,
   event: 'server-round-settled',
   round: ROUND_ID.toString(),
   settlementSignature,
+  finalizedSettlementAt,
+  resultDeadlineAt: heartbeatDeadlines.settleAt,
+  settlementDeadlineMet,
 }));

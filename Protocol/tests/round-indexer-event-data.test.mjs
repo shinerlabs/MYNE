@@ -84,8 +84,42 @@ test('recent and stale Round PDAs rebuild complete canonical history before curs
   assert.match(reconciliation, /chainRoundProjection\(roundId, state/);
   assert.match(reconciliation, /changedRoundProjection/);
   assert.match(source, /reconcileCanonicalRounds\(\);[\s\S]*const indexed = await indexTransactions\(\)/);
-  assert.match(source, /indexed, reconciled, reconciliationFailures, archived, referralsIndexed, projectOnly/);
+  assert.match(source, /indexed,[\s\S]*reconciled,[\s\S]*reconciliationFailures,[\s\S]*archived,[\s\S]*referralsIndexed,[\s\S]*projectOnly/);
   assert.doesNotMatch(reconciliation, /getProgramAccounts|program\.account\.[A-Za-z]+\.all\s*\(/);
+});
+
+test('closed PDA completeness is repaired only from a recomputed bounded archive proof', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const reconciliation = source.slice(
+    source.indexOf('async function reconcileCanonicalRounds'),
+    source.indexOf('async function archiveReadyRounds'),
+  );
+  assert.match(source, /ROUND_INDEXER_CLOSED_PROOF_MAX_ROWS/);
+  assert.match(source, /closedProofMaxRows <= 250_000/);
+  assert.match(reconciliation, /ids\.length <= 128/);
+  assert.match(reconciliation, /!states\[index\][\s\S]*indexedRound\?\.archive_verified === true[\s\S]*indexedRound\?\.closed_signature/);
+  assert.match(reconciliation, /mine_round_proofs\?round_id=in\.\(/);
+  assert.match(reconciliation, /select=round_id,archive_hash,canonical_snapshot/);
+  assert.match(reconciliation, /roundProjectionMatchesArchivedProof\(\{/);
+  assert.match(reconciliation, /closedRoundNeedsCanonicalReplay\(\{/);
+  assert.match(reconciliation, /replayCanonicalRoundHistory\([\s\S]*roundAccountAvailable: false/);
+  assert.match(reconciliation, /refreshedRows[\s\S]*refreshedDigests[\s\S]*refreshedProofs/);
+  assert.match(reconciliation, /canonicalRoundProjection = verifiedArchivedRoundProjection\(\{/);
+  assert.match(reconciliation, /repairedRound = \{[\s\S]*\.\.\.canonicalRoundProjection/);
+  assert.match(reconciliation, /replay\.historyComplete && roundProjectionMatchesArchivedProof/);
+  assert.match(reconciliation, /changedRoundProjection\(checkedRound, \{[\s\S]*\.\.\.\(canonicalRoundProjection \|\| \{\}\)[\s\S]*projection_complete: projectionComplete/);
+  assert.match(reconciliation, /checkedProof = proofById\.get\(key\)/);
+  assert.match(reconciliation, /checkedDigest = projectionDigests\.get\(key\)/);
+  assert.match(reconciliation, /storedProof: checkedProof/);
+  assert.match(reconciliation, /indexedProjection: checkedDigest/);
+  assert.match(reconciliation, /projection_complete: projectionComplete/);
+  assert.match(reconciliation, /total_receipts: asString\(checkedDigest\.indexed_total_receipts\)/);
+  assert.match(reconciliation, /processed_receipts: asString\(checkedDigest\.indexed_processed_receipts\)/);
+  assert.match(reconciliation, /closed_receipts: asString\(checkedDigest\.indexed_closed_receipts\)/);
+  assert.match(reconciliation, /changedRoundProjection\(checkedRound/);
+  assert.match(reconciliation, /historicalGapPlan\(currentRoundId\)/);
+  assert.match(reconciliation, /advanceHistoricalGapCursor\(gapPlan\.next\)/);
+  assert.doesNotMatch(reconciliation, /closed_signature=not\.is\.null[^\n]*order=round_id[^\n]*limit=1000/);
 });
 
 test('participant digest migration checks every tile without a PostgREST row cap', async () => {
@@ -121,7 +155,7 @@ test('projection-only mode keeps history live without reaching signer transactio
   const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
   assert.match(source, /ROUND_INDEXER_PROJECT_ONLY/);
   assert.match(source, /const archived = projectOnly \? 0 : await archiveReadyRounds\(\)/);
-  assert.match(source, /indexed, reconciled, reconciliationFailures, archived, referralsIndexed, projectOnly/);
+  assert.match(source, /indexed,[\s\S]*closedProofChecks,[\s\S]*closedProjectionRepairs,[\s\S]*archived,[\s\S]*projectOnly/);
 });
 
 test('observing RoundArchived never downgrades canonical archive verification', async () => {
@@ -156,15 +190,34 @@ test('receipt settlement status is derived from the normalized Anchor event name
   );
   assert.match(source, /const eventName = normalizeAnchorEventName\(event\.name\)/);
   assert.match(receiptCases, /case 'ReceiptRewardAccruedV1'/);
-  assert.match(receiptCases, /eventName === 'ReceiptRewardAccruedV1'[\s\S]*'accrued'/);
-  assert.match(receiptCases, /eventName === 'ReceiptClaimed'[\s\S]*'claimed'/);
-  assert.match(receiptCases, /eventName === 'ReceiptRefunded'/);
+  assert.match(receiptCases, /receiptSettlementStatus\(eventName\)/);
   assert.match(receiptCases, /eventName === 'ReceiptClosed'/);
   assert.match(receiptCases, /fetchProjectionDigests\(\[BigInt\(roundId\)\]\)/);
   assert.match(receiptCases, /digest\.indexed_processed_receipts/);
   assert.match(receiptCases, /digest\.indexed_closed_receipts/);
   assert.doesNotMatch(receiptCases, /mine_receipt_settlements\?.*select=receipt/);
   assert.doesNotMatch(receiptCases, /event\.name ===/);
+});
+
+test('canonical replay prunes only transaction-proven stale lifecycle rows with exact guards', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const replay = source.slice(
+    source.indexOf('function canonicalReceiptSettlement'),
+    source.indexOf('async function fetchProjectionDigests'),
+  );
+  assert.match(source, /ROUND_INDEXER_SETTLEMENT_REPAIR_MAX_ROWS/);
+  assert.match(source, /ROUND_INDEXER_SETTLEMENT_REPAIR_BATCH/);
+  assert.match(replay, /canonicalRoundSignatures\(address\)/);
+  assert.match(replay, /historyComplete = false/);
+  assert.match(replay, /staleReceiptSettlementRows\(\{/);
+  assert.match(replay, /finalizedHistoryComplete: historyComplete/);
+  assert.match(replay, /method: 'DELETE'/);
+  assert.match(replay, /receipt=eq\.\$\{encodeURIComponent\(row\.receipt\)\}/);
+  assert.match(replay, /status=eq\.\$\{encodeURIComponent\(row\.status\)\}/);
+  assert.match(replay, /signature=eq\.\$\{encodeURIComponent\(row\.signature\)\}/);
+  assert.match(replay, /slot=eq\.\$\{asString\(row\.slot\)\}/);
+  assert.match(replay, /roundAccountAvailable \|\| eventName !== 'RoundSettled'/);
+  assert.match(replay, /settlementRowsPruned/);
 });
 
 test('ensuring a round is insert-only and cannot churn updated_at on replay', async () => {
@@ -195,8 +248,30 @@ test('refund-only archival follows finalized Solana time rather than the host cl
   );
   assert.match(source, /const finalizedChainTimeSeconds = async \(\) =>/);
   assert.match(archiveBody, /const chainNow = await finalizedChainTimeSeconds\(\)/);
-  assert.match(archiveBody, /Number\(round\.refund_at\) > chainNow/);
+  assert.match(archiveBody, /BigInt\(chainNow\) < BigInt\(asString\(state\.refundAt\)\)/);
+  assert.doesNotMatch(archiveBody, /Number\(round\.refund_at\) > chainNow/);
+  assert.match(archiveBody, /state\.settled && !roundProjectionMatchesChain\(state, digest\)/);
+  assert.match(archiveBody, /!state\.settled && !refundedRoundProjectionMatchesChain\(\{/);
+  assert.match(archiveBody, /chainRound: state/);
+  assert.match(archiveBody, /indexedProjection: digest/);
+  assert.match(archiveBody, /bets,[\s\S]*settlements/);
+  assert.match(archiveBody, /finalizedChainTime: chainNow/);
   assert.doesNotMatch(archiveBody, /Date\.now\(\)/);
+});
+
+test('live reconciliation preserves exact fully refunded terminal projections', async () => {
+  const source = await readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8');
+  const reconciliation = source.slice(
+    source.indexOf('async function finalizedRefundProjectionMatches'),
+    source.indexOf('async function archiveReadyRounds'),
+  );
+  assert.match(reconciliation, /BigInt\(chainNow\) < BigInt\(asString\(state\.refundAt\)\)/);
+  assert.match(reconciliation, /mine_round_bets\?round_id=eq\./);
+  assert.match(reconciliation, /status=in\.\(claimed,accrued,refunded\)/);
+  assert.match(reconciliation, /refundedRoundProjectionMatchesChain\(\{/);
+  assert.match(reconciliation, /finalizedChainTime: chainNow/);
+  assert.match(reconciliation, /if \(!refundProjectionComplete && roundNeedsCanonicalReplay\(\{/);
+  assert.match(reconciliation, /refundProjectionComplete\s*\|\| roundProjectionMatchesChain\(state, digest\)/);
 });
 
 test('server randomness events use distinct proof fields instead of legacy account and slot columns', async () => {
@@ -264,6 +339,24 @@ test('archive attestation fails closed until provider-specific randomness proof 
   assert.match(archiveBody, /provider_kind: round\.randomness_provider_kind/);
   assert.match(archiveBody, /commitment_hex: round\.randomness_commitment_hex/);
   assert.match(archiveBody, /entropy_hash_hex: round\.randomness_entropy_hash_hex/);
+  assert.match(archiveBody, /authoritativeProjection = chainRoundProjection\(/);
+  assert.match(archiveBody, /const indexedRound = \{ \.\.\.round, \.\.\.authoritativeProjection \}/);
+  assert.match(archiveBody, /requireRoundStateRandomnessEvidence\(state, indexedRound\)/);
+  assert.match(archiveBody, /changedRoundProjection\(round, authoritativeProjection\)/);
+  assert.match(archiveBody, /maxRows: closedProofMaxRows - bets\.length - settlements\.length/);
+  assert.match(archiveBody, /bets\.length \+ settlements\.length \+ buybacks\.length <= closedProofMaxRows/);
+  assert.match(archiveBody, /archivedSnapshotRoundProjection\(snapshot, \{/);
+  assert.match(archiveBody, /archivedSnapshotProjectionDigest\(snapshot, \{ maxRows: closedProofMaxRows \}\)/);
+  assert.ok(
+    archiveBody.indexOf('requireRoundStateRandomnessEvidence(state, indexedRound)')
+      < archiveBody.indexOf('buildArchiveSnapshot({'),
+    'finalized Round randomness must be checked before hashing the archive',
+  );
+  assert.ok(
+    archiveBody.indexOf('archivedSnapshotProjectionDigest(snapshot')
+      < archiveBody.indexOf('archiveHash(snapshot)'),
+    'strict bounded snapshot validation must precede archive hashing and attestation',
+  );
 });
 
 test('server proof migration uses unsigned-safe numeric slots and preserves Switchboard columns', async () => {

@@ -30,11 +30,19 @@ import {
 } from './referral-index-policy.mjs';
 import { normalizeAnchorEventData, normalizeAnchorEventName } from './anchor-event-data.mjs';
 import {
+  archivedSnapshotProjectionDigest,
+  archivedSnapshotRoundProjection,
   canonicalSignatureOrder,
+  closedRoundNeedsCanonicalReplay,
   historicalRoundGapBatch,
+  receiptSettlementStatus,
   recentScheduledRoundIds,
+  refundedRoundProjectionMatchesChain,
   roundNeedsCanonicalReplay,
+  roundProjectionMatchesArchivedProof,
   roundProjectionMatchesChain,
+  staleReceiptSettlementRows,
+  verifiedArchivedRoundProjection,
 } from './round-reconciliation-policy.mjs';
 import {
   attachProgramWake,
@@ -82,6 +90,11 @@ const maxPages = Number(process.env.ROUND_INDEXER_MAX_PAGES || 100);
 const reconcileDepth = Number(process.env.ROUND_INDEXER_RECONCILE_DEPTH || 12);
 const reconcileMaxPages = Number(process.env.ROUND_INDEXER_RECONCILE_MAX_PAGES || 4);
 const reconcileGapBatch = Number(process.env.ROUND_INDEXER_GAP_BATCH || 8);
+const closedProofMaxRows = Number(process.env.ROUND_INDEXER_CLOSED_PROOF_MAX_ROWS || 100_000);
+const settlementRepairMaxRows = Number(
+  process.env.ROUND_INDEXER_SETTLEMENT_REPAIR_MAX_ROWS || 10_000,
+);
+const settlementRepairBatch = Number(process.env.ROUND_INDEXER_SETTLEMENT_REPAIR_BATCH || 256);
 const projectOnly = process.env.ROUND_INDEXER_PROJECT_ONLY === '1';
 const requireBuybackEvidence = process.env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE === '1';
 // A supervised child can be restarted after an RPC watchdog timeout while its
@@ -120,6 +133,22 @@ assert.ok(
 assert.ok(
   Number.isInteger(reconcileGapBatch) && reconcileGapBatch > 0 && reconcileGapBatch <= 32,
   'ROUND_INDEXER_GAP_BATCH must be between 1 and 32',
+);
+assert.ok(
+  Number.isInteger(closedProofMaxRows) && closedProofMaxRows > 0 && closedProofMaxRows <= 250_000,
+  'ROUND_INDEXER_CLOSED_PROOF_MAX_ROWS must be between 1 and 250000',
+);
+assert.ok(
+  Number.isInteger(settlementRepairMaxRows)
+    && settlementRepairMaxRows > 0
+    && settlementRepairMaxRows <= 250_000,
+  'ROUND_INDEXER_SETTLEMENT_REPAIR_MAX_ROWS must be between 1 and 250000',
+);
+assert.ok(
+  Number.isInteger(settlementRepairBatch)
+    && settlementRepairBatch > 0
+    && settlementRepairBatch <= settlementRepairMaxRows,
+  'ROUND_INDEXER_SETTLEMENT_REPAIR_BATCH must be within the settlement repair row bound',
 );
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -196,16 +225,41 @@ async function rest(path, { method = 'GET', body, prefer } = {}) {
  * Callers must supply a deterministic order and only use this after the chain
  * counters prove no more rows can be appended.
  */
-async function restImmutableRoundRows(path, { pageSize = 1000 } = {}) {
+async function restImmutableRoundRows(
+  path,
+  { pageSize = 1000, maxRows = closedProofMaxRows } = {},
+) {
   assert.match(path, /round_id=eq\.[^&]+/);
   assert.match(path, /(?:^|&)order=/);
+  assert.ok(Number.isInteger(maxRows) && maxRows >= 0 && maxRows <= 250_000,
+    'Immutable round relation row bound must be 0..250000');
   const rows = [];
   const separator = path.includes('?') ? '&' : '?';
-  for (let offset = 0; ; offset += pageSize) {
-    const chunk = await rest(`${path}${separator}limit=${pageSize}&offset=${offset}`);
+  for (let offset = 0; offset <= maxRows; offset += pageSize) {
+    const limit = Math.min(pageSize, maxRows + 1 - offset);
+    const chunk = await rest(`${path}${separator}limit=${limit}&offset=${offset}`);
     rows.push(...(chunk || []));
-    if (!chunk || chunk.length < pageSize) return rows;
+    assert.ok(rows.length <= maxRows, 'Immutable round relation exceeds the archive row bound');
+    if (!chunk || chunk.length < limit) return rows;
   }
+  throw new Error('Immutable round relation exceeds the archive row bound');
+}
+
+/** Read a mutable exact-round relation without accepting a truncated proof. */
+async function restBoundedRoundRows(path, { pageSize = 1000, maxRows } = {}) {
+  assert.match(path, /round_id=eq\.[^&]+/);
+  assert.match(path, /(?:^|&)order=/);
+  assert.ok(Number.isInteger(maxRows) && maxRows > 0 && maxRows <= 250_000);
+  const rows = [];
+  const separator = path.includes('?') ? '&' : '?';
+  for (let offset = 0; offset <= maxRows; offset += pageSize) {
+    const limit = Math.min(pageSize, maxRows + 1 - offset);
+    const chunk = await rest(`${path}${separator}limit=${limit}&offset=${offset}`);
+    rows.push(...(chunk || []));
+    assert.ok(rows.length <= maxRows, 'Exact-round relation exceeds the reviewed repair bound');
+    if (!chunk || chunk.length < limit) return rows;
+  }
+  throw new Error('Exact-round relation exceeds the reviewed repair bound');
 }
 
 async function acquireIndexerLease() {
@@ -620,6 +674,8 @@ async function processEvent(event, signature, slot, { canonicalReplay = false } 
       const roundId = asString(data.roundId);
       const authority = new PublicKey(data.authority).toBase58();
       const nonce = asString(data.nonce);
+      const status = receiptSettlementStatus(eventName);
+      assert.ok(status, `Unsupported receipt lifecycle event ${eventName}`);
       await upsert('mine_receipt_settlements', {
         round_id: roundId,
         receipt: receiptPda(roundId, authority, nonce).toBase58(),
@@ -629,11 +685,7 @@ async function processEvent(event, signature, slot, { canonicalReplay = false } 
         // processor also transferred SOL directly to the wallet. New program
         // releases emit `accrued`: receipt rewards are safely in the claim
         // vault, but still require the owner-signed SOL claim instruction.
-        status: eventName === 'ReceiptRewardAccruedV1'
-          ? 'accrued'
-          : eventName === 'ReceiptClaimed'
-            ? 'claimed'
-            : eventName === 'ReceiptRefunded' ? 'refunded' : 'closed',
+        status,
         sol_lamports: asString(data.solLamports || data.lamports || 0),
         myne_base_units: asString(data.myneBaseUnits || 0),
         motherlode_base_units: asString(data.motherlodeBaseUnits || 0),
@@ -897,21 +949,79 @@ async function canonicalRoundSignatures(address) {
   );
 }
 
+function canonicalReceiptSettlement(event, signature, slot, roundId) {
+  const eventName = normalizeAnchorEventName(event.name);
+  const status = receiptSettlementStatus(eventName);
+  if (!status) return null;
+  const data = normalizeAnchorEventData(event.data);
+  const authority = new PublicKey(data.authority).toBase58();
+  const nonce = asString(data.nonce);
+  return {
+    round_id: asString(roundId),
+    receipt: receiptPda(roundId, authority, nonce).toBase58(),
+    status,
+    signature,
+    slot: asString(slot),
+  };
+}
+
+async function pruneDisprovedSettlementRows(roundId, canonicalRows, historyComplete) {
+  if (!historyComplete || !canonicalRows.length) return 0;
+  const indexedRows = await restBoundedRoundRows(
+    `mine_receipt_settlements?round_id=eq.${asString(roundId)}`
+      + '&select=round_id,receipt,status,signature,slot'
+      + '&order=receipt.asc,status.asc',
+    { maxRows: settlementRepairMaxRows },
+  );
+  const staleRows = staleReceiptSettlementRows({
+    roundId,
+    indexedRows,
+    canonicalRows,
+    finalizedHistoryComplete: historyComplete,
+    maxRows: settlementRepairMaxRows,
+    maxDeletes: settlementRepairBatch,
+  });
+  let deleted = 0;
+  for (const row of staleRows) {
+    // Exact event identity guards make this safe if the forward cursor writes
+    // a later genuine status between the proof read and this DELETE.
+    const removed = await rest(
+      `mine_receipt_settlements?round_id=eq.${asString(roundId)}`
+        + `&receipt=eq.${encodeURIComponent(row.receipt)}`
+        + `&status=eq.${encodeURIComponent(row.status)}`
+        + `&signature=eq.${encodeURIComponent(row.signature)}`
+        + `&slot=eq.${asString(row.slot)}`,
+      { method: 'DELETE', prefer: 'return=representation' },
+    );
+    deleted += removed?.length || 0;
+  }
+  return deleted;
+}
+
 /**
  * Rebuild one exact round oldest-to-newest. Settlement depends on commitment,
  * lock, reveal, fee and bet events, so replaying only the settlement transaction
  * cannot repair a missing prerequisite. Every projection is an idempotent
  * upsert and the global cursor is deliberately untouched.
  */
-async function replayCanonicalRoundHistory(roundId, address) {
+async function replayCanonicalRoundHistory(
+  roundId,
+  address,
+  { roundAccountAvailable = true } = {},
+) {
   const signatures = await canonicalRoundSignatures(address);
   let transactions = 0;
   let settlementSignature = null;
+  let historyComplete = true;
+  const canonicalSettlements = [];
   for (const row of signatures) {
     const transaction = await provider.connection.getTransaction(row.signature, {
       commitment: 'finalized', maxSupportedTransactionVersion: 0,
     });
-    if (!transaction?.meta?.logMessages || transaction.meta.err) continue;
+    if (!transaction?.meta?.logMessages || transaction.meta.err) {
+      historyComplete = false;
+      continue;
+    }
     const events = [...parser.parseLogs(transaction.meta.logMessages)];
     const roundEvents = events.filter((event) => {
       const data = normalizeAnchorEventData(event.data);
@@ -919,14 +1029,37 @@ async function replayCanonicalRoundHistory(roundId, address) {
     });
     if (!roundEvents.length) continue;
     for (const event of roundEvents) {
-      await processEvent(event, row.signature, transaction.slot, { canonicalReplay: true });
-      if (normalizeAnchorEventName(event.name) === 'RoundSettled') {
+      const eventName = normalizeAnchorEventName(event.name);
+      const settlement = canonicalReceiptSettlement(
+        event,
+        row.signature,
+        transaction.slot,
+        roundId,
+      );
+      if (settlement) canonicalSettlements.push(settlement);
+      // A closed Round PDA cannot satisfy RoundSettled's live account fetch.
+      // Its already-verified archive retains those facts; replay still applies
+      // every lifecycle, archive and close event needed to repair the index.
+      if (roundAccountAvailable || eventName !== 'RoundSettled') {
+        await processEvent(event, row.signature, transaction.slot, { canonicalReplay: true });
+      }
+      if (eventName === 'RoundSettled') {
         settlementSignature = row.signature;
       }
     }
     transactions += 1;
   }
-  return { transactions, settlementSignature };
+  const settlementRowsPruned = await pruneDisprovedSettlementRows(
+    roundId,
+    canonicalSettlements,
+    historyComplete,
+  );
+  return {
+    transactions,
+    settlementSignature,
+    historyComplete,
+    settlementRowsPruned,
+  };
 }
 
 async function fetchProjectionDigests(roundIds) {
@@ -937,6 +1070,38 @@ async function fetchProjectionDigests(roundIds) {
     body: { p_round_ids: roundIds.map(asString) },
   });
   return new Map((rows || []).map((row) => [String(row.round_id), row]));
+}
+
+/**
+ * Prove the alternate unresolved terminal state from finalized chain time and
+ * exact immutable participant/refund rows. Aggregate counters alone cannot
+ * distinguish a fully refunded round from a damaged projection.
+ */
+async function finalizedRefundProjectionMatches(roundId, state, digest, chainNow) {
+  if (!state || state.settled || !digest
+      || BigInt(chainNow) < BigInt(asString(state.refundAt))
+      || BigInt(asString(state.processedReceipts)) !== BigInt(asString(state.totalReceipts))
+      || BigInt(asString(state.grossDeployedLamports)) !== 0n
+      || BigInt(asString(state.prizeLamports)) !== 0n) return false;
+  const bets = await restImmutableRoundRows(
+    `mine_round_bets?round_id=eq.${asString(roundId)}`
+      + '&select=round_id,receipt,square,amount_wei&order=receipt.asc,square.asc',
+    { maxRows: closedProofMaxRows },
+  );
+  const settlements = await restImmutableRoundRows(
+    `mine_receipt_settlements?round_id=eq.${asString(roundId)}`
+      + '&status=in.(claimed,accrued,refunded)'
+      + '&select=round_id,receipt,status,sol_lamports,myne_base_units,motherlode_base_units'
+      + '&order=receipt.asc,status.asc',
+    { maxRows: closedProofMaxRows - bets.length },
+  );
+  return refundedRoundProjectionMatchesChain({
+    chainRound: state,
+    indexedProjection: digest,
+    bets,
+    settlements,
+    finalizedChainTime: chainNow,
+  });
 }
 
 async function indexedSoloWinner(roundId, winningSquare, soloSample) {
@@ -994,6 +1159,40 @@ const chainRoundProjection = (
   };
 };
 
+function requireRoundStateRandomnessEvidence(state, indexedRound) {
+  assert.ok(state?.settled, 'Randomness evidence requires a settled Round account');
+  const randomnessHex = bytes(state.randomness).toString('hex');
+  assert.equal(randomnessHex.length, 64, 'Finalized Round randomness must contain 32 bytes');
+  assert.equal(indexedRound.randomness_hex, randomnessHex,
+    'Indexed randomness output disagrees with the finalized Round account');
+  assert.equal(String(indexedRound.randomness_value), BigInt(`0x${randomnessHex}`).toString(),
+    'Indexed randomness numeric output disagrees with the finalized Round account');
+  const encodedSlot = BigInt(asString(state.randomnessCommitSlot));
+  const serverRound = (encodedSlot & SERVER_RANDOMNESS_SLOT_FLAG) !== 0n;
+  if (serverRound) {
+    assert.equal(indexedRound.randomness_provider_kind, SERVER_PROVIDER_KIND,
+      'Indexed provider disagrees with the finalized server-tagged Round account');
+    assert.equal(indexedRound.randomness_id, null,
+      'Server commitment must not be indexed as an account');
+    assert.equal(indexedRound.randomness_commit_slot, null,
+      'Server-tagged slot must not be indexed as a signed bigint');
+    assert.equal(
+      String(indexedRound.randomness_entropy_slot),
+      (encodedSlot & SERVER_RANDOMNESS_SLOT_MASK).toString(),
+      'Indexed server entropy slot disagrees with the finalized Round account',
+    );
+  } else {
+    assert.ok(encodedSlot > 0n && encodedSlot <= SIGNED_BIGINT_MAX,
+      'Finalized Switchboard commit slot is invalid');
+    assert.equal(indexedRound.randomness_provider_kind, SWITCHBOARD_PROVIDER_KIND,
+      'Indexed provider disagrees with the finalized Switchboard Round account');
+    assert.equal(indexedRound.randomness_id, state.randomnessAccount.toBase58(),
+      'Indexed Switchboard account disagrees with the finalized Round account');
+    assert.equal(String(indexedRound.randomness_commit_slot), encodedSlot.toString(),
+      'Indexed Switchboard commit slot disagrees with the finalized Round account');
+  }
+}
+
 const sameProjectionValue = (left, right) => {
   if (left === null || left === undefined || right === null || right === undefined) {
     return (left ?? null) === (right ?? null);
@@ -1045,7 +1244,9 @@ async function advanceHistoricalGapCursor(nextRoundId) {
 /**
  * Reconcile both indexed stale rows and a fixed recent schedule window. The
  * latter discovers entirely missing database rows from deterministic Round PDA
- * addresses without a program-wide account scan.
+ * addresses without a program-wide account scan. The same persistent gap walk
+ * also revisits closed PDAs fairly: those can only recover completeness from a
+ * recomputed, formerly on-chain-verified archive proof, never from absence.
  */
 async function reconcileCanonicalRounds() {
   const chainNow = await finalizedChainTimeSeconds();
@@ -1066,36 +1267,172 @@ async function reconcileCanonicalRounds() {
     ...(staleRows || []).map((row) => String(row.round_id)),
     ...gapPlan.ids.map(String),
   ])].map(BigInt);
-  const addresses = ids.map(roundPda);
-  const states = await program.account.round.fetchMultiple(addresses);
-  const presentIds = ids.filter((_, index) => states[index]);
-  if (!presentIds.length) {
+  assert.ok(ids.length <= 128, 'Round reconciliation batch exceeds the reviewed bound');
+  if (!ids.length) {
     await advanceHistoricalGapCursor(gapPlan.next);
-    return { reconciled: 0, reconciliationFailures: 0 };
+    return {
+      reconciled: 0,
+      reconciliationFailures: 0,
+      closedProofChecks: 0,
+      closedProjectionRepairs: 0,
+      settlementRowsPruned: 0,
+    };
   }
-  const idFilter = presentIds.map(String).join(',');
-  const [indexedRows, projectionDigests] = await Promise.all([
+  const addresses = ids.map(roundPda);
+  const idFilter = ids.map(String).join(',');
+  const [states, indexedRows, projectionDigests] = await Promise.all([
+    program.account.round.fetchMultiple(addresses),
     rest(
       `mine_rounds?round_id=in.(${idFilter})&select=*`,
     ),
-    fetchProjectionDigests(presentIds),
+    fetchProjectionDigests(ids),
   ]);
   const indexedById = new Map((indexedRows || []).map((row) => [String(row.round_id), row]));
+  const closedProofIds = ids.filter((_, index) => {
+    const indexedRound = indexedById.get(String(ids[index]));
+    return !states[index]
+      && (indexedRound?.archive_verified === true || Boolean(indexedRound?.closed_signature));
+  });
+  const proofRows = closedProofIds.length
+    ? await rest(
+      `mine_round_proofs?round_id=in.(${closedProofIds.map(String).join(',')})`
+        + '&select=round_id,archive_hash,canonical_snapshot',
+    )
+    : [];
+  const proofById = new Map((proofRows || []).map((proof) => [String(proof.round_id), proof]));
   let reconciled = 0;
   let reconciliationFailures = 0;
+  let closedProofChecks = 0;
+  let closedProjectionRepairs = 0;
+  let settlementRowsPruned = 0;
   for (let index = 0; index < ids.length; index += 1) {
     const state = states[index];
-    if (!state) continue;
     const roundId = ids[index];
     const key = String(roundId);
+    const indexedRound = indexedById.get(key);
+    if (!state) {
+      if (!indexedRound
+          || (indexedRound.archive_verified !== true && !indexedRound.closed_signature)) continue;
+      closedProofChecks += 1;
+      try {
+        let checkedRound = indexedRound;
+        let checkedDigest = projectionDigests.get(key) ?? null;
+        let checkedProof = proofById.get(key) ?? null;
+        let canonicalRoundProjection = null;
+        let projectionComplete = roundProjectionMatchesArchivedProof({
+          programId: PROGRAM_ID.toBase58(),
+          indexedRound: checkedRound,
+          storedProof: checkedProof,
+          indexedProjection: checkedDigest,
+          programIdBytes: PROGRAM_ID.toBuffer(),
+          mintBytes: indexedConfig.mint.toBuffer(),
+          maxRows: closedProofMaxRows,
+        });
+        if (closedRoundNeedsCanonicalReplay({
+          indexedRound: checkedRound,
+          projectionMatchesProof: projectionComplete,
+        })) {
+          if (checkedRound.projection_complete === true) {
+            await rest(
+              `mine_rounds?round_id=eq.${key}&projection_complete=eq.true`,
+              {
+                method: 'PATCH',
+                body: {
+                  projection_complete: false,
+                  projection_version: ROUND_PROJECTION_VERSION,
+                  updated_at: new Date().toISOString(),
+                },
+                prefer: 'return=minimal',
+              },
+            );
+          }
+          const replay = await replayCanonicalRoundHistory(
+            roundId,
+            addresses[index],
+            { roundAccountAvailable: false },
+          );
+          settlementRowsPruned += replay.settlementRowsPruned;
+          reconciled += 1;
+          const [refreshedRows, refreshedDigests, refreshedProofs] = await Promise.all([
+            rest(`mine_rounds?round_id=eq.${key}&select=*`),
+            fetchProjectionDigests([roundId]),
+            rest(
+              `mine_round_proofs?round_id=eq.${key}`
+                + '&select=round_id,archive_hash,canonical_snapshot&limit=1',
+            ),
+          ]);
+          checkedRound = refreshedRows?.[0] ?? null;
+          checkedDigest = refreshedDigests.get(key) ?? null;
+          checkedProof = refreshedProofs?.[0] ?? null;
+          assert.ok(checkedRound, `Archived round ${key} disappeared during canonical replay`);
+          indexedById.set(key, checkedRound);
+          canonicalRoundProjection = verifiedArchivedRoundProjection({
+            programId: PROGRAM_ID.toBase58(),
+            indexedRound: checkedRound,
+            storedProof: checkedProof,
+            programIdBytes: PROGRAM_ID.toBuffer(),
+            mintBytes: indexedConfig.mint.toBuffer(),
+            maxRows: closedProofMaxRows,
+          }).roundProjection;
+          const repairedRound = {
+            ...checkedRound,
+            ...canonicalRoundProjection,
+            ...(checkedDigest ? {
+              total_receipts: asString(checkedDigest.indexed_total_receipts),
+              processed_receipts: asString(checkedDigest.indexed_processed_receipts),
+              closed_receipts: asString(checkedDigest.indexed_closed_receipts),
+            } : {}),
+          };
+          projectionComplete = replay.historyComplete && roundProjectionMatchesArchivedProof({
+            programId: PROGRAM_ID.toBase58(),
+            indexedRound: repairedRound,
+            storedProof: checkedProof,
+            indexedProjection: checkedDigest,
+            programIdBytes: PROGRAM_ID.toBuffer(),
+            mintBytes: indexedConfig.mint.toBuffer(),
+            maxRows: closedProofMaxRows,
+          });
+        }
+        const patch = changedRoundProjection(checkedRound, {
+          ...(canonicalRoundProjection || {}),
+          round_id: key,
+          projection_complete: projectionComplete,
+          projection_version: ROUND_PROJECTION_VERSION,
+          ...(projectionComplete ? {
+            total_receipts: asString(checkedDigest.indexed_total_receipts),
+            processed_receipts: asString(checkedDigest.indexed_processed_receipts),
+            closed_receipts: asString(checkedDigest.indexed_closed_receipts),
+          } : {}),
+        });
+        if (patch) {
+          await upsert('mine_rounds', patch, 'round_id');
+          if (projectionComplete) closedProjectionRepairs += 1;
+        }
+        if (!projectionComplete) reconciliationFailures += 1;
+      } catch (error) {
+        reconciliationFailures += 1;
+        console.error(JSON.stringify({
+          at: new Date().toISOString(),
+          event: 'closed-round-reconciliation-error',
+          round: key,
+          message: error instanceof Error ? error.message : String(error),
+        }));
+      }
+      continue;
+    }
     try {
       let digest = projectionDigests.get(key) ?? null;
-      if (roundNeedsCanonicalReplay({
-        indexedRound: indexedById.get(key),
+      let refundProjectionComplete = await finalizedRefundProjectionMatches(
+        roundId,
+        state,
+        digest,
+        chainNow,
+      );
+      if (!refundProjectionComplete && roundNeedsCanonicalReplay({
+        indexedRound,
         chainRound: state,
         indexedProjection: digest,
       })) {
-        const indexedRound = indexedById.get(key);
         if (indexedRound?.projection_complete === true) {
           // A replay can take several paged RPC reads. Withdraw the health
           // assertion first so the frontend never treats its intermediate
@@ -1114,11 +1451,19 @@ async function reconcileCanonicalRounds() {
           );
           indexedById.set(key, { ...indexedRound, projection_complete: false });
         }
-        await replayCanonicalRoundHistory(roundId, addresses[index]);
+        const replay = await replayCanonicalRoundHistory(roundId, addresses[index]);
+        settlementRowsPruned += replay.settlementRowsPruned;
         digest = (await fetchProjectionDigests([roundId])).get(key) ?? null;
+        refundProjectionComplete = await finalizedRefundProjectionMatches(
+          roundId,
+          state,
+          digest,
+          chainNow,
+        );
         reconciled += 1;
       }
-      const projectionComplete = roundProjectionMatchesChain(state, digest);
+      const projectionComplete = refundProjectionComplete
+        || roundProjectionMatchesChain(state, digest);
       const winningSquare = Number(state.winningTile);
       const soloWinner = state.settled && state.soloMode && projectionComplete
         ? await indexedSoloWinner(roundId, winningSquare, BigInt(asString(state.soloSample)))
@@ -1140,7 +1485,13 @@ async function reconcileCanonicalRounds() {
     }
   }
   await advanceHistoricalGapCursor(gapPlan.next);
-  return { reconciled, reconciliationFailures };
+  return {
+    reconciled,
+    reconciliationFailures,
+    closedProofChecks,
+    closedProjectionRepairs,
+    settlementRowsPruned,
+  };
 }
 
 async function archiveReadyRounds() {
@@ -1158,33 +1509,58 @@ async function archiveReadyRounds() {
   const chainNow = await finalizedChainTimeSeconds();
   let archived = 0;
   for (const round of rounds || []) {
-    if (!round.resolved && (!round.refund_at || Number(round.refund_at) > chainNow)) continue;
     const address = roundPda(round.round_id);
     const state = await program.account.round.fetchNullable(address);
     if (!state) continue;
+    if (!state.settled && BigInt(chainNow) < BigInt(asString(state.refundAt))) continue;
     if (Number(state.processedReceipts.toString()) !== Number(state.totalReceipts.toString())) continue;
     if (state.settled && !state.buybackCompleted) continue;
     const chainReceiptCount = Number(state.totalReceipts.toString());
     const digest = (await fetchProjectionDigests([BigInt(round.round_id)]))
       .get(String(round.round_id));
-    if (!roundProjectionMatchesChain(state, digest)) continue;
+    if (!digest) continue;
+    if (state.settled && !roundProjectionMatchesChain(state, digest)) continue;
     if (Number(digest.indexed_processed_receipts) !== chainReceiptCount) continue;
-    const [bets, settlements] = await Promise.all([
-      restImmutableRoundRows(
-        `mine_round_bets?round_id=eq.${round.round_id}&select=*&order=receipt.asc,square.asc`,
-      ),
-      restImmutableRoundRows(
-        `mine_receipt_settlements?round_id=eq.${round.round_id}`
-          + '&status=in.(claimed,accrued,refunded)&select=*&order=receipt.asc,status.asc',
-      ),
-    ]);
+    const winningSquare = Number(state.winningTile);
+    const soloWinner = state.settled && state.soloMode
+      ? await indexedSoloWinner(
+        BigInt(round.round_id),
+        winningSquare,
+        BigInt(asString(state.soloSample)),
+      )
+      : null;
+    const authoritativeProjection = chainRoundProjection(
+      BigInt(round.round_id),
+      state,
+      { projectionComplete: true, soloWinner },
+    );
+    const indexedRound = { ...round, ...authoritativeProjection };
+    const bets = await restImmutableRoundRows(
+      `mine_round_bets?round_id=eq.${round.round_id}&select=*&order=receipt.asc,square.asc`,
+      { maxRows: closedProofMaxRows },
+    );
+    const settlements = await restImmutableRoundRows(
+      `mine_receipt_settlements?round_id=eq.${round.round_id}`
+        + '&status=in.(claimed,accrued,refunded)&select=*&order=receipt.asc,status.asc',
+      { maxRows: closedProofMaxRows - bets.length },
+    );
+    if (!state.settled && !refundedRoundProjectionMatchesChain({
+      chainRound: state,
+      indexedProjection: digest,
+      bets,
+      settlements,
+      finalizedChainTime: chainNow,
+    })) continue;
     // A settled v6 round is not archival-ready until its exact on-chain fee
     // event has been indexed and the allocation conserves every lamport.
     // Refund-only rounds never distribute fees and therefore skip this gate.
-    const feeAudit = state.settled ? requireRoundFeeAudit(round) : null;
+    const feeAudit = state.settled ? requireRoundFeeAudit(indexedRound) : null;
     const buybacks = await restImmutableRoundRows(
       `mine_buyback_executions?round_id=eq.${round.round_id}&select=*&order=sequence.asc`,
+      { maxRows: closedProofMaxRows - bets.length - settlements.length },
     );
+    assert.ok(bets.length + settlements.length + buybacks.length <= closedProofMaxRows,
+      'Archive snapshot exceeds the reviewed total row bound');
     if (requireBuybackEvidence && state.settled) {
       // Compare evidence to the amount emitted and indexed for this round. Do
       // not duplicate a version-specific basis-point formula in the indexer.
@@ -1194,20 +1570,29 @@ async function archiveReadyRounds() {
       );
       if (evidenced !== allocation) continue;
     }
-    const indexedRound = {
-      ...round,
-      total_receipts: chainReceiptCount,
-      processed_receipts: Number(state.processedReceipts.toString()),
-    };
     if (state.settled) {
+      requireRoundStateRandomnessEvidence(state, indexedRound);
       requireRoundRandomnessProof(indexedRound, {
         programIdBytes: PROGRAM_ID.toBuffer(),
         mintBytes: indexedConfig.mint.toBuffer(),
       });
     }
+    // Future closed-PDA recovery can trust the snapshot only if every core
+    // outcome/timing/economic field came from this finalized Round account.
+    // Fee and provider evidence remain exact event proofs and were validated
+    // above before this single authoritative projection write.
+    const authoritativePatch = changedRoundProjection(round, authoritativeProjection);
+    if (authoritativePatch) await upsert('mine_rounds', authoritativePatch, 'round_id');
     const snapshot = buildArchiveSnapshot({
       program: PROGRAM_ID.toBase58(), round: indexedRound, bets, settlements, buybacks,
     });
+    archivedSnapshotRoundProjection(snapshot, {
+      programId: PROGRAM_ID.toBase58(),
+      expectedRoundId: String(round.round_id),
+      programIdBytes: PROGRAM_ID.toBuffer(),
+      mintBytes: indexedConfig.mint.toBuffer(),
+    });
+    archivedSnapshotProjectionDigest(snapshot, { maxRows: closedProofMaxRows });
     const snapshotHash = archiveHash(snapshot);
     const existingProofs = await rest(`mine_round_proofs?round_id=eq.${round.round_id}&select=archive_hash`);
     if (existingProofs?.length) {
@@ -1282,6 +1667,9 @@ export async function indexerTick() {
       indexed: 0,
       reconciled: 0,
       reconciliationFailures: 0,
+      closedProofChecks: 0,
+      closedProjectionRepairs: 0,
+      settlementRowsPruned: 0,
       archived: 0,
       referralsIndexed: 0,
       skipped: true,
@@ -1291,7 +1679,13 @@ export async function indexerTick() {
   // Repair exact recent/stale round histories before advancing the global
   // cursor. Otherwise a cursor that reaches RoundSettled while its earlier
   // proof event is absent fails before the recovery path can run.
-  const { reconciled, reconciliationFailures } = await reconcileCanonicalRounds();
+  const {
+    reconciled,
+    reconciliationFailures,
+    closedProofChecks,
+    closedProjectionRepairs,
+    settlementRowsPruned,
+  } = await reconcileCanonicalRounds();
   const indexed = await indexTransactions();
   // Projection-only instances are safe to keep alive during a protocol pause
   // or stateful-worker shutdown. They read finalized accounts/logs and repair
@@ -1299,7 +1693,15 @@ export async function indexerTick() {
   const archived = projectOnly ? 0 : await archiveReadyRounds();
   const referralsIndexed = await indexReferralTransactions();
   return {
-    indexed, reconciled, reconciliationFailures, archived, referralsIndexed, projectOnly,
+    indexed,
+    reconciled,
+    reconciliationFailures,
+    closedProofChecks,
+    closedProjectionRepairs,
+    settlementRowsPruned,
+    archived,
+    referralsIndexed,
+    projectOnly,
   };
 }
 

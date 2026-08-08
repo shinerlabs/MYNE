@@ -140,7 +140,7 @@ test('worker success freshness follows cadence and rejects non-useful outcomes',
   );
 });
 
-test('round supervision exposes absolute prepare, prebind, lock, and settle deadlines', () => {
+test('round supervision settles at betting close inside the five-second winner interval', () => {
   assert.equal(DEFAULT_NEXT_ROUND_PREBIND_GRACE_SECONDS, 15);
   assert.deepEqual(canonicalRoundDeadlines({
     roundId: 1,
@@ -151,10 +151,40 @@ test('round supervision exposes absolute prepare, prebind, lock, and settle dead
     prebindAt: 1_022,
     prepareAt: 1_065,
     bettingEndsAt: 1_125,
-    lockAt: 1_130,
-    settlesAt: 1_130,
-    settleAt: 1_135,
+    lockAt: 1_125,
+    settlesAt: 1_125,
+    settleAt: 1_130,
   });
+  assert.throws(() => canonicalRoundDeadlines({
+    roundId: 1,
+    initializedAt: 1_000,
+    roundDurationSeconds: 65,
+    settlementLateSeconds: 6,
+  }), /must equal the 5-second result window/);
+});
+
+test('round health treats the inter-round gap as the settlement deadline window', () => {
+  const base = {
+    initializedAt: 1_000,
+    roundDurationSeconds: 65,
+    rows: [
+      { roundId: 0, prepared: true, entropyLocked: false, funded: true, settled: false },
+      { roundId: 1, prepared: true, entropyLocked: false, funded: false, settled: false },
+    ],
+  };
+  const revealing = assessRoundScheduleHealth({ ...base, now: 1_061 });
+  const round = revealing.entries.find(({ roundId }) => roundId === 0);
+  assert.equal(round.lockAt, 1_060);
+  assert.equal(round.settleAt, 1_065);
+  assert.equal(round.condition, 'prepared');
+  assert.equal(revealing.ok, true);
+
+  const rolled = assessRoundScheduleHealth({ ...base, now: 1_065 });
+  assert.equal(
+    rolled.entries.find(({ roundId }) => roundId === 0).condition,
+    'funded-settlement-late',
+  );
+  assert.ok(rolled.errors.some((error) => /entropy lock missed 1065/.test(error)));
 });
 
 test('health fails before rollover when the next round is not prebound', () => {
@@ -298,6 +328,54 @@ test('live health stays failed until the selected resume round is on-chain prebo
     deadlineViolation: 'prepare-late',
   });
   assert.equal(publicHealth(state).ok, true);
+});
+
+test('durable deadline incidents keep live health failed after worker recovery', () => {
+  const workers = new Map(WORKER_NAMES.map((name) => [name, {
+    running: true,
+    restarts: 0,
+    lastHeartbeatAt: 20_000,
+    lastCompletedAt: 20_000,
+    lastSuccessfulAt: 20_000,
+    lastOutcome: 'ok',
+    consecutiveErrors: 0,
+  }]));
+  const state = {
+    mode: 'live',
+    ready: true,
+    error: null,
+    protocolPaused: true,
+    checkedAt: 'now',
+    revision: 'test',
+    workers,
+    roundProgress: new Map([['44', {
+      roundId: 44,
+      consecutiveErrors: 0,
+      deadlineViolation: null,
+      lastOutcome: 'completed',
+    }]]),
+    roundDeadlineIncidents: [{
+      id: `${DEFAULT_PROGRAM_ID}:44:settlement-deadline-missed:10000`,
+      programId: DEFAULT_PROGRAM_ID,
+      roundId: 44,
+      stage: 'settlement-deadline-missed',
+      firstObservedAt: 10_000,
+      lastObservedAt: 10_000,
+      occurrences: 1,
+      outcome: 'confirmed late',
+      clearedAt: null,
+    }],
+    now: 25_000,
+    heartbeatTimeoutMs: 60_000,
+  };
+  const health = publicHealth(state);
+  assert.equal(health.ok, false);
+  assert.equal(health.roundDeadlineIncidents.length, 1);
+  assert.equal(health.roundDeadlineIncidents[0].roundId, 44);
+
+  state.roundDeadlineIncidents = [];
+  assert.equal(publicHealth(state).ok, true);
+  assert.deepEqual(publicHealth({ ...state, mode: 'observe' }).roundDeadlineIncidents, []);
 });
 
 test('live health fails closed when an essential settlement/index worker is down', () => {
@@ -575,4 +653,22 @@ test('production Switchboard workers never depend on a host Solana CLI config', 
   assert.match(explicitEnv, /ANCHOR_PROVIDER_URL/);
   assert.match(explicitEnv, /ANCHOR_WALLET/);
   assert.match(explicitEnv, /loadProgramFromConnection/);
+});
+
+test('live host durably latches every deadline stage and clears only by paused exact acknowledgement', async () => {
+  const source = await readFile(
+    new URL('../scripts/production-worker-host.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /createRoundDeadlineIncidentLatch\(\{ dataDir, programId: programIdText \}\)/);
+  assert.match(source, /ROUND_HEALTH_CONDITION_STAGE\[entry\.condition\][\s\S]*recordDurableRoundIncident/);
+  assert.match(source, /ROUND_DEADLINE_VIOLATION_STAGES\.has\(message\.stage\)[\s\S]*recordDurableRoundIncident/);
+  assert.match(source, /MYNE_CLEAR_ROUND_DEADLINE_INCIDENT/);
+  assert.match(
+    source,
+    /A round deadline incident can be cleared only while the protocol is paused/,
+  );
+  assert.match(source, /roundDeadlineIncidentLatch\.clearExact\(incidentClearAcknowledgement\)/);
+  assert.match(source, /await roundDeadlineIncidentLatch\.flush\(\)/);
+  assert.match(source, /applyDurableIncidentState\(\)/);
 });

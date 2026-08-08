@@ -443,6 +443,97 @@ const noUnclaimedReceipts = (message) => Object.assign(new Error(message), {
   code: NO_UNCLAIMED_RECEIPTS,
 });
 
+const claimRoundKey = (value) => toBig(value?.account?.roundId ?? value?.roundId).toString();
+const uniqueClaimRoundIds = (roundIds) => [
+  ...new Map(roundIds.map((roundId) => [toBig(roundId).toString(), roundId])).values(),
+];
+
+/**
+ * Submit atomic receipt chunks and reconcile partial progress against the
+ * confirmed wallet receipt ledger before reporting it to the UI.
+ *
+ * `sendInstructions` confirms each successful chunk before it returns. If a
+ * later chunk fails, those earlier chunks cannot be rolled back. A keeper may
+ * also process any remaining receipt concurrently, so transaction counts alone
+ * cannot say which rounds remain. The confirmed rescan is the authority.
+ */
+export async function executeClaimChunks({
+  requestedRoundIds,
+  claims,
+  sendChunk,
+  reconcileRemaining,
+  chunkSize = 4,
+}) {
+  const requested = uniqueClaimRoundIds(requestedRoundIds);
+  const initialClaimsByRound = new Map();
+  const confirmedClaimsByRound = new Map();
+  for (const claim of claims) {
+    const key = claimRoundKey(claim);
+    initialClaimsByRound.set(key, (initialClaimsByRound.get(key) ?? 0) + 1);
+  }
+
+  let signature = null;
+  let confirmedReceiptCount = 0;
+  for (let offset = 0; offset < claims.length; offset += chunkSize) {
+    const chunk = claims.slice(offset, offset + chunkSize);
+    try {
+      signature = await sendChunk(chunk);
+      confirmedReceiptCount += chunk.length;
+      for (const claim of chunk) {
+        const key = claimRoundKey(claim);
+        confirmedClaimsByRound.set(key, (confirmedClaimsByRound.get(key) ?? 0) + 1);
+      }
+    } catch (failure) {
+      try {
+        const remainingClaims = await reconcileRemaining();
+        const remainingKeys = new Set(remainingClaims.map(claimRoundKey));
+        const processedRoundIds = requested.filter((roundId) => !remainingKeys.has(claimRoundKey({ roundId })));
+        const remainingRoundIds = requested.filter((roundId) => remainingKeys.has(claimRoundKey({ roundId })));
+        return {
+          status: remainingRoundIds.length === 0
+            ? 'complete'
+            : (processedRoundIds.length > 0 ? 'partial' : 'failed'),
+          signature,
+          processedRoundIds,
+          remainingRoundIds,
+          confirmedReceiptCount,
+          failure,
+          reconciled: true,
+        };
+      } catch (reconciliationError) {
+        // Even when the rescan itself is unavailable, preserve the minimum
+        // progress proven by confirmed atomic chunks. Do not guess that any
+        // unverified round is complete.
+        const processedRoundIds = requested.filter((roundId) => {
+          const key = claimRoundKey({ roundId });
+          return (confirmedClaimsByRound.get(key) ?? 0) >= (initialClaimsByRound.get(key) ?? 0);
+        });
+        const processedKeys = new Set(processedRoundIds.map((roundId) => claimRoundKey({ roundId })));
+        return {
+          status: 'unverified',
+          signature,
+          processedRoundIds,
+          remainingRoundIds: requested.filter((roundId) => !processedKeys.has(claimRoundKey({ roundId }))),
+          confirmedReceiptCount,
+          failure,
+          reconciliationError,
+          reconciled: false,
+        };
+      }
+    }
+  }
+
+  return {
+    status: 'complete',
+    signature,
+    processedRoundIds: requested,
+    remainingRoundIds: [],
+    confirmedReceiptCount,
+    failure: null,
+    reconciled: true,
+  };
+}
+
 export async function claimRound(roundId) {
   const account = getAccount();
   const rows = await claimableReceipts([roundId], account);
@@ -465,31 +556,39 @@ export async function claimManyRounds(roundIds) {
   if (!rows.length) throw noUnclaimedReceipts('No unclaimed receipts for these rounds');
   const authority = new PublicKey(account);
   const { program } = await getWritableProgram();
-  const instructions = await Promise.all(rows.map(({ publicKey, account: receipt }) => (
-    program.methods.claimReceipt().accounts({
+  const claims = await Promise.all(rows.map(async ({ publicKey, account: receipt }) => ({
+    roundId: toBig(receipt.roundId),
+    instruction: await program.methods.claimReceipt().accounts({
       config: protocolPdas.config, miningPool: protocolPdas.miningPool,
       stakePool: protocolPdas.stakePool, miner: minerPda(account),
       stakePosition: stakePositionPda(account), round: roundPda(receipt.roundId),
       receipt: publicKey, authority,
-    }).instruction()
-  )));
-  let signature;
+    }).instruction(),
+  })));
   // Four receipt settlements remain below legacy transaction account/compute
   // limits in the measured client path. Each chunk is simulated by
   // sendInstructions before the wallet is asked to sign.
   try {
-    for (let offset = 0; offset < instructions.length; offset += 4) {
-      signature = await sendInstructions(instructions.slice(offset, offset + 4));
-      // Each confirmed chunk is durable. Remove its receipts from every
-      // subsequent read immediately, even if a later wallet prompt is rejected.
-      invalidateReceiptCache();
-    }
+    return await executeClaimChunks({
+      requestedRoundIds: roundIds,
+      claims,
+      sendChunk: async (chunk) => {
+        const signature = await sendInstructions(chunk.map(({ instruction }) => instruction));
+        // Each confirmed chunk is durable. Remove its receipts from every
+        // subsequent read immediately, even if a later wallet prompt is rejected.
+        invalidateReceiptCache();
+        return signature;
+      },
+      reconcileRemaining: async () => {
+        invalidateReceiptCache();
+        return claimableReceipts(roundIds, account);
+      },
+    });
   } finally {
     // Also clear in-flight/cache state on a failed simulation or wallet prompt;
     // an independent lifecycle worker may have processed the same receipts.
     invalidateReceiptCache();
   }
-  return signature;
 }
 export const claimManyEthOnly = claimManyRounds;
 

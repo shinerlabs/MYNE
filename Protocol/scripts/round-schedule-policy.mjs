@@ -15,6 +15,43 @@ export const ROUND_KEEPER_DEFERRED_EXIT_CODE = 75;
 export const ROUND_KEEPER_MISSED_EXIT_CODE = 76;
 
 /**
+ * The keeper's tolerated settlement latency is the complete result interval.
+ * A wider operational override would make health green after the next round
+ * has already started; a narrower one would reject a valid part of the UI's
+ * advertised winner window.
+ */
+export function requireExactSettlementWindow({
+  roundDurationSeconds,
+  bettingDurationSeconds,
+  settlementLateSeconds,
+}) {
+  for (const [name, value] of Object.entries({
+    roundDurationSeconds,
+    bettingDurationSeconds,
+    settlementLateSeconds,
+  })) assert.ok(Number.isSafeInteger(value), `${name} must be a safe integer`);
+  assert.ok(
+    roundDurationSeconds > bettingDurationSeconds,
+    'Round duration must exceed betting duration',
+  );
+  const resultWindowSeconds = roundDurationSeconds - bettingDurationSeconds;
+  assert.equal(
+    settlementLateSeconds,
+    resultWindowSeconds,
+    `ROUND_KEEPER_SETTLEMENT_LATE_SECONDS must equal the ${resultWindowSeconds}-second result window`,
+  );
+  return resultWindowSeconds;
+}
+
+/** The result deadline is exclusive because that timestamp starts the next round. */
+export function settlementConfirmedWithinResultWindow({ confirmedAt, resultDeadlineAt }) {
+  for (const [name, value] of Object.entries({ confirmedAt, resultDeadlineAt })) {
+    assert.ok(Number.isSafeInteger(value), `${name} must be a safe integer`);
+  }
+  return confirmedAt < resultDeadlineAt;
+}
+
+/**
  * First future round that can still be prebound inside the host's safe window.
  *
  * A paused protocol can cross one or more scheduled `opened_at` boundaries

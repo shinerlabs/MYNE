@@ -101,7 +101,8 @@ test('Claim All settles receipts before withdrawing MYNE and never aliases SOL-o
   assert.match(claimAll, /runTx\('Claiming SOL…', withdrawClaimableSol, refreshMiner\)/);
   assert.match(claimAll, /const refined = await refine\(\)/);
   assert.match(claimAll, /return refined && allReceiptsProcessed/);
-  assert.match(claimAll, /Claimed available rewards · some receipts still need processing/);
+  assert.match(claimAll, /allReceiptsProcessed = claimProgress\.complete/);
+  assert.match(claimAll, /incompleteClaimMessage\(claimProgress\)/);
   assert.doesNotMatch(claimAll, /claimEthOnly/);
   assert.match(main, /rewardAction === 'sol'[\s\S]*claimEthOnly\(ids\)/);
   assert.match(main, /rewardAction === 'all'[\s\S]*claimAll\(ids\)/);
@@ -112,15 +113,22 @@ test('partial multi-transaction claims invalidate stale receipts and preserve du
     lottery.indexOf('export async function claimManyRounds'),
     lottery.indexOf('export const claimManyEthOnly'),
   );
-  assert.match(lowLevel, /try \{[\s\S]*sendInstructions[\s\S]*invalidateReceiptCache\(\)[\s\S]*\} finally \{[\s\S]*invalidateReceiptCache\(\)/);
+  assert.match(lowLevel, /executeClaimChunks\(\{/);
+  assert.match(lowLevel, /sendInstructions\(chunk\.map\(\(\{ instruction \}\) => instruction\)\)/);
+  assert.match(lowLevel, /reconcileRemaining:[\s\S]*claimableReceipts\(roundIds, account\)/);
+  assert.match(lowLevel, /finally \{[\s\S]*invalidateReceiptCache\(\)/);
 
   const batching = mine.slice(mine.indexOf('async function claimBatched'), mine.indexOf('/** Claim every supplied round'));
   assert.match(batching, /error\?\.code === NO_UNCLAIMED_RECEIPTS/);
   assert.match(batching, /reward is already in the durable wallet ledger/);
+  assert.match(batching, /const processedRoundKeys = new Set\(\)/);
+  assert.match(batching, /Processed \$\{processed\} of \$\{requestedRoundIds\.length\} rounds/);
+  assert.doesNotMatch(batching, /claimed \+= batch\.length/);
+  assert.doesNotMatch(batching, /waitForTx\(/);
 
   const burn = mine.slice(mine.indexOf('export async function stakeAndBurnRewards'), mine.indexOf('// --- boot'));
   assert.match(burn, /let allReceiptsProcessed = true/);
-  assert.match(burn, /Staked \+ burned available MYNE · some receipts still need processing/);
+  assert.match(burn, /incompleteClaimMessage\(claimProgress, 'Staked \+ burned available MYNE'\)/);
   assert.match(burn, /return false/);
 });
 
@@ -129,7 +137,7 @@ test('SOL-only and Stake + Burn actions explicitly withdraw the accrued owner ba
   const burn = mine.slice(mine.indexOf('export async function stakeAndBurnRewards'), mine.indexOf('// --- boot'));
   assert.match(claimSol, /await refreshMiner\(\)/);
   assert.match(claimSol, /state\.claimableSol <= 0n/);
-  assert.match(claimSol, /if \(processed > 0\)[\s\S]*Claimed SOL to your wallet[\s\S]*return true/);
+  assert.match(claimSol, /if \(progress\.processedRounds > 0\)[\s\S]*Claimed SOL to your wallet[\s\S]*return true/);
   assert.match(claimSol, /withdrawClaimableSol/);
   assert.match(burn, /miner\.claimableSol > 0n[\s\S]*withdrawClaimableSol[\s\S]*burnUnclaimedMyne/);
 });

@@ -107,6 +107,68 @@ test('server keeper binds before start, preserves the future-slot mix, and settl
   assert.doesNotMatch(source, /@switchboard-xyz/);
 });
 
+test('server keeper uses betting close as the on-chain settlement boundary', async () => {
+  const [source, programSource] = await Promise.all([
+    readFile(new URL('../scripts/server-round-keeper.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../programs/myne_protocol/src/lib.rs', import.meta.url), 'utf8'),
+  ]);
+  assert.match(programSource, /RESOLUTION_COUNTDOWN_SECONDS:\s*u64\s*=\s*0;/);
+  assert.match(
+    source,
+    /const scheduledSettlesAt = scheduledBettingEndsAt;/,
+    'Settlement must start at 60 seconds so the winner can occupy the five-second result interval',
+  );
+  assert.doesNotMatch(
+    source,
+    /const scheduledSettlesAt = scheduledOpenedAt\s*\n\s*\+ Number\(configState\.roundDurationSeconds/,
+  );
+  assert.match(
+    source,
+    /if \(lockCompletedAt >= heartbeatDeadlines\.settleAt\)/,
+    'The first legal lock second must not be reported as a missed deadline',
+  );
+  assert.match(
+    source,
+    /if \(settlementStartedAt >= heartbeatDeadlines\.settleAt\)/,
+    'Settlement at the next round boundary is too late for the winner interval',
+  );
+  assert.match(source, /finalizedTransactionTimeSeconds\(\s*settlementSignature/);
+  assert.match(source, /settlementConfirmedWithinResultWindow/);
+  assert.equal(
+    source.match(/await emitTerminalRoundHeartbeat\('tick-error', 'settlement-deadline-missed', outcome\)/g)?.length,
+    2,
+    'Both fresh settlement and restart recovery must deliver the deadline incident before exit',
+  );
+  const deadlineBranchStart = source.indexOf('if (settlementDeadlineMet)');
+  const deadlineBranch = source.slice(
+    deadlineBranchStart,
+    source.indexOf('console.log(JSON.stringify({', deadlineBranchStart),
+  );
+  assert.doesNotMatch(
+    deadlineBranch.slice(deadlineBranch.indexOf('} else {')),
+    /emitRoundHeartbeat\('tick-complete'/,
+    'A late finalized settlement must retain its tick error',
+  );
+});
+
+test('server keeper restart proves the exact finalized settlement before reporting success', async () => {
+  const source = await readFile(
+    new URL('../scripts/server-round-keeper.mjs', import.meta.url),
+    'utf8',
+  );
+  assert.match(source, /findFinalizedRoundSettlementEvidence/);
+  assert.match(source, /classifyFinalizedRoundSettlementEvidence/);
+  assert.match(source, /await auditRecoveredSettlement\('already-settled-at-startup'\)/);
+  assert.match(source, /await auditRecoveredSettlement\('settled-during-lock-recovery'\)/);
+  assert.doesNotMatch(source, /emitRoundHeartbeat\('tick-complete', 'settled', 'already-settled'\)/);
+  assert.doesNotMatch(source, /emitRoundHeartbeat\('tick-complete', 'settled', 'settled-during-recovery'\)/);
+  assert.match(
+    source,
+    /await emitTerminalRoundHeartbeat\('tick-error', 'settlement-deadline-missed', outcome\)/,
+    'Recovery must deliver the persistent deadline signal before process exit',
+  );
+});
+
 test('server entropy delay fits inside the five-second winner phase', async () => {
   const source = await readFile(
     new URL('../programs/myne_protocol/src/lib.rs', import.meta.url),

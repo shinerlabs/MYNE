@@ -35,6 +35,12 @@ is supervised but isolated: a Jupiter/pool/lease outage sets `degraded: true`, n
 round and claim workers. Alert on both fields. A release canary still requires completed buyback
 evidence before archival even though an operational buyback outage cannot take mining offline.
 
+Every prepare, prebind, entropy-lock or settlement deadline violation is also written to
+`/data/round-deadline-incidents.json` with an atomic file write, file fsync, rename and directory
+fsync. An active incident keeps live `ready` and `/healthz.ok` false across process and deployment
+restarts even if the affected Round later settles. Standby and observe mode neither load nor alter
+this live transaction-worker latch.
+
 ## Railway layout
 
 - Project: `MYNE-Production`
@@ -171,3 +177,13 @@ availability benefit until replica coordination for every worker is independentl
 5. Rotate an operational wallet only through the paused, reviewed on-chain rotation instruction.
 6. Resume only after the full observe-mode catch-up and two-canary gate pass again with documented
    sign-off.
+
+Never delete or edit `round-deadline-incidents.json` manually. After the protocol is paused and one
+specific incident has been reconciled, copy its complete `id` from `/healthz.roundDeadlineIncidents`
+into `MYNE_CLEAR_ROUND_DEADLINE_INCIDENT`. A live-host restart accepts that exact acknowledgement
+only while the on-chain config remains paused, records the clearance durably and logs
+`round-deadline-incident-cleared`. A typo or unknown id fails startup; an acknowledgement for an
+already-cleared incident is idempotent across an automatic restart and cannot clear a later
+recurrence because each recurrence has a new id. Remove the acknowledgement variable after the
+clearance log is captured, then repeat the normal paused health and canary gates. There is no
+automatic age-, settlement- or restart-based clearance.
