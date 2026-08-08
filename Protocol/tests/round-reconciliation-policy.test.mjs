@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -10,6 +11,7 @@ import {
   receiptSettlementStatus,
   recentScheduledRoundIds,
   refundedRoundProjectionMatchesChain,
+  randomnessProjectionValueMatches,
   roundParticipantProjectionMatchesChain,
   roundNeedsCanonicalReplay,
   roundProjectionMatchesArchivedProof,
@@ -20,6 +22,7 @@ import {
 import {
   archiveHash,
   buildArchiveSnapshot,
+  SERVER_PROVIDER_KIND,
   SWITCHBOARD_PROVIDER_KIND,
 } from '../scripts/round-archive-policy.mjs';
 
@@ -506,6 +509,155 @@ const archivedDatabaseProjection = {
   indexed_tile_lamports: ['12', '3', ...Array(23).fill('0')],
   indexed_tile_receipts: [2, 1, ...Array(23).fill(0)],
 };
+
+const legacyRandomnessHex = '0a17'.repeat(16);
+const legacyRandomnessExact = BigInt(`0x${legacyRandomnessHex}`).toString();
+
+function hashHex(parts) {
+  const hash = createHash('sha256');
+  for (const part of parts) hash.update(part);
+  return hash.digest('hex');
+}
+
+function u64Le(value) {
+  const encoded = Buffer.alloc(8);
+  encoded.writeBigUInt64LE(BigInt(value));
+  return encoded;
+}
+
+const archiveProgramBytes = Buffer.alloc(32, 3);
+const archiveMintBytes = Buffer.alloc(32, 4);
+const archiveRevealHex = '05'.repeat(32);
+const archiveEntropyHex = '06'.repeat(32);
+const archiveCommitmentHex = hashHex([
+  Buffer.from('MYNE_SERVER_COMMIT_V1'),
+  archiveProgramBytes,
+  archiveMintBytes,
+  u64Le(41),
+  Buffer.from(archiveRevealHex, 'hex'),
+]);
+const archiveServerOutputHex = hashHex([
+  Buffer.from('MYNE_SERVER_OUTPUT_V1'),
+  archiveProgramBytes,
+  archiveMintBytes,
+  u64Le(41),
+  Buffer.from(archiveRevealHex, 'hex'),
+  u64Le(105),
+  Buffer.from(archiveEntropyHex, 'hex'),
+]);
+
+function legacySnapshot(snapshot) {
+  const legacy = structuredClone(snapshot);
+  legacy.round.randomness_value = Number(BigInt(`0x${legacy.round.randomness_hex}`)).toString();
+  assert.match(legacy.round.randomness_value, /e\+/);
+  return legacy;
+}
+
+const exactV2Snapshot = buildArchiveSnapshot({
+  program: 'program-id',
+  round: {
+    ...archivedSnapshot.round,
+    randomness_hex: legacyRandomnessHex,
+    randomness_value: legacyRandomnessExact,
+  },
+  bets: archivedBets,
+  settlements: archivedSettlements,
+  buybacks: [],
+});
+const legacyV2Snapshot = legacySnapshot(exactV2Snapshot);
+
+const exactV3Snapshot = buildArchiveSnapshot({
+  program: 'program-id',
+  round: {
+    ...archivedSnapshot.round,
+    randomness_provider_kind: SERVER_PROVIDER_KIND,
+    randomness_id: null,
+    randomness_commit_slot: null,
+    randomness_value: BigInt(`0x${archiveServerOutputHex}`).toString(),
+    randomness_hex: archiveServerOutputHex,
+    randomness_commitment_hex: archiveCommitmentHex,
+    randomness_reveal_hex: archiveRevealHex,
+    randomness_target_slot: '101',
+    randomness_entropy_slot: '105',
+    randomness_entropy_hash_hex: archiveEntropyHex,
+    randomness_commitment_signature: 'commit',
+    randomness_commitment_tx_slot: '90',
+    randomness_lock_signature: 'lock',
+    randomness_lock_tx_slot: '100',
+    randomness_reveal_signature: 'settle',
+    randomness_reveal_tx_slot: '110',
+  },
+  bets: archivedBets,
+  settlements: archivedSettlements,
+  buybacks: [],
+});
+const legacyV3Snapshot = legacySnapshot(exactV3Snapshot);
+
+function verifiedLegacyProjection(snapshot, context = {}) {
+  const hash = archiveHash(snapshot);
+  return verifiedArchivedRoundProjection({
+    programId: 'program-id',
+    indexedRound: {
+      round_id: 41,
+      archive_verified: true,
+      archive_hash: hash,
+    },
+    storedProof: {
+      round_id: 41,
+      archive_hash: hash,
+      canonical_snapshot: snapshot,
+    },
+    ...context,
+  }).roundProjection;
+}
+
+test('legacy v2 and v3 scientific randomness snapshots recover exact values from attested hex', () => {
+  const v2 = verifiedLegacyProjection(legacyV2Snapshot);
+  assert.equal(v2.randomness_value, legacyRandomnessExact);
+  const v3 = verifiedLegacyProjection(legacyV3Snapshot, {
+    programIdBytes: archiveProgramBytes,
+    mintBytes: archiveMintBytes,
+  });
+  assert.equal(v3.randomness_value, BigInt(`0x${archiveServerOutputHex}`).toString());
+});
+
+test('legacy scientific randomness compatibility fails closed on v2 and v3 mismatches', () => {
+  for (const [snapshot, context] of [
+    [legacyV2Snapshot, {}],
+    [legacyV3Snapshot, { programIdBytes: archiveProgramBytes, mintBytes: archiveMintBytes }],
+  ]) {
+    const mismatch = structuredClone(snapshot);
+    mismatch.round.randomness_value = Number(BigInt(`0x${'ff'.repeat(32)}`)).toString();
+    assert.throws(
+      () => verifiedLegacyProjection(mismatch, context),
+      /numeric and hex outputs disagree/,
+    );
+  }
+});
+
+test('randomness projection comparison treats matching legacy JSON numeric output as a no-op', () => {
+  assert.equal(randomnessProjectionValueMatches({
+    randomness_hex: legacyRandomnessHex,
+    randomness_value: Number(legacyRandomnessExact),
+  }, {
+    randomness_hex: legacyRandomnessHex,
+    randomness_value: legacyRandomnessExact,
+  }), true);
+  assert.equal(randomnessProjectionValueMatches({
+    randomness_hex: legacyRandomnessHex,
+    randomness_value: Number(BigInt(`0x${'ff'.repeat(32)}`)),
+  }, {
+    randomness_hex: legacyRandomnessHex,
+    randomness_value: legacyRandomnessExact,
+  }), false);
+  assert.equal(randomnessProjectionValueMatches({
+    randomness_hex: 'ff'.repeat(32),
+    randomness_value: Number(legacyRandomnessExact),
+  }, {
+    randomness_hex: legacyRandomnessHex,
+    randomness_value: legacyRandomnessExact,
+  }), false);
+});
 
 test('closed projection recomputes its attested archive participant and settlement digest', () => {
   const digest = archivedSnapshotProjectionDigest(archivedSnapshot);

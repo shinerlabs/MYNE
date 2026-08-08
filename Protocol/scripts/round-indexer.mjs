@@ -16,6 +16,7 @@ import {
 import {
   archiveHash,
   buildArchiveSnapshot,
+  canonicalRandomnessValue,
   requireRoundFeeAudit,
   requireRoundRandomnessProof,
   SERVER_PROVIDER_KIND,
@@ -38,6 +39,7 @@ import {
   receiptSettlementStatus,
   recentScheduledRoundIds,
   refundedRoundProjectionMatchesChain,
+  randomnessProjectionValueMatches,
   roundNeedsCanonicalReplay,
   roundProjectionMatchesArchivedProof,
   roundProjectionMatchesChain,
@@ -1165,7 +1167,8 @@ function requireRoundStateRandomnessEvidence(state, indexedRound) {
   assert.equal(randomnessHex.length, 64, 'Finalized Round randomness must contain 32 bytes');
   assert.equal(indexedRound.randomness_hex, randomnessHex,
     'Indexed randomness output disagrees with the finalized Round account');
-  assert.equal(String(indexedRound.randomness_value), BigInt(`0x${randomnessHex}`).toString(),
+  assert.equal(canonicalRandomnessValue(indexedRound.randomness_value, randomnessHex),
+    BigInt(`0x${randomnessHex}`).toString(),
     'Indexed randomness numeric output disagrees with the finalized Round account');
   const encodedSlot = BigInt(asString(state.randomnessCommitSlot));
   const serverRound = (encodedSlot & SERVER_RANDOMNESS_SLOT_FLAG) !== 0n;
@@ -1193,7 +1196,12 @@ function requireRoundStateRandomnessEvidence(state, indexedRound) {
   }
 }
 
-const sameProjectionValue = (left, right) => {
+const sameProjectionValue = (key, indexedRound, projection) => {
+  if (key === 'randomness_value') {
+    return randomnessProjectionValueMatches(indexedRound, projection);
+  }
+  const left = indexedRound[key];
+  const right = projection[key];
   if (left === null || left === undefined || right === null || right === undefined) {
     return (left ?? null) === (right ?? null);
   }
@@ -1205,7 +1213,7 @@ const sameProjectionValue = (left, right) => {
 const changedRoundProjection = (indexedRound, projection) => {
   if (!indexedRound) return { ...projection, updated_at: new Date().toISOString() };
   const changed = Object.fromEntries(
-    Object.entries(projection).filter(([key, value]) => !sameProjectionValue(indexedRound[key], value)),
+    Object.entries(projection).filter(([key]) => !sameProjectionValue(key, indexedRound, projection)),
   );
   return Object.keys(changed).length
     ? { round_id: projection.round_id, ...changed, updated_at: new Date().toISOString() }

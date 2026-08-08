@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   archiveHash,
   buildArchiveSnapshot,
+  canonicalRandomnessValue,
   requireRoundFeeAudit,
   requireRoundRandomnessProof,
   SERVER_PROVIDER_KIND,
@@ -39,7 +40,7 @@ const round = {
   randomness_provider_kind: SWITCHBOARD_PROVIDER_KIND,
   randomness_id: 'randomness',
   randomness_value: '12',
-  randomness_hex: '0c'.repeat(32),
+  randomness_hex: `${'00'.repeat(31)}0c`,
   randomness_commit_slot: 50,
   solo_sample: '0',
   total_receipts: 2,
@@ -143,6 +144,40 @@ test('Switchboard archive snapshots remain byte-compatible version 2', () => {
   assert.equal('randomness_proof' in snapshot, false);
 });
 
+test('new archive snapshots canonicalize lossy PostgREST randomness from exact hex', () => {
+  const randomnessHex = '0a17'.repeat(16);
+  const exact = BigInt(`0x${randomnessHex}`).toString();
+  const legacyScientific = Number(exact).toString();
+  assert.match(legacyScientific, /e\+/);
+  const snapshot = buildArchiveSnapshot({
+    program: 'program',
+    round: {
+      ...round,
+      randomness_hex: randomnessHex,
+      randomness_value: legacyScientific,
+    },
+    bets,
+    settlements,
+    buybacks,
+  });
+  assert.equal(snapshot.round.randomness_value, exact);
+  assert.equal(canonicalRandomnessValue(legacyScientific, randomnessHex), exact);
+  assert.throws(
+    () => buildArchiveSnapshot({
+      program: 'program',
+      round: {
+        ...round,
+        randomness_hex: randomnessHex,
+        randomness_value: Number(BigInt(`0x${'ff'.repeat(32)}`)).toString(),
+      },
+      bets,
+      settlements,
+      buybacks,
+    }),
+    /numeric and hex outputs disagree/,
+  );
+});
+
 function hashHex(parts) {
   const hash = createHash('sha256');
   for (const part of parts) hash.update(part);
@@ -185,6 +220,7 @@ const serverRound = {
   randomness_target_slot: '101',
   randomness_entropy_slot: '105',
   randomness_entropy_hash_hex: serverEntropyHashHex,
+  randomness_value: BigInt(`0x${serverOutputHex}`).toString(),
   randomness_hex: serverOutputHex,
   randomness_commitment_signature: 'commit-signature',
   randomness_commitment_tx_slot: '90',

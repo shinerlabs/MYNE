@@ -5,11 +5,37 @@ const numberOrNull = (value) => (value === null || value === undefined ? null : 
 const U64_MAX = (1n << 64n) - 1n;
 const SIGNED_BIGINT_MAX = (1n << 63n) - 1n;
 const HEX_32 = /^[0-9a-f]{64}$/;
+const LEGACY_SCIENTIFIC_INTEGER = /^[1-9](?:\.[0-9]+)?e\+[0-9]+$/;
 const SERVER_COMMIT_DOMAIN = Buffer.from('MYNE_SERVER_COMMIT_V1');
 const SERVER_OUTPUT_DOMAIN = Buffer.from('MYNE_SERVER_OUTPUT_V1');
 
 export const SWITCHBOARD_PROVIDER_KIND = 'switchboard';
 export const SERVER_PROVIDER_KIND = 'server_commit_reveal';
+
+/**
+ * Return the exact unsigned integer committed by a 32-byte randomness output.
+ *
+ * Early archive workers read PostgreSQL `numeric(78,0)` through JSON as a
+ * JavaScript Number before stringifying it. Their immutable, on-chain-attested
+ * snapshots therefore contain a rounded scientific string. Accept only that
+ * exact legacy rendering when it is implied by the independently committed
+ * hex output; new snapshots always store the lossless decimal representation.
+ */
+export function canonicalRandomnessValue(value, randomnessHex) {
+  if (value === null || value === undefined || value === '') {
+    if (randomnessHex === null || randomnessHex === undefined || randomnessHex === '') return null;
+    throw new Error('Round randomness numeric output is missing');
+  }
+  if (typeof randomnessHex !== 'string' || !HEX_32.test(randomnessHex)) {
+    throw new Error('Round randomness hex output is invalid');
+  }
+  const exact = BigInt(`0x${randomnessHex}`).toString();
+  const text = String(value);
+  if (text === exact) return exact;
+  const legacy = Number(exact).toString();
+  if (LEGACY_SCIENTIFIC_INTEGER.test(text) && text === legacy) return exact;
+  throw new Error('Round randomness numeric and hex outputs disagree');
+}
 
 const FEE_AMOUNT_FIELDS = Object.freeze([
   'total_fee_lamports',
@@ -268,7 +294,7 @@ function canonicalRound(round) {
     admin_total_lamports: textOrNull(round.admin_total_lamports),
     admin_fee_wallet: textOrNull(round.admin_fee_wallet),
     randomness_id: textOrNull(round.randomness_id),
-    randomness_value: textOrNull(round.randomness_value),
+    randomness_value: canonicalRandomnessValue(round.randomness_value, round.randomness_hex),
     randomness_hex: textOrNull(round.randomness_hex),
     randomness_commit_slot: textOrNull(round.randomness_commit_slot),
     solo_sample: textOrNull(round.solo_sample),

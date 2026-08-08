@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import {
   archiveHash,
+  canonicalRandomnessValue,
   requireRoundFeeAudit,
   requireRoundRandomnessProof,
   SERVER_PROVIDER_KIND,
@@ -176,6 +177,12 @@ export function archivedSnapshotRoundProjection(
   const roundId = requiredCanonicalNumeric(round.round_id, 'Archive round round_id');
   assert.equal(roundId, String(expectedRoundId), 'Archive snapshot round id is invalid');
   const resolved = requiredCanonicalBoolean(round.resolved, 'Archive round resolved');
+  const randomnessHex = requiredCanonicalHex(
+    round.randomness_hex,
+    'Archive round randomness_hex',
+    { nullable: true },
+  );
+  const randomnessValue = canonicalRandomnessValue(round.randomness_value, randomnessHex);
   const projection = {
     round_id: roundId,
     rent_payer: requiredCanonicalText(round.rent_payer, 'Archive round rent_payer'),
@@ -261,16 +268,8 @@ export function archivedSnapshotRoundProjection(
       'Archive round randomness_id',
       { nullable: true },
     ),
-    randomness_value: requiredCanonicalNumeric(
-      round.randomness_value,
-      'Archive round randomness_value',
-      { nullable: true },
-    ),
-    randomness_hex: requiredCanonicalHex(
-      round.randomness_hex,
-      'Archive round randomness_hex',
-      { nullable: true },
-    ),
+    randomness_value: randomnessValue,
+    randomness_hex: randomnessHex,
     randomness_commit_slot: requiredCanonicalNumeric(
       round.randomness_commit_slot,
       'Archive round randomness_commit_slot',
@@ -458,6 +457,29 @@ export function archivedSnapshotRoundProjection(
   return projection;
 }
 
+/**
+ * Compare a PostgREST round row with an exact archive projection without
+ * treating JSON's lossy numeric rendering as a different randomness output.
+ * The independently verified 32-byte hex remains authoritative.
+ */
+export function randomnessProjectionValueMatches(indexedRound, canonicalProjection) {
+  const expectedHex = canonicalProjection?.randomness_hex ?? null;
+  const expectedValue = canonicalProjection?.randomness_value ?? null;
+  if (expectedHex === null || expectedValue === null) {
+    return expectedHex === null
+      && expectedValue === null
+      && (indexedRound?.randomness_hex ?? null) === null
+      && (indexedRound?.randomness_value ?? null) === null;
+  }
+  if (indexedRound?.randomness_hex !== expectedHex) return false;
+  try {
+    return canonicalRandomnessValue(indexedRound.randomness_value, expectedHex)
+      === canonicalRandomnessValue(expectedValue, expectedHex);
+  } catch {
+    return false;
+  }
+}
+
 /** Verify the immutable archive hash and return its fully validated projections. */
 export function verifiedArchivedRoundProjection({
   programId,
@@ -635,7 +657,9 @@ export function roundProjectionMatchesArchivedProof({
       maxRows,
     });
     for (const [field, expected] of Object.entries(roundProjection)) {
-      if (typeof expected === 'boolean') {
+      if (field === 'randomness_value') {
+        if (!randomnessProjectionValueMatches(indexedRound, roundProjection)) return false;
+      } else if (typeof expected === 'boolean') {
         if (indexedRound[field] !== expected) return false;
       } else if (expected === null) {
         if (indexedRound[field] !== null) return false;
