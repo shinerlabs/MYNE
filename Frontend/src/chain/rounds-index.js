@@ -1,7 +1,10 @@
 import { supabase, isSocialConfigured } from '../social/config.js';
 import { ROUND_DURATION } from './config.js';
 import { nowSeconds as chainNowSeconds } from './round.js';
-import { summariseStakingRewardWindow } from './staking-apy.js';
+import {
+  selectLatestCompleteStakingRewardWindow,
+  summariseStakingRewardWindow,
+} from './staking-apy.js';
 import {
   commitmentHexFromAccount, describeRandomnessRound, normalizeProofHex,
 } from './randomness-mode.js';
@@ -325,6 +328,7 @@ export async function loadMyBetRounds(address) {
 
 const STAKING_WINDOW_CACHE_MS = 30_000;
 const ROUND_CADENCE_SECONDS = Number(ROUND_DURATION);
+const PAUSED_STAKING_WINDOW_LOOKBACK_SECONDS = 6 * 60 * 60;
 let stakingWindowCache = null;
 
 /**
@@ -367,27 +371,35 @@ export async function loadStakingRewardWindow(
     if (latestError || !latestRows?.length) return null;
     const end = Number(latestRows[0].settles_at);
     if (!Number.isSafeInteger(end)) return null;
-    const start = end - Math.round(windowMinutes * 60);
+    const exactWindowStart = end - Math.round(windowMinutes * 60);
+    const queryStart = allowStale
+      ? end - PAUSED_STAKING_WINDOW_LOOKBACK_SECONDS
+      : exactWindowStart;
     const { data, error } = await supabase
       .from('mine_rounds')
       .select('round_id,resolved,settles_at,staking_net_lamports::text')
-      .gte('settles_at', start)
+      .gte('settles_at', queryStart)
       .lte('settles_at', end)
       .order('settles_at', { ascending: true })
       .limit(1000);
     if (error) return null;
+    if (allowStale) {
+      return selectLatestCompleteStakingRewardWindow(data ?? [], {
+        windowMinutes,
+        roundCadenceSeconds: ROUND_CADENCE_SECONDS,
+        observedAt,
+        maxRows: 1000,
+      });
+    }
     return summariseStakingRewardWindow(data ?? [], {
-      start,
+      start: exactWindowStart,
       end,
       windowMinutes,
       roundCadenceSeconds: ROUND_CADENCE_SECONDS,
       maxRows: 1000,
       observedAt,
       watermarkSettlesAt: end,
-      // Mining creates no new reward rows while paused. A paused read anchors
-      // to the final verified fee row instead of expiring it after three
-      // cadences; live reads retain the strict freshness guard.
-      maxStalenessSeconds: allowStale ? Number.MAX_SAFE_INTEGER : ROUND_CADENCE_SECONDS * 3,
+      maxStalenessSeconds: ROUND_CADENCE_SECONDS * 3,
       maxSettlementGapSeconds: ROUND_CADENCE_SECONDS + 5,
     });
   })().catch(() => null);

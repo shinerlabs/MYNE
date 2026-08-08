@@ -2620,7 +2620,10 @@ const paintMineBalance = () => {
   if (!label) return;
   const balance = Number(chain.format.solIcon(chain.state.balance ?? 0n, 6));
   const minimum = mineCostLabel(chain.MIN_ETH_PER_ROUND);
-  const autoMaximum = Number(maxAutoPlanFundingLamports(chain.state.balance ?? 0n)) / 1e9;
+  const autoMaximum = Number(maxAutoPlanFundingLamports(
+    chain.state.balance ?? 0n,
+    chain.state.autoPlanFundingReserve ?? 0n,
+  )) / 1e9;
   label.textContent = chain.state.account
     ? `Balance ${mineCostLabel(balance)}${autoRound ? ` · Auto available ${mineCostLabel(autoMaximum)} (90%)` : ''} · Min ${minimum}`
     : '';
@@ -2654,11 +2657,15 @@ const updateMine = () => {
   const receiptRent = typeof chain.state.autoPlanMaxFee === 'bigint'
     ? chain.state.autoPlanMaxFee
     : null;
-  const maxFundingLamports = maxAutoPlanFundingLamports(chain.state.balance ?? 0n);
+  const maxFundingLamports = maxAutoPlanFundingLamports(
+    chain.state.balance ?? 0n,
+    chain.state.autoPlanFundingReserve ?? 0n,
+  );
   const maxRoundsBig = receiptRent == null ? 0n : affordableAutoPlanRounds({
     walletBalance: chain.state.balance ?? 0n,
     amountPerPlay: perRoundLamports,
     maxFee: receiptRent,
+    setupReserve: chain.state.autoPlanFundingReserve ?? 0n,
   });
   const maxRounds = maxRoundsBig > BigInt(Number.MAX_SAFE_INTEGER)
     ? Number.MAX_SAFE_INTEGER
@@ -5517,7 +5524,7 @@ const renderPlan = (state) => {
       <b>${affordable == null ? 'cost loading' : stalled ? 'needs top-up' : `${rounds} round${rounds === '1' ? '' : 's'} left`}</b>
     </div>
     <p class="auto-plan-summary">${plan.tiles.length} tile${plan.tiles.length === 1 ? '' : 's'} · ${chain.format.ethSmart(plan.amountPerPlay)} SOL per round · ${chain.format.ethSmart(plan.balance)} SOL left</p>
-    <p class="auto-plan-reward-mode"><b>${autoRewardMode === 'burn' ? 'AUTO-BURN' : 'AUTO-MINE'}</b> · ${autoRewardMode === 'burn' ? 'Stake + burn your MYNE for 5× staking pool weight. 0% Claim Fee' : 'Keep your MYNE in-system and accumulating. 10% Claim Fee'}</p>
+    <p class="auto-plan-reward-mode"><b>${plan.rewardMode === 'burn' ? 'AUTO-BURN' : 'AUTO-MINE'}</b> · ${plan.rewardMode === 'burn' ? 'Stake + burn your MYNE for 5× staking pool weight. 0% Claim Fee' : 'Keep your MYNE in-system and accumulating. 10% Claim Fee'}</p>
     ${affordable == null ? '<p class="auto-plan-warn">Live receipt-rent quote unavailable. Round capacity is not estimated until the RPC returns it.</p>' : ''}
     ${stalled ? `<p class="auto-plan-warn">Balance ${chain.format.ethSmart(plan.balance)} SOL is below the ${chain.format.ethSmart(perRoundCost)} SOL needed for one more round (exact wager + receipt rent). Top up to resume, or withdraw what's left.</p>` : ''}
     ${plan.autoClaim

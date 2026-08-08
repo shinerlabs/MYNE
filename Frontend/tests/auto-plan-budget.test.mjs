@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   affordableAutoPlanRounds,
+  autoPlanSetupReserve,
   maxAutoPlanFundingLamports,
   requiredDeposit,
 } from '../src/chain/autocommit.js';
@@ -12,6 +13,16 @@ test('Auto-round keeps exactly 10% of wallet SOL outside plan funding', () => {
   assert.equal(maxAutoPlanFundingLamports(1_000n), 900n);
   assert.equal(maxAutoPlanFundingLamports(11n), 9n);
   assert.equal(maxAutoPlanFundingLamports(0n), 0n);
+  assert.equal(maxAutoPlanFundingLamports(1_000n, 100n), 810n);
+});
+
+test('first-wallet setup costs are reserved before the 90% funding ceiling', () => {
+  const feeParams = {
+    transactionFeeReserve: 5n, autoPlanRent: 20n, minerRent: 30n, stakePositionRent: 40n,
+  };
+  assert.equal(autoPlanSetupReserve({ hasMiner: false, hasPlan: false, feeParams }), 95n);
+  assert.equal(autoPlanSetupReserve({ hasMiner: true, hasPlan: false, feeParams }), 25n);
+  assert.equal(autoPlanSetupReserve({ hasMiner: true, hasPlan: true, feeParams }), 5n);
 });
 
 test('Auto-round capacity uses the exact wager plus live receipt rent', () => {
@@ -19,7 +30,8 @@ test('Auto-round capacity uses the exact wager plus live receipt rent', () => {
     walletBalance: 1_000n,
     amountPerPlay: 100n,
     maxFee: 50n,
-  }), 6n);
+    setupReserve: 100n,
+  }), 5n);
   assert.equal(requiredDeposit({ amountPerPlay: 100n, maxFee: 50n, fundRounds: 6 }), 900n);
 });
 
@@ -29,11 +41,13 @@ test('both initial funding and top-ups enforce the 90% boundary before submissio
     readFile(new URL('../src/chain/mine-page.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/main.js', import.meta.url), 'utf8'),
   ]);
-  assert.match(autoCommit, /await assertFundingWithinWalletBudget\(deposit, authority\)/);
-  assert.match(autoCommit, /await assertFundingWithinWalletBudget\(value, authority\)/);
+  assert.match(autoCommit, /await assertFundingWithinWalletBudget\(deposit, authority, setupReserve\)/);
+  assert.match(autoCommit, /await assertFundingWithinWalletBudget\(value, authority, feeParams\.transactionFeeReserve\)/);
   assert.match(minePage, /deposit > maximumFunding/);
   assert.match(minePage, /value > maximumFunding/);
   assert.match(main, /affordableAutoPlanRounds\(\{/);
   assert.match(main, /state\.autoPlanMaxFee/);
+  assert.match(autoCommit, /minerRegistrationInstruction/);
+  assert.match(main, /plan\.rewardMode === 'burn'/);
   assert.doesNotMatch(main, /AUTO_FEE_WEI|AUTO_FEE_PER_ROUND|GAS_RESERVE_ETH/);
 });

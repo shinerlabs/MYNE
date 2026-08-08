@@ -1235,7 +1235,7 @@ pub mod myne_protocol {
         Ok(())
     }
 
-    pub fn cancel_auto_plan(ctx: Context<ManageAutoPlan>) -> Result<()> {
+    pub fn cancel_auto_plan(ctx: Context<CancelAutoPlan>) -> Result<()> {
         let amount = ctx.accounts.auto_plan.balance_lamports;
         move_lamports(
             &ctx.accounts.auto_plan.to_account_info(),
@@ -4517,6 +4517,21 @@ pub struct ManageAutoPlan<'info> {
     #[account(seeds=[CONFIG_SEED], bump=config.bump)]
     pub config: Account<'info, ProtocolConfig>,
     #[account(mut, seeds=[b"auto_plan", authority.key().as_ref()], bump=auto_plan.bump, has_one=authority)]
+    pub auto_plan: Account<'info, AutoPlan>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+}
+#[derive(Accounts)]
+pub struct CancelAutoPlan<'info> {
+    #[account(seeds=[CONFIG_SEED], bump=config.bump)]
+    pub config: Account<'info, ProtocolConfig>,
+    #[account(
+        mut,
+        close=authority,
+        seeds=[b"auto_plan", authority.key().as_ref()],
+        bump=auto_plan.bump,
+        has_one=authority
+    )]
     pub auto_plan: Account<'info, AutoPlan>,
     #[account(mut)]
     pub authority: Signer<'info>,

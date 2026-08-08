@@ -27,6 +27,7 @@ import {
   ROUND_KEEPER_DEFERRED_EXIT_CODE,
   ROUND_KEEPER_MISSED_EXIT_CODE,
 } from './round-schedule-policy.mjs';
+import { executeAutoPlansDuringWindow } from './auto-plan-executor.mjs';
 
 const { AnchorProvider, Program, Wallet } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
@@ -362,75 +363,39 @@ console.log(JSON.stringify({
 // A provider-backed round may be created and bound during its preparation
 // lead, but the program deliberately rejects every wager before `opened_at`.
 await waitForScheduledTimestamp(openedAt);
-const autoExecutions = [];
 const receiptRent = BigInt(await connection.getMinimumBalanceForRentExemption(468));
-let activePlanIndex = [];
 if ((await chainTimeSeconds()) < bettingEndsAt && asBigInt(roundState.randomnessCommitSlot) === 0n) {
-  try {
-    activePlanIndex = await indexedRows('mine_auto_plans?active=eq.true&select=authority&order=authority.asc');
-  } catch (error) {
-    // Auto-round availability may degrade when the index is unavailable, but
-    // the randomness lifecycle must still commit and settle the round.
-    console.error(JSON.stringify({
-      event: 'auto-plan-index-unavailable',
-      round: ROUND_ID.toString(),
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }
+  await executeAutoPlansDuringWindow({
+    bettingEndsAt,
+    nowSeconds: chainTimeSeconds,
+    sleep,
+    indexedRows,
+    buildEntry: async ({ authority: indexedAuthority }) => {
+      const authority = new PublicKey(indexedAuthority);
+      const autoPlan = pda('auto_plan', authority.toBuffer());
+      const plan = await myne.account.autoPlan.fetchNullable(autoPlan);
+      if (!plan || !plan.authority.equals(authority)) return null;
+      const perRound = plan.amounts.reduce((sum, amount) => sum + BigInt(amount.toString()), 0n);
+      if (!plan.active || BigInt(plan.balanceLamports.toString()) < perRound + receiptRent
+          || BigInt(plan.lastRound.toString()) === ROUND_ID) return null;
+      const nonce = BigInt(plan.nextNonce.toString());
+      const nonceSeed = Buffer.alloc(8);
+      nonceSeed.writeBigUInt64LE(nonce);
+      const miner = pda('miner', authority.toBuffer());
+      const receipt = pda('bet', roundSeed, authority.toBuffer(), nonceSeed);
+      const ix = await myne.methods.executeAutoPlan(ROUND_ID_BN, new anchor.BN(nonce.toString())).accounts({
+        config, autoPlan, miner, round, receipt, executor: keypair.publicKey,
+        randomnessAccount: randomnessPubkey,
+        systemProgram: SystemProgram.programId,
+      }).instruction();
+      return { authority: authority.toBase58(), ix };
+    },
+    sendBatch: (batch) => sendKeeperInstructions(batch.map(({ ix }) => ix)),
+    onEvent: (event) => console[event.error ? 'error' : 'log'](JSON.stringify({
+      ...event, round: ROUND_ID.toString(),
+    })),
+  });
 }
-const executable = [];
-for (const indexed of activePlanIndex) {
-  try {
-    const authority = new PublicKey(indexed.authority);
-    const autoPlan = pda('auto_plan', authority.toBuffer());
-    const plan = await myne.account.autoPlan.fetchNullable(autoPlan);
-    if (!plan || !plan.authority.equals(authority)) continue;
-    const perRound = plan.amounts.reduce((sum, amount) => sum + BigInt(amount.toString()), 0n);
-    if (!plan.active || BigInt(plan.balanceLamports.toString()) < perRound + receiptRent
-        || BigInt(plan.lastRound.toString()) === ROUND_ID) continue;
-    const nonce = BigInt(plan.nextNonce.toString());
-    const nonceSeed = Buffer.alloc(8);
-    nonceSeed.writeBigUInt64LE(nonce);
-    const miner = pda('miner', authority.toBuffer());
-    const receipt = pda('bet', roundSeed, authority.toBuffer(), nonceSeed);
-    const ix = await myne.methods.executeAutoPlan(ROUND_ID_BN, new anchor.BN(nonce.toString())).accounts({
-      config, autoPlan, miner, round, receipt, executor: keypair.publicKey,
-      randomnessAccount: randomnessPubkey,
-      systemProgram: SystemProgram.programId,
-    }).instruction();
-    executable.push({ authority: authority.toBase58(), ix });
-  } catch (error) {
-    console.error(JSON.stringify({
-      event: 'auto-plan-invalid-index-entry',
-      round: ROUND_ID.toString(),
-      authority: indexed?.authority ?? null,
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }
-}
-const AUTO_BATCH_SIZE = Math.max(1, Math.min(6, Number(process.env.AUTO_PLAN_BATCH_SIZE || 4)));
-for (let offset = 0; offset < executable.length; offset += AUTO_BATCH_SIZE) {
-  const batch = executable.slice(offset, offset + AUTO_BATCH_SIZE);
-  try {
-    const sent = await sendKeeperInstructions(batch.map((entry) => entry.ix));
-    autoExecutions.push({
-      authorities: batch.map((entry) => entry.authority),
-      signature: sent.signature,
-      measuredUnits: sent.measuredUnits,
-      computeLimit: sent.computeLimit,
-    });
-  } catch (error) {
-    // A user may cancel or reconfigure between the indexed read and execution.
-    // That race must not prevent the round's post-close commit and settlement.
-    console.error(JSON.stringify({
-      event: 'auto-plan-batch-skipped',
-      round: ROUND_ID.toString(),
-      authorities: batch.map((entry) => entry.authority),
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }
-}
-if (autoExecutions.length) console.log(JSON.stringify({ event: 'auto-plans-executed', round: ROUND_ID.toString(), executions: autoExecutions }));
 
 // Betting must close before the provider request is committed. Commit and the
 // MYNE callback are atomic so the recorded slot can never come from an older

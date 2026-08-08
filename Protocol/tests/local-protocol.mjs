@@ -508,6 +508,15 @@ await assert.rejects(
     .rpc(),
   /AutoPlanAlreadyExecuted|already executed|custom program error/i,
 );
+await program.methods
+  .cancelAutoPlan()
+  .accounts({ config, autoPlan, authority: payer.publicKey })
+  .rpc();
+assert.equal(
+  await program.account.autoPlan.fetchNullable(autoPlan),
+  null,
+  'Cancelling Auto Mine must close its PDA and return tracked balance plus account rent',
+);
 
 let roundState = await program.account.round.fetch(round);
 assert.equal(roundState.grossDeployedLamports.toString(), '650000000');

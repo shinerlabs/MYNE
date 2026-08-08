@@ -6,6 +6,7 @@ import {
   apyPercent,
   formatApyPercent,
   positionApyPercent,
+  selectLatestCompleteStakingRewardWindow,
   selectPausedApySnapshot,
   stakingApyVariants,
   stakingApySnapshot,
@@ -93,6 +94,31 @@ test('a protocol pause retains one validated APY snapshot', () => {
 
 test('staking reward window sums exact indexed lamports only when coverage is complete', () => {
   assert.deepEqual(summariseStakingRewardWindow(completeRows(), context), {
+    complete: true,
+    windowMinutes: 5,
+    rewardLamports: 1_000n,
+    rounds: 5,
+    firstSettlesAt: 1_005,
+    lastSettlesAt: 1_265,
+  });
+});
+
+test('paused APY uses the newest earlier fully verified window across an index gap', () => {
+  const olderComplete = completeRows();
+  const brokenLatest = [
+    { round_id: '40', resolved: true, settles_at: 1_330, staking_net_lamports: '900' },
+    { round_id: '41', resolved: true, settles_at: 1_395, staking_net_lamports: '0' },
+  ];
+  const selected = selectLatestCompleteStakingRewardWindow(
+    [...olderComplete, ...brokenLatest],
+    {
+      windowMinutes: 5,
+      roundCadenceSeconds: 65,
+      observedAt: 1_500,
+      maxRows: 1000,
+    },
+  );
+  assert.deepEqual(selected, {
     complete: true,
     windowMinutes: 5,
     rewardLamports: 1_000n,
@@ -200,5 +226,7 @@ test('staking UI does not invent lifetime claims and pool quotes expire', async 
   assert.match(rounds, /nowSeconds = Number\(chainNowSeconds\(\)\)/);
   assert.match(rounds, /\.eq\('resolved', true\)[\s\S]*\.not\('staking_net_lamports', 'is', null\)/);
   assert.match(rounds, /watermarkSettlesAt: end/);
-  assert.match(rounds, /allowStale \? Number\.MAX_SAFE_INTEGER : ROUND_CADENCE_SECONDS \* 3/);
+  assert.match(rounds, /PAUSED_STAKING_WINDOW_LOOKBACK_SECONDS/);
+  assert.match(rounds, /selectLatestCompleteStakingRewardWindow\(data \?\? \[\],/);
+  assert.match(rounds, /maxStalenessSeconds: ROUND_CADENCE_SECONDS \* 3/);
 });

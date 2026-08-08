@@ -170,3 +170,49 @@ export function summariseStakingRewardWindow(
     lastSettlesAt,
   };
 }
+
+/**
+ * Return the newest exact reward window from a bounded chronological index read.
+ *
+ * Pausing can expose an older index gap inside the latest 30 minutes. Walking
+ * backwards is safe only because every candidate is still passed through the
+ * same strict consecutive-round, fee-event and time-coverage validator used by
+ * the live metric. Missing rows are never interpreted as zero rewards.
+ */
+export function selectLatestCompleteStakingRewardWindow(
+  rows,
+  {
+    windowMinutes,
+    roundCadenceSeconds,
+    observedAt,
+    maxRows = 1000,
+  },
+) {
+  if (!Array.isArray(rows) || rows.length === 0 || rows.length >= maxRows
+    || !Number.isFinite(windowMinutes) || !(windowMinutes > 0)
+    || !Number.isSafeInteger(roundCadenceSeconds) || roundCadenceSeconds <= 0
+    || !Number.isSafeInteger(observedAt)) return null;
+
+  const windowSeconds = Math.round(windowMinutes * 60);
+  for (let endIndex = rows.length - 1; endIndex >= 0; endIndex -= 1) {
+    const end = Number(rows[endIndex]?.settles_at);
+    if (!Number.isSafeInteger(end) || end > observedAt) continue;
+    const start = end - windowSeconds;
+    let startIndex = endIndex;
+    while (startIndex > 0 && Number(rows[startIndex - 1]?.settles_at) >= start) startIndex -= 1;
+    const candidate = rows.slice(startIndex, endIndex + 1);
+    const summary = summariseStakingRewardWindow(candidate, {
+      start,
+      end,
+      windowMinutes,
+      roundCadenceSeconds,
+      maxRows,
+      observedAt,
+      watermarkSettlesAt: end,
+      maxStalenessSeconds: Number.MAX_SAFE_INTEGER,
+      maxSettlementGapSeconds: roundCadenceSeconds + 5,
+    });
+    if (summary.complete) return summary;
+  }
+  return null;
+}

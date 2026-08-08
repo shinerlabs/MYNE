@@ -2,7 +2,7 @@ import { formatEther, parseEther } from './units.js';
 
 import {
   UNLIMITED_PLAYS, approveClaimDelegate, cancelPlan, configurePlan, depositToPlan,
-  isClaimDelegate, maxAutoPlanFundingLamports, readFeeParams, readPlan, requiredDeposit,
+  autoPlanSetupReserve, isClaimDelegate, maxAutoPlanFundingLamports, readFeeParams, readPlan, requiredDeposit,
 } from './autocommit.js';
 
 export { UNLIMITED_PLAYS };
@@ -72,6 +72,7 @@ export const state = {
   currentRound: null, // full readRound() of state.roundId — carries its own `resolved`/winner
   plan: null, // MYNE auto-plan for the connected account (null = none configured)
   autoPlanMaxFee: null, // live rent for one BetReceipt; null means the RPC quote is unavailable
+  autoPlanFundingReserve: 0n, // setup rent + configured fee budget excluded before applying 90%
   // Live maintenance status, refreshed with the round. `null` means the config
   // read has not completed; only an authoritative on-chain `true` disables Mine.
   protocolPaused: null,
@@ -170,14 +171,28 @@ async function refreshJackpot() {
 
 /** Auto-round plan state. Only meaningful with a wallet connected. */
 async function refreshPlan() {
-  if (!state.account) { state.plan = null; state.autoPlanMaxFee = null; return emit(); }
+  if (!state.account) {
+    state.plan = null;
+    state.autoPlanMaxFee = null;
+    state.autoPlanFundingReserve = 0n;
+    return emit();
+  }
   try {
     const [planResult, feeResult] = await Promise.allSettled([
       readPlan(state.account),
       readFeeParams(),
     ]);
-    if (feeResult.status === 'fulfilled') state.autoPlanMaxFee = feeResult.value.maxFee;
-    else state.autoPlanMaxFee = null;
+    if (feeResult.status === 'fulfilled') {
+      state.autoPlanMaxFee = feeResult.value.maxFee;
+      state.autoPlanFundingReserve = autoPlanSetupReserve({
+        hasMiner: state.hasAccount,
+        hasPlan: Boolean(planResult.status === 'fulfilled' && planResult.value),
+        feeParams: feeResult.value,
+      });
+    } else {
+      state.autoPlanMaxFee = null;
+      state.autoPlanFundingReserve = 0n;
+    }
     if (planResult.status === 'rejected') throw planResult.reason;
     const plan = planResult.value;
     // Keep a DISABLED plan visible while it still holds a balance. An exhausted plan keeps
@@ -458,7 +473,8 @@ async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoCla
   const unlimited = autoClaim || plays === UNLIMITED_PLAYS;
   const effectivePlays = unlimited ? UNLIMITED_PLAYS : plays;
 
-  const { accountDeposit, maxFee } = await readFeeParams();
+  const feeParams = await readFeeParams();
+  const { accountDeposit, maxFee } = feeParams;
   const amountPerPlay = parseEther(String(ethPerTile)) * BigInt(tiles.length);
   // Funding is independent of play count: an unlimited plan runs until its balance drains,
   // so the user chooses how many rounds to prepay and can top up at any time.
@@ -469,7 +485,10 @@ async function configureAutoPlan({ tiles, ethPerTile, plays, fundRounds, autoCla
   if (deposit > state.balance) {
     return notify(`Need ${formatEther(deposit)} SOL to fund this plan (incl. executor fees)`);
   }
-  const maximumFunding = maxAutoPlanFundingLamports(state.balance);
+  const setupReserve = autoPlanSetupReserve({
+    hasMiner: state.hasAccount, hasPlan: Boolean(state.plan), feeParams,
+  });
+  const maximumFunding = maxAutoPlanFundingLamports(state.balance, setupReserve);
   if (deposit > maximumFunding) {
     return notify(`Auto-round can use at most ${formatEther(maximumFunding)} SOL (90% of your wallet balance)`);
   }
@@ -501,10 +520,10 @@ export async function topUpPlan(rounds = 10) {
   if (!getAccount()) return connectWallet();
   if (!state.plan) return notify('No active plan');
 
-  const { maxFee } = await readFeeParams();
+  const { maxFee, transactionFeeReserve } = await readFeeParams();
   const value = state.plan.amountPerPlay * BigInt(rounds) + maxFee * BigInt(rounds);
   if (value > state.balance) return notify(`Need ${formatEther(value)} SOL to add ${rounds} rounds`);
-  const maximumFunding = maxAutoPlanFundingLamports(state.balance);
+  const maximumFunding = maxAutoPlanFundingLamports(state.balance, transactionFeeReserve);
   if (value > maximumFunding) {
     return notify(`Auto-round top-ups can use at most ${formatEther(maximumFunding)} SOL (90% of your wallet balance)`);
   }

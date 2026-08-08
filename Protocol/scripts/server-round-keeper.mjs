@@ -34,6 +34,7 @@ import {
   loadOrCreateServerReveal,
   serverRandomnessCommitment,
 } from './server-randomness-policy.mjs';
+import { executeAutoPlansDuringWindow } from './auto-plan-executor.mjs';
 
 const { AnchorProvider, Program, Wallet } = anchor;
 const PROGRAM_ID = new PublicKey(
@@ -275,27 +276,20 @@ console.log(JSON.stringify({
 // manual and automated deployments until its scheduled `opened_at`.
 await waitForChainTimestamp(openedAt);
 if ((await chainTimeSeconds()) < bettingEndsAt) {
-  let activePlanIndex = [];
-  try {
-    activePlanIndex = await indexedRows('mine_auto_plans?active=eq.true&select=authority&order=authority.asc');
-  } catch (error) {
-    console.error(JSON.stringify({
-      event: 'auto-plan-index-unavailable',
-      round: ROUND_ID.toString(),
-      error: error instanceof Error ? error.message : String(error),
-    }));
-  }
   const receiptRent = BigInt(await connection.getMinimumBalanceForRentExemption(468));
-  const executable = [];
-  for (const indexed of activePlanIndex) {
-    try {
-      const authority = new PublicKey(indexed.authority);
+  await executeAutoPlansDuringWindow({
+    bettingEndsAt,
+    nowSeconds: chainTimeSeconds,
+    sleep,
+    indexedRows,
+    buildEntry: async ({ authority: indexedAuthority }) => {
+      const authority = new PublicKey(indexedAuthority);
       const autoPlan = pda('auto_plan', authority.toBuffer());
       const plan = await program.account.autoPlan.fetchNullable(autoPlan);
-      if (!plan || !plan.authority.equals(authority)) continue;
+      if (!plan || !plan.authority.equals(authority)) return null;
       const perRound = plan.amounts.reduce((sum, amount) => sum + asBigInt(amount), 0n);
       if (!plan.active || asBigInt(plan.balanceLamports) < perRound + receiptRent
-          || asBigInt(plan.lastRound) === ROUND_ID) continue;
+          || asBigInt(plan.lastRound) === ROUND_ID) return null;
       const nonce = asBigInt(plan.nextNonce);
       const nonceSeed = Buffer.alloc(8);
       nonceSeed.writeBigUInt64LE(nonce);
@@ -308,36 +302,13 @@ if ((await chainTimeSeconds()) < bettingEndsAt) {
           randomnessAccount: null, systemProgram: SystemProgram.programId,
         })
         .instruction();
-      executable.push({ authority: authority.toBase58(), ix });
-    } catch (error) {
-      console.error(JSON.stringify({
-        event: 'auto-plan-invalid-index-entry',
-        round: ROUND_ID.toString(),
-        authority: indexed?.authority ?? null,
-        error: error instanceof Error ? error.message : String(error),
-      }));
-    }
-  }
-  const batchSize = Math.max(1, Math.min(6, Number(process.env.AUTO_PLAN_BATCH_SIZE || 4)));
-  for (let offset = 0; offset < executable.length; offset += batchSize) {
-    const batch = executable.slice(offset, offset + batchSize);
-    try {
-      const sent = await sendKeeperInstructions(batch.map((entry) => entry.ix));
-      console.log(JSON.stringify({
-        event: 'auto-plans-executed',
-        round: ROUND_ID.toString(),
-        authorities: batch.map((entry) => entry.authority),
-        signature: sent.signature,
-      }));
-    } catch (error) {
-      console.error(JSON.stringify({
-        event: 'auto-plan-batch-skipped',
-        round: ROUND_ID.toString(),
-        authorities: batch.map((entry) => entry.authority),
-        error: error instanceof Error ? error.message : String(error),
-      }));
-    }
-  }
+      return { authority: authority.toBase58(), ix };
+    },
+    sendBatch: (batch) => sendKeeperInstructions(batch.map(({ ix }) => ix)),
+    onEvent: (event) => console[event.error ? 'error' : 'log'](JSON.stringify({
+      ...event, round: ROUND_ID.toString(),
+    })),
+  });
 }
 
 await waitForChainTimestamp(bettingEndsAt);

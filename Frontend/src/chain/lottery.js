@@ -17,6 +17,7 @@ import {
   SERVER_RANDOMNESS_PENDING,
 } from './randomness-mode.js';
 import { createReceiptNonce } from './receipt-nonce.js';
+import { minerPda, minerRegistrationInstruction, stakePositionPda } from './miner-registration.js';
 import {
   asBn, decodeProtocolAccount, derivePda, fetchProtocolAccount, getProtocolConfig, getWritableProgram,
   protocolPdas, protocolProgramId, sendInstructions, u64Seed,
@@ -48,8 +49,6 @@ const createAtaInstruction = (payer, owner, mint, ata) => new TransactionInstruc
   ], data: new Uint8Array(),
 });
 const roundPda = (roundId) => derivePda('round', u64Seed(roundId));
-const minerPda = (authority) => derivePda('miner', new PublicKey(authority));
-const stakePositionPda = (authority) => derivePda('stake_position', new PublicKey(authority));
 const receiptPda = (roundId, authority, nonce) => derivePda(
   'bet', u64Seed(roundId), new PublicKey(authority), u64Seed(nonce),
 );
@@ -237,12 +236,6 @@ export async function readMyBets(roundId, address) {
   return totals;
 }
 
-const referralFromLocation = () => {
-  const match = window.location.hash.match(/[?&]ref=([^&]+)/);
-  if (!match) return PublicKey.default;
-  try { return new PublicKey(decodeURIComponent(match[1])); } catch { return PublicKey.default; }
-};
-
 export async function placeBet({ roundId, tiles, ethPerTile }) {
   const account = getAccount();
   if (!account) throw new Error('Connect a Solana wallet first');
@@ -255,7 +248,6 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
   const nonce = createReceiptNonce();
   const round = roundPda(roundId);
   const miner = minerPda(account);
-  const stakePosition = stakePositionPda(account);
   const receipt = receiptPda(roundId, account, nonce);
   const { program } = await getWritableProgram();
   const configState = await getProtocolConfig();
@@ -267,14 +259,8 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
   const configuredServerMode = isServerRandomnessProgram(configuredRandomnessProgram);
   const roundState = await fetchProtocolAccount('Round', round);
   const instructions = [];
-  if (!(await connection.getAccountInfo(miner, 'confirmed'))) {
-    const referrer = referralFromLocation();
-    instructions.push(await program.methods.registerMiner(referrer).accounts({
-      config: protocolPdas.config, miningPool: protocolPdas.miningPool, stakePool: protocolPdas.stakePool,
-      miner, stakePosition, referrerMiner: referrer.equals(PublicKey.default) ? null : minerPda(referrer),
-      authority, systemProgram: SystemProgram.programId,
-    }).instruction());
-  }
+  const registration = await minerRegistrationInstruction({ program, authority });
+  if (registration.instruction) instructions.push(registration.instruction);
   if (!roundState) {
     if (providerRandomness) {
       throw new Error('This round is being prepared by the verified-randomness keeper. Please try again shortly.');
