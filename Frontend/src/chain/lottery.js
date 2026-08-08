@@ -3,7 +3,8 @@ import bs58 from 'bs58';
 
 import { connection, getAccount } from './client.js';
 import { GRID, MIN_ROUND_DEPLOYMENT, setGenesisTime, solanaNetwork } from './config.js';
-import { parseEther } from './units.js';
+import { formatEther, parseEther } from './units.js';
+import { manualDeploymentRequiredBalance, readFeeParams } from './autocommit.js';
 import { intervalReward } from './round-rewards.js';
 import { roundIdsForRange } from './round-range.js';
 import { loadReceiptIndex } from './rounds-index.js';
@@ -263,6 +264,20 @@ export async function placeBet({ roundId, tiles, ethPerTile }) {
   const roundState = await fetchProtocolAccount('Round', round);
   const instructions = [];
   const registration = await minerRegistrationInstruction({ program, authority });
+  const feeParams = await readFeeParams();
+  const walletBalance = await connection.getBalance(authority, 'confirmed');
+  const requiredBalance = manualDeploymentRequiredBalance({
+    amount: total,
+    hasMiner: !registration.instruction,
+    feeParams,
+  });
+  if (BigInt(walletBalance) < requiredBalance) {
+    const shortfall = requiredBalance - BigInt(walletBalance);
+    throw new Error(
+      `Not enough SOL for this deployment. Need ${formatEther(requiredBalance)} SOL total `
+      + `(deployment, account rent and network fee); add ${formatEther(shortfall)} SOL or lower the amount.`,
+    );
+  }
   if (registration.instruction) instructions.push(registration.instruction);
   if (!roundState) {
     if (providerRandomness) {

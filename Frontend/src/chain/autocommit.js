@@ -83,6 +83,16 @@ export function requiredDeposit({ amountPerPlay, fundRounds, maxFee = 0n }) {
   return (amountPerPlay + maxFee) * BigInt(fundRounds);
 }
 
+/** Exact wallet balance needed for one manual deployment. */
+export function manualDeploymentRequiredBalance({ amount, hasMiner, feeParams }) {
+  return toBig(amount)
+    + toBig(feeParams?.maxFee ?? 0n)
+    + toBig(feeParams?.transactionFeeReserve ?? 0n)
+    + (hasMiner
+      ? 0n
+      : toBig(feeParams?.minerRent ?? 0n) + toBig(feeParams?.stakePositionRent ?? 0n));
+}
+
 export function autoPlanSetupReserve({ hasMiner, hasPlan, feeParams }) {
   return toBig(feeParams?.transactionFeeReserve ?? 0n)
     + (hasPlan ? 0n : toBig(feeParams?.autoPlanRent ?? 0n))

@@ -364,6 +364,10 @@ export async function main(env = process.env) {
       MYNE_MINT_ADDRESS: mint.toBase58(),
       SUPABASE_URL: supabaseUrl,
       SUPABASE_SERVICE_ROLE_KEY: serviceRole,
+      ROUND_INDEXER_LEASE_HOLDER: String(
+        env.ROUND_INDEXER_LEASE_HOLDER
+          || `${programIdText}:${env.RAILWAY_DEPLOYMENT_ID || 'local'}:${env.RAILWAY_REPLICA_ID || process.pid}`,
+      ),
     });
     const specs = liveWorkerSpecs({
       programId: programIdText,

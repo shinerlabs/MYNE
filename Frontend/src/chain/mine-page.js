@@ -92,31 +92,67 @@ export const state = {
 const emptyTileBets = () => Array(25).fill(0n);
 let confirmedTileBets = { roundId: null, account: null, amounts: emptyTileBets() };
 
-const clearConfirmedTileBets = () => {
+const confirmedTileStorageKey = (roundId, account) => (
+  roundId === null || !account ? null : `myne-confirmed-tiles-v1:${account}:${roundId}`
+);
+
+const persistConfirmedTileBets = () => {
+  const key = confirmedTileStorageKey(confirmedTileBets.roundId, confirmedTileBets.account);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, JSON.stringify(confirmedTileBets.amounts.map(String)));
+  } catch { /* private storage or quota; in-memory locking remains authoritative */ }
+};
+
+const restoreConfirmedTileBets = ({ roundId, account }) => {
+  const key = confirmedTileStorageKey(roundId, account);
+  if (!key) return false;
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!Array.isArray(stored) || stored.length !== 25 || stored.some((value) => !/^\d+$/.test(String(value)))) {
+      return false;
+    }
+    confirmedTileBets = { roundId, account, amounts: stored.map(BigInt) };
+    return true;
+  } catch { return false; }
+};
+
+const clearConfirmedTileBets = ({ removeStored = false } = {}) => {
+  const key = confirmedTileStorageKey(confirmedTileBets.roundId, confirmedTileBets.account);
+  if (removeStored && key) {
+    try { localStorage.removeItem(key); } catch { /* storage unavailable */ }
+  }
   confirmedTileBets = { roundId: null, account: null, amounts: emptyTileBets() };
 };
 
-const rememberConfirmedTileBets = ({ roundId, account, tiles, amountPerTile }) => {
+const rememberConfirmedTileBets = ({ roundId, account, tiles, amountPerTile, baseAmounts = emptyTileBets() }) => {
   if (confirmedTileBets.roundId !== roundId || confirmedTileBets.account !== account) {
     confirmedTileBets = { roundId, account, amounts: emptyTileBets() };
   }
   for (const tile of tiles) {
     const index = Number(tile) - 1;
     if (index >= 0 && index < confirmedTileBets.amounts.length) {
+      const priorTotal = BigInt(baseAmounts[index] ?? 0n);
+      if (priorTotal > confirmedTileBets.amounts[index]) confirmedTileBets.amounts[index] = priorTotal;
       confirmedTileBets.amounts[index] += amountPerTile;
     }
   }
+  persistConfirmedTileBets();
 };
 
 const reconcileConfirmedTileBets = ({ roundId, account, onChainBets }) => {
   if (confirmedTileBets.roundId !== roundId || confirmedTileBets.account !== account) {
-    return onChainBets;
+    if (!restoreConfirmedTileBets({ roundId, account })) return onChainBets;
   }
   const merged = mergeConfirmedTileBets(onChainBets, confirmedTileBets.amounts);
   confirmedTileBets.amounts = confirmedTileBets.amounts.map((amount, index) => (
     BigInt(onChainBets[index] ?? 0n) >= amount ? 0n : amount
   ));
-  if (confirmedTileBets.amounts.every((amount) => amount === 0n)) clearConfirmedTileBets();
+  if (confirmedTileBets.amounts.every((amount) => amount === 0n)) {
+    clearConfirmedTileBets({ removeStored: true });
+  } else {
+    persistConfirmedTileBets();
+  }
   return merged;
 };
 
@@ -328,7 +364,7 @@ function tick() {
   state.secondsLeft = next.secondsLeft;
 
   if (rolled) {
-    clearConfirmedTileBets();
+    clearConfirmedTileBets({ removeStored: true });
     state.roundId = next.roundId;
     syncRoundRealtime(next.roundId);
     // Use the new chain round as the anchor. If the tab was backgrounded, `state.roundId` may
@@ -608,6 +644,7 @@ export async function mine({
           account: submittedAccount,
           tiles,
           amountPerTile: submittedAmountPerTile,
+          baseAmounts: state.myBets,
         });
         state.myBets = mergeConfirmedTileBets(state.myBets, confirmedTileBets.amounts);
         emit();

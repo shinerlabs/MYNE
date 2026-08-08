@@ -61,7 +61,11 @@ const startSlot = Number(process.env.ROUND_INDEXER_START_SLOT ?? -1);
 const referralStartSlot = Number(process.env.REFERRAL_INDEXER_START_SLOT ?? startSlot);
 const maxPages = Number(process.env.ROUND_INDEXER_MAX_PAGES || 100);
 const requireBuybackEvidence = process.env.ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE === '1';
-const indexerInstanceId = randomUUID();
+// A supervised child can be restarted after an RPC watchdog timeout while its
+// database lease is still live. The host supplies one stable, replica-scoped
+// holder so that replacement child can resume immediately without defeating
+// fencing between distinct hosts/replicas.
+const indexerInstanceId = String(process.env.ROUND_INDEXER_LEASE_HOLDER || '').trim() || randomUUID();
 const SERVER_RANDOMNESS_SLOT_FLAG = 1n << 63n;
 const SERVER_RANDOMNESS_SLOT_MASK = SERVER_RANDOMNESS_SLOT_FLAG - 1n;
 const SIGNED_BIGINT_MAX = SERVER_RANDOMNESS_SLOT_MASK;

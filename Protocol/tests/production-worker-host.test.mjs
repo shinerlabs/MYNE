@@ -45,6 +45,15 @@ test('live health fails closed when an essential settlement/index worker is down
   assert.equal(publicHealth({ ...state, mode: 'standby' }).ok, true);
 });
 
+test('round-indexer restarts retain a replica-scoped lease holder', async () => {
+  const [host, indexer] = await Promise.all([
+    readFile(new URL('../scripts/production-worker-host.mjs', import.meta.url), 'utf8'),
+    readFile(new URL('../scripts/round-indexer.mjs', import.meta.url), 'utf8'),
+  ]);
+  assert.match(host, /ROUND_INDEXER_LEASE_HOLDER:[\s\S]*RAILWAY_DEPLOYMENT_ID[\s\S]*RAILWAY_REPLICA_ID/);
+  assert.match(indexer, /process\.env\.ROUND_INDEXER_LEASE_HOLDER[\s\S]*\|\| randomUUID\(\)/);
+});
+
 test('worker host requires the complete server claims schema marker', async () => {
   const [source, migration] = await Promise.all([
     readFile(new URL('../scripts/production-worker-host.mjs', import.meta.url), 'utf8'),

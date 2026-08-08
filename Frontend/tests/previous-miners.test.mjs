@@ -80,6 +80,8 @@ test('the miners card keeps the latest played round while empty outcomes remain 
   assert.match(refresh, /confirmedMinerSource\(state\.lastResolved, state\.lastPlayedResolved\)/);
   assert.match(refresh, /const confirmedEmpty = isConfirmedEmptyRound\(confirmed\)/);
   assert.match(refresh, /!result\.miners\.length && !confirmedEmpty/);
+  assert.match(refresh, /if \(!confirmedMiners\.length && !confirmedEmpty\) return false/);
+  assert.match(refresh, /if \(rendered\) confirmedMinerRenderedKey = key/);
   assert.match(refresh, /WINNING TILE #\$\{winningSquare \+ 1\} · 0 MINERS · 0 MYNE REWARDED/);
   assert.match(refresh, /winning tile published · 0 MYNE rewarded/);
 });

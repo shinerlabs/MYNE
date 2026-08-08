@@ -5437,12 +5437,12 @@ const paintRoundMinerIdentity = async (row, wallet) => {
 };
 
 const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty = false } = {}) => {
-  if (!roundMinersList) return;
+  if (!roundMinersList) return false;
   const confirmedMiners = miners.map((miner) => ({ ...miner, roundId, winningSquare }));
   // An empty roster is final only when the settled Round account confirms
   // total_receipts == 0. Otherwise preserve the prior result while a late
   // receipt-index read catches up.
-  if (!confirmedMiners.length && !confirmedEmpty && roundMinersList.children.length) return;
+  if (!confirmedMiners.length && !confirmedEmpty) return false;
   confirmedMinerByWallet.clear();
   confirmedMiners.forEach((miner) => confirmedMinerByWallet.set(miner.address, miner));
   confirmedMinerRows = confirmedMiners;
@@ -5476,7 +5476,7 @@ const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty 
         }));
       } catch { /* private storage or quota; live chain data remains authoritative */ }
     }
-    return;
+    return confirmedEmpty;
   }
   const pageStart = confirmedMinerPage * CONFIRMED_MINERS_PAGE_SIZE;
   const pageRows = confirmedMiners.slice(pageStart, pageStart + CONFIRMED_MINERS_PAGE_SIZE);
@@ -5510,6 +5510,7 @@ const renderConfirmedMiners = (miners, roundId, winningSquare, { confirmedEmpty 
   try {
     localStorage.setItem('myne-previous-miners', JSON.stringify({ roundId: String(roundId), winningSquare, miners: confirmedMiners, confirmedEmpty: false }, (_, value) => typeof value === 'bigint' ? { __bigint: value.toString() } : value));
   } catch { /* private storage or quota; live chain data remains authoritative */ }
+  return true;
 };
 
 // Paint the last confirmed roster immediately on reload while the current RPC request catches up.
@@ -5538,8 +5539,8 @@ const refreshIndexedConfirmedMiners = async () => {
   // A settled played round with a non-zero receipt count cannot authoritatively have an empty
   // roster. Leave the previous card in place and retry on the next Realtime/poll signal.
   if (!result.miners.length && round.totalReceipts > 0n) return;
-  renderConfirmedMiners(previousRoundMinerRoster(result), round.roundId, result.winningSquare);
-  confirmedMinerRenderedKey = key;
+  const rendered = renderConfirmedMiners(previousRoundMinerRoster(result), round.roundId, result.winningSquare);
+  if (rendered) confirmedMinerRenderedKey = key;
   if (confirmedMinerRequestKey === key) confirmedMinerRequestKey = '';
 };
 
@@ -5569,10 +5570,10 @@ const scheduleRoundMinersRefresh = (state) => {
         roundMinerFetchTimer = window.setTimeout(fetchConfirmedMiners, 750);
         return;
       }
-      renderConfirmedMiners(previousRoundMinerRoster(result), requestedRound, result.winningSquare, {
+      const rendered = renderConfirmedMiners(previousRoundMinerRoster(result), requestedRound, result.winningSquare, {
         confirmedEmpty,
       });
-      confirmedMinerRenderedKey = key;
+      if (rendered) confirmedMinerRenderedKey = key;
     } catch (error) {
       // Keep the older confirmed result visible. A transient RPC failure must not replace a
       // known-good miner roster with an error or an empty state.
