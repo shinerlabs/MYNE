@@ -11,7 +11,7 @@
 - Hosting: Vercel project `myne-upph`
 - Supabase project: `tfyvarplanptbknnqzwn`
 - Production workers: Railway project `MYNE-Production`, service `myne-protocol-workers`
-  (healthy standby; transaction-producing workers disabled)
+  (service retained, runtime intentionally stopped during the emergency pause)
 
 The production build is deployed directly from the repository workspace. GitHub Desktop can
 push this commit to `main`; the connected Vercel project will then build from GitHub as usual.
@@ -64,7 +64,11 @@ Before Mainnet, apply all Supabase migrations (`20260807090000_round_index.sql`,
 `20260807131500_keeper_leases.sql`, `20260807133000_referral_read_model_v1.sql`,
 `20260807140000_wallet_chat_hardening.sql`,
 `20260807141000_wallet_validator_lint_cleanup.sql`, and
-`20260807142000_chat_admin_provisioning.sql`), rebuild and
+`20260807142000_chat_admin_provisioning.sql`,
+`20260808090000_server_randomness_proofs.sql`,
+`20260808113000_burn_stats.sql`,
+`20260808120000_receipt_reward_accrual.sql`, and
+`20260808123000_empty_round_stats.sql`), rebuild and
 synchronize both IDLs, record a fresh SBF hash,
 and repeat the full Rust, Anchor/local-validator, keeper-policy and frontend test suites. Prior
 version-5 hashes and test output are historical only.

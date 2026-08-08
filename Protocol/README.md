@@ -37,6 +37,9 @@ anchor test --validator legacy
 
 # Internal Mainnet candidate/preflight (not the final verified deployment build):
 pnpm build:mainnet
+
+# Read-only Mainnet-liability compatibility fork (requires reviewed RPC):
+MAINNET_RPC_URL=<reviewed-mainnet-rpc> pnpm test:mainnet-receipt-upgrade-fork
 ```
 
 Never deploy the default `anchor build` output to Mainnet. `pnpm build:mainnet` forwards
@@ -80,8 +83,9 @@ superseded by the version-6 readiness and launch documents.
 Production lifecycle services are deliberately separated from the randomness-critical reveal
 transaction:
 
-- `devnet:switchboard-round`/the supervised production round keeper binds an uncommitted request,
-  commits and records it only after betting closes, then reveals and settles atomically;
+- `devnet:switchboard-round` retains the reviewed Switchboard path, while the supervised Mainnet
+  server keeper binds a durable secret commitment before betting, locks a future SlotHashes entry
+  after betting closes, then reveals and settles permissionlessly;
 - `round:indexer` records finalized round/referral events, maintains versioned cursors and commits
   deterministic archive proofs;
 - `round:lifecycle` batches permissionless settlements/refunds and closes archived PDAs;
@@ -97,10 +101,12 @@ standby-to-live controls and incident procedure are documented in
 
 ## Mainnet-candidate boundary
 
-The checked-in code is a deployment candidate, not an authorization to launch. Production uses
-the verified Switchboard commit/reveal path and a canonical official Meteora DAMM v2 or DLMM
-reserve gate; the legacy
-caller-supplied randomness instruction is limited to configs whose randomness program is the
-default key. Before funding Mainnet, complete the external Switchboard/Meteora rehearsal,
+The checked-in code is a deployment candidate, not an authorization to launch. The production
+artifact accepts only the pinned legacy Switchboard provider or the explicitly selected MYNE
+server commit–reveal mode, and always enforces the canonical official Meteora DAMM v2 or DLMM
+reserve gate. Server mode prevents pre-bid outcome knowledge by mixing a pre-bet commitment with
+a future post-close SlotHashes entry, but a server can withhold its reveal and force refunds. The
+legacy caller-supplied randomness instruction is limited to configs whose randomness program is
+the default key. Before funding Mainnet, complete the exact server-randomness/Meteora canary,
 independent security review, legal review, and production-key/keeper setup in
 [`docs/MAINNET_LAUNCH_RUNBOOK.md`](docs/MAINNET_LAUNCH_RUNBOOK.md).

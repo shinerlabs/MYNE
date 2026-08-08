@@ -30,7 +30,7 @@ import { explorerAddress, dexscreenerUrl, launchAllocation } from './chain/confi
 import { waitForTx, readSettlementTx, readRoundWinners, verifyRoundFairness, invalidateReceiptCache } from './chain/lottery.js';
 import { randomnessHex } from './chain/randomness-proof.js';
 import { isServerRandomnessProgram } from './chain/randomness-mode.js';
-import { formatApyPercent, positionApyPercent } from './chain/staking-apy.js';
+import { formatApyPercent, positionApyPercent, stakingApySnapshot } from './chain/staking-apy.js';
 import {
   affordableAutoPlanRounds, maxAutoPlanFundingLamports, requiredDeposit,
 } from './chain/autocommit.js';
@@ -338,7 +338,7 @@ document.querySelector('#app').innerHTML = `
 
   <main class="feature-shell staking-shell page-view" data-page="stake">
     <header class="feature-hero route-header staking-hero"><div><span class="eyebrow">SOL REWARDS</span><h1>Stake.</h1></div></header>
-    <section class="feature-metrics staking-metrics"><article class="staking-yield-metric"><span>STAKING APY</span><strong id="metric-apr">—</strong><small>LAST 30 MINUTES · NON-COMPOUNDING EST.</small></article><article><span>TOTAL STAKED</span><strong><img src="/myne-token-icon.svg" alt=""/> <b id="metric-staked">—</b></strong></article><article><span>SOL REWARDS POOL</span><strong class="staking-sol-pool">${solIcon()} <b id="metric-pool">—</b></strong></article><article><span>STAKERS</span><strong id="metric-stakers">—</strong></article></section>
+    <section class="feature-metrics staking-metrics"><article class="staking-yield-metric"><span>STAKING APY</span><strong id="metric-apr">—</strong><small id="stake-apy-window-label">LAST 30 MINUTES · NON-COMPOUNDING EST.</small></article><article><span>TOTAL STAKED</span><strong><img src="/myne-token-icon.svg" alt=""/> <b id="metric-staked">—</b></strong></article><article><span>SOL REWARDS POOL</span><strong class="staking-sol-pool">${solIcon()} <b id="metric-pool">—</b></strong></article><article><span>STAKERS</span><strong id="metric-stakers">—</strong></article></section>
     <div class="staking-dashboard" data-mobile-view="overview">
       <nav class="dashboard-view-tabs stake-dashboard-tabs" role="tablist" aria-label="Staking dashboard view">
         <button class="active" id="stake-overview-tab" type="button" role="tab" aria-selected="true" aria-controls="stake-overview-view" data-dashboard-view="overview">Rewards</button>
@@ -348,7 +348,7 @@ document.querySelector('#app').innerHTML = `
         <section class="stake-rewards eth-claim-hero" aria-labelledby="eth-claim-title">
       <div class="eth-claim-main">
         <img class="eth-claim-logo" src="/solana-mark.svg" alt="Solana"/>
-        <div><span class="eyebrow" id="eth-claim-title">CLAIMABLE SOL</span><strong id="stake-claimable-eth">0.00</strong><small id="stake-reward-updated">Connect a wallet to see your rewards</small></div>
+        <div><span class="eyebrow" id="eth-claim-title">CLAIMABLE SOL</span><strong id="stake-claimable-eth"><img class="sol-icon stake-claim-hover-mark" src="/solana-mark.svg" alt="" aria-hidden="true"/><span data-sol-readout-value>0.00</span></strong><small id="stake-reward-updated">Connect a wallet to see your rewards</small></div>
       </div>
       <div class="eth-claim-actions">
         <div class="eth-lifetime"><span>CLAIMED SOL</span><strong id="stake-lifetime-eth">—</strong><small>History not indexed</small></div>
@@ -1669,6 +1669,20 @@ if (aboutNav) {
 let stakingState = null;
 let stakingMetricsState = null;
 let stakingMetricsRefreshId = 0;
+const STAKING_APY_SNAPSHOT_KEY = `myne-staking-apy-pause-v1:${solanaNetwork.cluster}:${protocolProgramId.toBase58()}`;
+const loadStakingApySnapshot = () => {
+  try {
+    return stakingApySnapshot(JSON.parse(window.localStorage.getItem(STAKING_APY_SNAPSHOT_KEY) || 'null'));
+  } catch {
+    return null;
+  }
+};
+const saveStakingApySnapshot = (metrics) => {
+  const snapshot = stakingApySnapshot(metrics);
+  if (!snapshot) return null;
+  try { window.localStorage.setItem(STAKING_APY_SNAPSHOT_KEY, JSON.stringify(snapshot)); } catch { /* optional cache */ }
+  return snapshot;
+};
 
 const updateStake = () => {
   const principal = Math.max(0, Number(stakeAmount.value || 0));
@@ -1797,21 +1811,26 @@ const solReadoutAnimations = new Map();
 const animateSolReadout = (selector, value) => {
   const node = document.querySelector(selector);
   if (!node) return;
+  // The generic SOL/USD hover temporarily detaches the value node. Do not
+  // overwrite its injected USD span while it owns this readout; the next live
+  // staking refresh resumes the SOL animation after mouseleave.
+  if (node.classList.contains('is-usd')) return;
+  const valueNode = node.querySelector(':scope > [data-sol-readout-value]') || node;
   const target = Number(value);
-  if (!Number.isFinite(target)) { node.textContent = value; return; }
-  const previous = Number(node.textContent?.replace(/[^0-9.-]/g, ''));
+  if (!Number.isFinite(target)) { valueNode.textContent = value; return; }
+  const previous = Number(valueNode.textContent?.replace(/[^0-9.-]/g, ''));
   const start = Number.isFinite(previous) ? previous : target;
   const oldAnimation = solReadoutAnimations.get(selector);
   if (oldAnimation) cancelAnimationFrame(oldAnimation);
-  if (Math.abs(target - start) < 0.000001) { node.textContent = value; return; }
+  if (Math.abs(target - start) < 0.000001) { valueNode.textContent = value; return; }
   const started = performance.now();
   const duration = 720;
   const step = (now) => {
     const progress = Math.min(1, (now - started) / duration);
     const eased = 1 - ((1 - progress) ** 3);
-    node.textContent = (start + ((target - start) * eased)).toFixed(2);
+    valueNode.textContent = (start + ((target - start) * eased)).toFixed(2);
     if (progress < 1) solReadoutAnimations.set(selector, requestAnimationFrame(step));
-    else { solReadoutAnimations.delete(selector); node.textContent = value; }
+    else { solReadoutAnimations.delete(selector); valueNode.textContent = value; }
   };
   solReadoutAnimations.set(selector, requestAnimationFrame(step));
 };
@@ -1888,10 +1907,27 @@ const refreshStakingHistory = async () => {
  */
 const refreshStakingMetrics = async () => {
   const requestId = ++stakingMetricsRefreshId;
+  const paused = chain.state.protocolPaused === true;
+  // Prefer the exact last live value already on screen. A persisted snapshot
+  // keeps that same value through a reload during maintenance.
+  const frozenApy = paused
+    ? (stakingApySnapshot(stakingMetricsState) ?? loadStakingApySnapshot())
+    : null;
   try {
-    const m = await readStakingMetrics();
+    const current = await readStakingMetrics({ allowStaleWindow: paused && !frozenApy });
     if (requestId !== stakingMetricsRefreshId) return;
+    const captured = frozenApy ?? (paused ? stakingApySnapshot(current) : null);
+    const m = captured
+      ? { ...current, ...captured, aprPct: captured.apyStandardPct, aprStatus: 'paused' }
+      : current;
     stakingMetricsState = m;
+    if (paused) {
+      if (captured) {
+        try { window.localStorage.setItem(STAKING_APY_SNAPSHOT_KEY, JSON.stringify(captured)); } catch { /* optional cache */ }
+      }
+    } else {
+      saveStakingApySnapshot(m);
+    }
     // A bare dash reads as "broken" and sends people looking for a bug. `aprStatus` already says
     // WHICH input is missing, so show that instead — it is the difference between "this is down"
     // and "this needs another few hours of history".
@@ -1908,6 +1944,10 @@ const refreshStakingMetrics = async () => {
     setMetric('#header-staking-apr', headerAprText);
     setMetric('#stake-flex-apy', formatApyPercent(m.apyStandardPct));
     setMetric('#stake-burn-apy', formatApyPercent(m.apyBurnPct));
+    const apyWindowLabel = document.querySelector('#stake-apy-window-label');
+    if (apyWindowLabel) apyWindowLabel.textContent = paused && m.apyStandardPct != null
+      ? 'PAUSED SNAPSHOT · LAST VERIFIED 30M'
+      : 'LAST 30 MINUTES · NON-COMPOUNDING EST.';
     setMetric('#metric-staked', m.totalStakedPrincipal.toLocaleString(undefined, { maximumFractionDigits: 2 }));
     const poolText = m.rewardMode === 'eth'
       ? `${m.rewardsPoolEth < 0.001 && m.rewardsPoolEth > 0
@@ -1939,7 +1979,9 @@ const refreshStakingMetrics = async () => {
         window: 'APY needs a complete indexed 30-minute net SOL reward window; unresolved, missing or stale history is never extrapolated.',
         math: 'APY is unavailable because one or more inputs were outside the supported numeric range.',
       };
-      apr.title = m.aprPct == null
+      apr.title = paused && m.aprPct != null
+        ? 'APY snapshot retained from the last verified value before mining paused.'
+        : m.aprPct == null
         ? (aprReason[m.aprStatus] ?? aprReason.price)
         : `Spot-price run-rate, non-compounding estimate. Annualised from the latest ${Math.max(1, Math.round(m.aprWindowDays * 1440))}-minute indexed net SOL reward window, `
           + 'divided by total staked weight and priced from the current MYNE/SOL pool spot quote. '
@@ -1950,6 +1992,20 @@ const refreshStakingMetrics = async () => {
   } catch (error) {
     if (requestId !== stakingMetricsRefreshId) return;
     console.warn('staking metrics failed', error);
+    if (paused && frozenApy) {
+      const snapshot = { ...(stakingMetricsState ?? {}), ...frozenApy, aprPct: frozenApy.apyStandardPct, aprStatus: 'paused' };
+      stakingMetricsState = snapshot;
+      const aprText = formatApyPercent(snapshot.apyStandardPct);
+      setMetric('#metric-apr', aprText);
+      setMetric('#header-staking-apr', formatApyPercent(snapshot.apyStandardPct, { compact: true }));
+      setMetric('#stake-flex-apy', formatApyPercent(snapshot.apyStandardPct));
+      setMetric('#stake-burn-apy', formatApyPercent(snapshot.apyBurnPct));
+      const apyWindowLabel = document.querySelector('#stake-apy-window-label');
+      if (apyWindowLabel) apyWindowLabel.textContent = 'PAUSED SNAPSHOT · LAST VERIFIED 30M';
+      updateStakeFlexCard();
+      updateProjection();
+      return;
+    }
     // Never leave a prior successful snapshot on-screen after the current authoritative read
     // fails. An em dash is honest; a stale APY can be mistaken for a live return.
     stakingMetricsState = null;

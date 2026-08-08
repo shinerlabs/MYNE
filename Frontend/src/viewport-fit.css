@@ -787,6 +787,52 @@ body[data-route="referrals"] :is(.my-referral-row, .referral-row) {
   }
 }
 
+/* Mine desktop headline scale ---------------------------------------------------------------
+   Match the bolder reference status rail without enlarging compact layouts. The alternate
+   USDC descriptor inherits the exact same label variable, so hover/focus never changes type
+   size or shifts the three columns. */
+@media (min-width: 901px) {
+  body[data-route="mine"] .control-column > .round-summary {
+    --mine-summary-value-size: clamp(34px, 2.7vw, 42px);
+    --mine-summary-label-size: clamp(11px, .95vw, 13px);
+    --mine-summary-icon-size: clamp(26px, 2.1vw, 31px);
+    min-height: 116px !important;
+    padding-block: 14px !important;
+  }
+
+  body[data-route="mine"] .control-column > .round-summary .summary-stat {
+    grid-template-rows: 46px auto 20px !important;
+    padding-block: 7px !important;
+  }
+
+  html body[data-route="mine"] .control-column > .round-summary.motherlode-inline > .deployed-stat > :is(.deployed-token-value, .deployed-usd-value),
+  body[data-route="mine"] .control-column > .round-summary > .time-stat > strong,
+  body[data-route="mine"] .control-column > .round-summary > .motherlode-stat > .motherlode-secondary {
+    height: 46px !important;
+    font-size: var(--mine-summary-value-size) !important;
+    line-height: 1 !important;
+  }
+
+  body[data-route="mine"] .control-column > .round-summary .summary-stat > span {
+    margin-top: 7px !important;
+    font-size: var(--mine-summary-label-size) !important;
+    line-height: 1 !important;
+  }
+
+  body[data-route="mine"] .control-column > .round-summary .deployed-stat :is(.summary-eth, .summary-usdc),
+  body[data-route="mine"] .control-column > .round-summary .motherlode-secondary :is(.motherlode-eth, .summary-usdc) {
+    width: var(--mine-summary-icon-size) !important;
+    height: auto !important;
+    flex: 0 0 var(--mine-summary-icon-size) !important;
+  }
+
+  body[data-route="mine"] .control-column > .round-summary .motherlode-token-value {
+    height: 20px !important;
+    font-size: clamp(13px, 1vw, 16px) !important;
+    line-height: 1 !important;
+  }
+}
+
 /* Desktop route authority ---------------------------------------------------------------
    The legacy styles contain several mutually exclusive desktop experiments. Keep the final
    geometry here, after every visual layer, so changing window width never changes control scale

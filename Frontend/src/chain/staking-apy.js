@@ -43,6 +43,25 @@ export const stakingApyVariants = (standardApyPct) => ({
   burn: Number.isFinite(standardApyPct) && standardApyPct >= 0 ? standardApyPct * 5 : null,
 });
 
+/**
+ * Small, deployment-local snapshot used only while the protocol is paused.
+ * Keeping this separate from the live metric object prevents a maintenance
+ * period from silently changing the last APY users saw before mining stopped.
+ */
+export const stakingApySnapshot = (metrics, capturedAt = Date.now()) => {
+  if (!metrics || !Number.isFinite(metrics.apyStandardPct) || metrics.apyStandardPct < 0
+    || !Number.isFinite(metrics.apyBurnPct) || metrics.apyBurnPct < 0
+    || !Number.isSafeInteger(capturedAt) || capturedAt <= 0) return null;
+  return {
+    apyStandardPct: metrics.apyStandardPct,
+    apyBurnPct: metrics.apyBurnPct,
+    aprWindowDays: Number.isFinite(metrics.aprWindowDays) ? metrics.aprWindowDays : 0,
+    aprWindowRounds: Number.isSafeInteger(metrics.aprWindowRounds) ? metrics.aprWindowRounds : 0,
+    aprAsOf: Number.isSafeInteger(metrics.aprAsOf) ? metrics.aprAsOf : null,
+    capturedAt,
+  };
+};
+
 /** A personal position has no meaningful APY until it has positive principal and weight. */
 export const positionApyPercent = (standardApyPct, principalMyne, weightMyne) => {
   if (!Number.isFinite(standardApyPct) || standardApyPct < 0

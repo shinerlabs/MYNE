@@ -38,7 +38,15 @@ test('Mine summary currency rows render one centered icon and value group', () =
   assert.match(source, /deployedTokenLabel\.hidden = true/);
   assert.match(surfaces, /\.deployed-stat > \.deployed-token-label[\s\S]*display: none !important/);
   assert.match(surfaces, /:is\(\.deployed-stat, \.motherlode-stat\):is\(:hover, :focus-visible\) > span::after[\s\S]*content: attr\(data-hover-label\) !important/);
-  assert.match(surfaces, /:is\(\.deployed-stat, \.motherlode-stat\):is\(:hover, :focus-visible\) > span[\s\S]*font-size: 9px !important/);
+  assert.match(surfaces, /:is\(\.deployed-stat, \.motherlode-stat\):is\(:hover, :focus-visible\) > span[\s\S]*font-size: var\(--mine-summary-label-size, 9px\) !important/);
+});
+
+test('desktop Mine summary uses the enlarged reference proportions', async () => {
+  const viewport = await readFile(new URL('../src/viewport-fit.css', import.meta.url), 'utf8');
+  assert.match(viewport, /--mine-summary-value-size: clamp\(34px, 2\.7vw, 42px\)/);
+  assert.match(viewport, /--mine-summary-label-size: clamp\(11px, \.95vw, 13px\)/);
+  assert.match(viewport, /--mine-summary-icon-size: clamp\(26px, 2\.1vw, 31px\)/);
+  assert.match(viewport, /\.motherlode-secondary[\s\S]*font-size: var\(--mine-summary-value-size\) !important/);
 });
 
 test('Total deployment swaps denomination without pseudo hover conversion or geometry changes', () => {

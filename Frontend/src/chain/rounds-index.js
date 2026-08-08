@@ -342,11 +342,15 @@ let stakingWindowCache = null;
  * claim to represent the previous 30 minutes. `complete` is deliberately
  * strict so an indexer outage renders APY unavailable instead of overstating it.
  */
-export async function loadStakingRewardWindow(windowMinutes = 30, nowSeconds = Number(chainNowSeconds())) {
+export async function loadStakingRewardWindow(
+  windowMinutes = 30,
+  nowSeconds = Number(chainNowSeconds()),
+  { allowStale = false } = {},
+) {
   if (!Number.isFinite(windowMinutes) || !(windowMinutes > 0)
     || !Number.isFinite(nowSeconds) || !(await indexAvailable())) return null;
   const observedAt = Math.floor(nowSeconds);
-  const key = `${windowMinutes}:${Math.floor(observedAt / (STAKING_WINDOW_CACHE_MS / 1000))}`;
+  const key = `${windowMinutes}:${Math.floor(observedAt / (STAKING_WINDOW_CACHE_MS / 1000))}:${allowStale ? 'paused' : 'live'}`;
   if (stakingWindowCache?.key === key) {
     if ('value' in stakingWindowCache) return stakingWindowCache.value;
     return stakingWindowCache.promise;
@@ -386,7 +390,10 @@ export async function loadStakingRewardWindow(windowMinutes = 30, nowSeconds = N
       maxRows: 1000,
       observedAt,
       watermarkSettlesAt: end,
-      maxStalenessSeconds: ROUND_CADENCE_SECONDS * 3,
+      // Mining creates no new reward rows while paused. A paused read anchors
+      // to the final verified fee row instead of expiring it after three
+      // cadences; live reads retain the strict freshness guard.
+      maxStalenessSeconds: allowStale ? Number.MAX_SAFE_INTEGER : ROUND_CADENCE_SECONDS * 3,
       maxSettlementGapSeconds: ROUND_CADENCE_SECONDS + 5,
     });
   })().catch(() => null);

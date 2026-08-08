@@ -587,13 +587,13 @@ html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat >
 @media (hover: hover) {
   html body[data-route="mine"] .round-summary.motherlode-inline > :is(.deployed-stat, .motherlode-stat) > span {
     position: relative !important;
-    font-size: 9px !important;
+    font-size: var(--mine-summary-label-size, 9px) !important;
     letter-spacing: .15em !important;
   }
 
   html body[data-route="mine"] .round-summary.motherlode-inline > :is(.deployed-stat, .motherlode-stat):is(:hover, :focus-visible) > span {
     color: transparent !important;
-    font-size: 9px !important;
+    font-size: var(--mine-summary-label-size, 9px) !important;
     letter-spacing: .15em !important;
   }
 
@@ -605,7 +605,7 @@ html body[data-route="mine"] .round-summary.motherlode-inline > .deployed-stat >
     transform: translateX(-50%) !important;
     color: #8f9198 !important;
     font: inherit !important;
-    font-size: 9px !important;
+    font-size: var(--mine-summary-label-size, 9px) !important;
     font-weight: inherit !important;
     letter-spacing: .15em !important;
     line-height: inherit !important;

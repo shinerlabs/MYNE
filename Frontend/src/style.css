@@ -4555,6 +4555,10 @@ body[data-route="stake"] .eth-claim-hero::before {
 body[data-route="stake"] .eth-claim-hero > .eth-claim-main { display: flex; align-items: center; justify-content: flex-start !important; gap: 28px; min-width: 0; }
 body[data-route="stake"] .eth-claim-logo { width: 112px; height: 112px; object-fit: contain; filter: drop-shadow(0 12px 28px rgba(112,145,215,.18)); }
 body[data-route="stake"] #stake-claimable-eth { display: block; margin: 5px 0 4px; color: #fff; font: 750 clamp(54px,7.3vw,86px)/.92 var(--font-number); letter-spacing: -.065em; font-variant-numeric: tabular-nums; }
+/* Invisible semantic anchor for the delegated SOL -> USD hover. The visible
+   Solana mark remains the large hero logo; keeping this anchor inside the
+   number makes the injected `.usd-swap` inherit the exact same typography. */
+body[data-route="stake"] #stake-claimable-eth > .stake-claim-hover-mark { display: none !important; }
 body[data-route="stake"] #stake-reward-updated { color: #8f9299; font-size: 11px; }
 body[data-route="stake"] .eth-claim-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; align-content: center; }
 body[data-route="stake"] .eth-claim-actions > div { grid-column: 1/-1; padding: 0 2px 10px; }

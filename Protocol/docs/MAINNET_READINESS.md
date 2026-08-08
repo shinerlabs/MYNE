@@ -1,6 +1,6 @@
 # MYNE Mainnet readiness review
 
-**Review date:** 2026-08-07
+**Review date:** 2026-08-08
 **Outcome:** version-6 source candidate; public Mainnet activation remains blocked until a fresh
 artifact, hash, full test evidence, independent review and live-service gates below are complete.
 
@@ -29,7 +29,15 @@ evidence only after the final clean artifact is built, hashed and exercised by t
   7.2% net staker rewards; 2% Motherlode; 1% buyback/burn; and 1% direct admin. Total direct admin
   revenue is 1.8% before the documented integer-dust assignment.
 - Exact cumulative-interval distribution of the full post-fee SOL prize. Integer rounding telescopes, so losing-tile SOL and all rounding units reach the winning-tile miners in proportion to their winning-tile contribution.
-- Permissionless processing for accumulated and auto-burn receipts. The receipt PDA fixes the beneficiary and reward mode before the result; keepers cannot redirect SOL or MYNE.
+- Permissionless processing for accumulated and auto-burn receipts. The receipt PDA fixes the
+  beneficiary and reward mode before the result. Processing moves SOL into that wallet's
+  canonical on-chain claim balance and attributes MYNE; only the wallet owner can later withdraw
+  SOL with Claim SOL or Claim All.
+- Server commit–reveal fixes a secret commitment before betting and mixes its later reveal with a
+  future Solana SlotHashes entry locked after betting closes. The server can withhold and force
+  refunds but cannot choose among revealed outcomes after seeing bids. Every successfully
+  pre-opened round settles and publishes a winning tile, including zero-bid rounds, which emit
+  zero MYNE.
 - Per-round `total_receipts`, `processed_receipts` and `closed_receipts` counters. Processed receipts close only after archival, and rent returns to the immutable user beneficiary.
 - A round can close only after every receipt is processed and closed, the 1% buyback is complete, and `claimed_lamports` exactly equals the prize plus any Motherlode SOL payout. Round rent returns only to its recorded payer.
 - A production event index stores round, receipt, settlement, randomness and buyback transaction evidence. The randomness authority commits a deterministic SHA-256 snapshot on-chain before cleanup.
@@ -78,6 +86,25 @@ keeper-policy and frontend test after the final source/dependency freeze.
 - Frontend production build passes.
 - Final reviewed local SBF SHA-256: `6431275770d1ab8e991f97924c2f71d3bc26fc46e4bea26b13f86d4e221019fc` (917,800 bytes).
 
+## Current paused-upgrade candidate evidence
+
+This evidence is stronger than the superseded v5 baseline but remains a local candidate until it
+is tied to a clean public commit and external release manifest:
+
+- Production-feature SBF SHA-256
+  `3ddf493606c11b1c8f1ee8f75a82d13efd16f7803d402417386e2984f42c6ae0`
+  (1,100,304 bytes); synchronized target/frontend IDL SHA-256
+  `992e91637ef14c058a452734df1b750b454c8b36cd686e2fd392ea882eb48dfe`.
+- Rust default and production-feature suites: 41/41 each; formatting and both Clippy
+  `-D warnings` modes pass.
+- Protocol policy suite: 102/102; frontend suite: 201/201; production frontend build passes.
+- Full Anchor local-validator lifecycle passes claim-vault processing, equal reward allocation,
+  fee routing, staking, MYNE claims, Auto Mine, archive and rent closure.
+- An isolated fork loaded the candidate SBF against exact copies of all 16 outstanding paused
+  Mainnet receipts. It accrued 3.212000000 SOL and 8.000000000 MYNE into owner ledgers,
+  materialized 0.010166263 SOL of already funded staking rewards, and made zero direct wallet
+  payments. Mainnet stayed read-only throughout this compatibility test.
+
 ## Remaining launch gates
 
 1. **Verified production artifact.** Commit the final reviewed source to the public repository,
@@ -94,17 +121,23 @@ keeper-policy and frontend test after the final source/dependency freeze.
    `20260807131500_keeper_leases.sql`, `20260807133000_referral_read_model_v1.sql`,
    `20260807140000_wallet_chat_hardening.sql`,
    `20260807141000_wallet_validator_lint_cleanup.sql` and
-   `20260807142000_chat_admin_provisioning.sql`. Deploy the indexer and all three supervised
+   `20260807142000_chat_admin_provisioning.sql`,
+   `20260808090000_server_randomness_proofs.sql`,
+   `20260808113000_burn_stats.sql`,
+   `20260808120000_receipt_reward_accrual.sql` and
+   `20260808123000_empty_round_stats.sql`. Deploy the indexer and all three supervised
    keepers with durable storage, alerts and restricted service-role credentials. Set
    `ROUND_INDEXER_REQUIRE_BUYBACK_EVIDENCE=1` and set
    `REFERRAL_INDEXER_START_SLOT` to the program deployment slot in production.
    Use the managed standby-to-live procedure in `WORKER_HOSTING.md`; a healthy standby deployment
    is required evidence but is not permission to unpause.
-4. **Switchboard/Meteora canary.** Exercise uncommitted create/open/bind, deployments carrying the
-   bound account, post-close commit plus on-chain commit recording, seed-slot wait, atomic
-   reveal/settle, early-commit rejection, missed reveal/refunds, archive/cleanup, delayed
-   randomness close, a direct-pool quote, tiny swap and verified burn using the exact production
-   configuration.
+4. **Server-randomness/Meteora canary.** While the protocol remains paused, switch only after the
+   legacy queue is drained and the exact first managed round is recorded. Start the reviewed
+   worker and verify commitment binding before opening the public betting interval. Exercise a
+   small bid, post-close future-slot lock, reveal/settle, winning-tile display, claim-vault receipt
+   processing, owner-signed SOL/MYNE claims, archive/cleanup, a direct-pool quote, tiny buyback swap
+   and verified burn using the exact production configuration. Re-pause immediately on any missed
+   preparation or proof.
 5. **Independent review.** An unaffiliated Solana/Anchor security reviewer must assess the exact artifact and the scope in `INDEPENDENT_SECURITY_REVIEW_SCOPE.md`. The project team’s own review cannot satisfy this gate.
 6. **Legal review.** Paid chance-based mining and token rewards require jurisdiction-specific advice before public funds are accepted.
 7. **Canonical mint identity.** Deploy the checked-in token metadata JSON, SVG master and 1024px PNG

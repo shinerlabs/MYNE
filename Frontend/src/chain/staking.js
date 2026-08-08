@@ -189,10 +189,10 @@ export async function claimStakingRewards() {
   return signature;
 }
 
-export async function readStakingMetrics() {
+export async function readStakingMetrics({ allowStaleWindow = false } = {}) {
   const [pool, rewardWindow] = await Promise.all([
     readStakePool(),
-    loadStakingRewardWindow(APY_WINDOW_MINUTES),
+    loadStakingRewardWindow(APY_WINDOW_MINUTES, undefined, { allowStale: allowStaleWindow }),
   ]);
   const standard = baseUnitsToTokens(pool?.totalStandard);
   const burn = baseUnitsToTokens(pool?.totalBurn);

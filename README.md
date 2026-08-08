@@ -1,7 +1,8 @@
 # MYNE
 
 MYNE is a Solana mining and staking protocol with a Vite web client, an Anchor program,
-permissionless receipt settlement, Switchboard randomness, and a rebuildable Supabase index.
+permissionless receipt processing into owner-controlled reward balances, provider-aware
+commit–reveal randomness, and a rebuildable Supabase index.
 
 > **Pre-launch software:** the repository is under active review. No Mainnet deployment should be
 > treated as approved until the launch runbook is complete and an independent Solana security
