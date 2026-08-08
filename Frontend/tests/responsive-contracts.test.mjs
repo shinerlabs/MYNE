@@ -90,7 +90,7 @@ test('phone Stake uses fixed action tracks and reclaims the hidden tier track on
   assert.match(source, /document\.querySelector\('#stake-tier-tabs'\)\.hidden = mode !== 'deposit'/);
   assert.match(
     phoneAuthority,
-    /\.staking-actions \.stake-composer\s*\{[^}]*grid-template-rows:\s*44px 76px 14px 54px 44px 44px\s*!important/,
+    /Compact Stake hierarchy:[\s\S]*\.staking-actions \.stake-composer\s*\{[^}]*grid-template-rows:\s*52px 86px 14px 54px 44px 44px\s*!important/,
   );
   assert.match(
     phoneAuthority,
@@ -98,7 +98,7 @@ test('phone Stake uses fixed action tracks and reclaims the hidden tier track on
   );
   assert.match(
     phoneAuthority,
-    /\.staking-actions \.stake-composer:has\(#stake-tier-tabs\[hidden\]\)\s*\{[^}]*grid-template-rows:\s*44px 14px 54px 44px 44px\s*!important/,
+    /Compact Stake hierarchy:[\s\S]*\.staking-actions \.stake-composer:has\(#stake-tier-tabs\[hidden\]\)\s*\{[^}]*grid-template-rows:\s*52px 14px 54px 44px 44px\s*!important/,
   );
 });
 

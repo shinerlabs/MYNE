@@ -52,6 +52,12 @@ test('stake claim, FLEX and calculator actions share one compact row on mobile',
   assert.match(fitStyles, /\.eth-claim-actions > \.stake-calculator-trigger \{[\s\S]*grid-column:\s*3 !important;[\s\S]*grid-row:\s*1 !important/);
 });
 
+test('compact Stake makes Standard and Burn primary over the action switch', () => {
+  assert.match(fitStyles, /Compact Stake hierarchy:[\s\S]*\.stake-mode-tabs \{[\s\S]*width:\s*min\(360px, 72%\) !important;[\s\S]*justify-self:\s*center !important/);
+  assert.match(fitStyles, /Compact Stake hierarchy:[\s\S]*\.stake-tier-tabs,[\s\S]*min-height:\s*86px !important;[\s\S]*height:\s*86px !important/);
+  assert.match(fitStyles, /Compact Stake hierarchy:[\s\S]*\.stake-tier-tabs button small \{[\s\S]*display:\s*block !important/);
+});
+
 test('compact Stake keeps rewards bounded and APY metadata readable', () => {
   assert.match(fitStyles, /@media \(max-width: 1024px\), \(max-height: 650px\)[\s\S]*\.staking-overview \{[\s\S]*height:\s*min\(100%, clamp\(240px, 45dvh, 310px\)\) !important/);
   assert.match(fitStyles, /@media \(max-width: 720px\)[\s\S]*\.staking-yield-metric > small \{[\s\S]*display:\s*none !important/);

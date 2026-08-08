@@ -4244,3 +4244,59 @@ body[data-route="stake"] .staking-dashboard .eth-claim-actions > .stake-calculat
     grid-row: 1 !important;
   }
 }
+
+/* Compact Stake hierarchy: the action switch is supporting navigation; Standard and Burn are
+   the product choices. Keep the switch easy to tap without letting it dominate the full card. */
+@media (max-width: 720px) {
+  body[data-route="stake"] .staking-actions .stake-composer {
+    grid-template-rows: 52px 86px 14px 54px 44px 44px !important;
+    gap: 4px 6px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-mode-tabs {
+    width: min(360px, 72%) !important;
+    max-width: 360px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+    align-self: start !important;
+    justify-self: center !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-mode-tabs button {
+    min-height: 44px !important;
+    height: 44px !important;
+    font-size: 10px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-tier-tabs,
+  body[data-route="stake"] .stake-composer .stake-tier-tabs button,
+  body[data-route="stake"] .stake-composer .stake-tier-tabs #stake-tier-burn {
+    min-height: 86px !important;
+    height: 86px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-tier-tabs {
+    gap: 10px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-tier-tabs button {
+    padding-inline: 16px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-tier-tabs button b {
+    font-size: 10px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-tier-tabs button small {
+    display: block !important;
+    font-size: 8px !important;
+  }
+
+  body[data-route="stake"] .stake-composer .stake-tier-tabs button strong {
+    font-size: 20px !important;
+  }
+
+  body[data-route="stake"] .staking-actions .stake-composer:has(#stake-tier-tabs[hidden]) {
+    grid-template-rows: 52px 14px 54px 44px 44px !important;
+  }
+}
