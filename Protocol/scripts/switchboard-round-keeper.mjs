@@ -23,6 +23,10 @@ import {
 } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 import { loadExplicitSwitchboardEnv } from './production-switchboard-env.mjs';
+import {
+  ROUND_KEEPER_DEFERRED_EXIT_CODE,
+  ROUND_KEEPER_MISSED_EXIT_CODE,
+} from './round-schedule-policy.mjs';
 
 const { AnchorProvider, Program, Wallet } = anchor;
 const PROGRAM_ID = new PublicKey(process.env.MYNE_PROGRAM_ID || 'D6kkupmJWw9bpDZ46R8Xn1ncMtC1upopPo2wundvWd3e');
@@ -50,7 +54,7 @@ if (configState.paused) {
     event: 'switchboard-round-idle',
     reason: 'protocol-paused',
   }));
-  process.exit(0);
+  process.exit(ROUND_KEEPER_DEFERRED_EXIT_CODE);
 }
 assert.equal(
   configState.randomnessAuthority.toBase58(),
@@ -268,6 +272,16 @@ if (!roundState) {
       status: 'waiting-for-index-reconciliation',
     }));
     process.exit(0);
+  }
+  const scheduledOpenedAt = Number(configState.initializedAt.toString())
+    + Number(ROUND_ID) * Number(configState.roundDurationSeconds.toString());
+  if ((await chainTimeSeconds()) >= scheduledOpenedAt) {
+    console.error(JSON.stringify({
+      event: 'switchboard-round-window-missed',
+      round: ROUND_ID.toString(),
+      scheduledOpenedAt,
+    }));
+    process.exit(ROUND_KEEPER_MISSED_EXIT_CODE);
   }
   const randomnessKeypair = Keypair.generate();
   const [randomness, createIx] = await sb.Randomness.create(

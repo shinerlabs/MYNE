@@ -25,6 +25,10 @@ import {
 } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 import {
+  ROUND_KEEPER_DEFERRED_EXIT_CODE,
+  ROUND_KEEPER_MISSED_EXIT_CODE,
+} from './round-schedule-policy.mjs';
+import {
   SERVER_RANDOMNESS_PENDING,
   decodeServerEntropySlot,
   loadOrCreateServerReveal,
@@ -73,7 +77,7 @@ const configState = await program.account.protocolConfig.fetch(config);
 assert.equal(Number(configState.version), 6, 'Server round keeper requires protocol fee schedule v6');
 if (configState.paused) {
   console.log(JSON.stringify({ event: 'server-round-idle', reason: 'protocol-paused' }));
-  process.exit(0);
+  process.exit(ROUND_KEEPER_DEFERRED_EXIT_CODE);
 }
 assert.ok(
   configState.randomnessProgram.equals(PROGRAM_ID),
@@ -204,6 +208,19 @@ let roundState = await program.account.round.fetchNullable(round);
 if (roundState?.settled) {
   console.log(JSON.stringify({ ok: true, event: 'server-round-already-settled', round: ROUND_ID.toString() }));
   process.exit(0);
+}
+
+if (!roundState) {
+  const scheduledOpenedAt = Number(configState.initializedAt.toString())
+    + Number(ROUND_ID) * Number(configState.roundDurationSeconds.toString());
+  if ((await chainTimeSeconds()) >= scheduledOpenedAt) {
+    console.error(JSON.stringify({
+      event: 'server-round-window-missed',
+      round: ROUND_ID.toString(),
+      scheduledOpenedAt,
+    }));
+    process.exit(ROUND_KEEPER_MISSED_EXIT_CODE);
+  }
 }
 
 // Persist before constructing either on-chain instruction. Never print this

@@ -20,6 +20,7 @@
     "mainnet:register-liquidity": "node scripts/mainnet-register-liquidity-gate.mjs",
     "mainnet:activate": "node scripts/mainnet-activate.mjs",
     "mainnet:pause": "node scripts/mainnet-pause.mjs",
+    "mainnet:preview-server-randomness": "node scripts/preview-mainnet-server-randomness-switch.mjs",
     "mainnet:refund-deployer": "node scripts/refund-mainnet-deployer.mjs",
     "addresses:mainnet": "node scripts/derive-mainnet-addresses.mjs",
     "prepare:admin-ata": "node scripts/prepare-admin-fallback-ata.mjs",

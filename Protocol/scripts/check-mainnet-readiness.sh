@@ -134,6 +134,10 @@ grep -q "$METEORA_DAMM_V2" scripts/mainnet-liquidity-policy.mjs
 grep -q 'SUBMIT_MAINNET_LIQUIDITY_GATE' scripts/mainnet-register-liquidity-gate.mjs
 grep -q 'CONFIRM_INDEPENDENT_SECURITY_REVIEW' scripts/mainnet-activate.mjs
 grep -q 'SUBMIT_MAINNET_ACTIVATE' scripts/mainnet-activate.mjs
+grep -q 'submissionSupported: false' scripts/preview-mainnet-server-randomness-switch.mjs
+grep -q 'CONFIRM_SWITCHBOARD_ROUNDS_DRAINED' scripts/preview-mainnet-server-randomness-switch.mjs
+grep -q 'CONFIRM_SERVER_RANDOMNESS_REVIEW' scripts/preview-mainnet-server-randomness-switch.mjs
+grep -q 'simulateTransaction' scripts/preview-mainnet-server-randomness-switch.mjs
 grep -q 'SUBMIT_MAINNET_REFUND' scripts/refund-mainnet-deployer.mjs
 grep -q 'CONFIRM_CREATE_MYNE_MINT' scripts/create-mainnet-mint.mjs
 grep -q 'CONFIRM_LIQUIDITY_DESTINATION' scripts/create-mainnet-mint.mjs

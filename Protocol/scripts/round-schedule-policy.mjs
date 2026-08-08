@@ -5,6 +5,11 @@ import assert from 'node:assert/strict';
 // duration before starting any transaction worker.
 export const PROVIDER_PREPARATION_LEAD_SECONDS = 60;
 
+// Per-round children use distinct process statuses so the supervisor can
+// distinguish a harmless paused deferral from an irrecoverably missed window.
+export const ROUND_KEEPER_DEFERRED_EXIT_CODE = 75;
+export const ROUND_KEEPER_MISSED_EXIT_CODE = 76;
+
 /**
  * Round workers that must exist at a given scheduled timestamp.
  *

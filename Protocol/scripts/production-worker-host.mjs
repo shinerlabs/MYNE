@@ -16,6 +16,8 @@ import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 import { requireMatchingSolanaNetwork } from './production-network-policy.mjs';
 import {
   PROVIDER_PREPARATION_LEAD_SECONDS,
+  ROUND_KEEPER_DEFERRED_EXIT_CODE,
+  ROUND_KEEPER_MISSED_EXIT_CODE,
   roundIdsToPrepare,
 } from './round-schedule-policy.mjs';
 
@@ -59,6 +61,15 @@ export function workerMode(env) {
   const mode = String(env.MYNE_WORKER_MODE || 'standby').trim().toLowerCase();
   assert.ok(mode === 'standby' || mode === 'live', 'MYNE_WORKER_MODE must be standby or live');
   return mode;
+}
+
+export function firstManagedRoundId(env, randomnessMode) {
+  if (randomnessMode !== 'server') return 0;
+  const value = requiredEnv(env, 'MYNE_FIRST_SERVER_ROUND_ID');
+  assert.match(value, /^\d+$/, 'MYNE_FIRST_SERVER_ROUND_ID must be an unsigned integer');
+  const roundId = Number(value);
+  assert.ok(Number.isSafeInteger(roundId), 'MYNE_FIRST_SERVER_ROUND_ID exceeds the safe integer range');
+  return roundId;
 }
 
 export function liveWorkerSpecs({
@@ -212,6 +223,7 @@ export async function main(env = process.env) {
   const [gateAddress] = PublicKey.findProgramAddressSync([Buffer.from('liquidity_gate')], programId);
   let validatedRandomnessMode = null;
   let validatedRoundSchedule = null;
+  let validatedProtocolPaused = null;
 
   const validate = async () => {
     const genesisHash = await connection.getGenesisHash();
@@ -246,6 +258,7 @@ export async function main(env = process.env) {
     assert.ok(Number.isSafeInteger(initializedAt), 'Configured genesis timestamp is invalid');
     validatedRandomnessMode = serverRandomness ? 'server' : 'switchboard';
     validatedRoundSchedule = { initializedAt, roundDurationSeconds };
+    validatedProtocolPaused = Boolean(config.paused);
     const gate = await program.account.liquidityGate.fetch(gateAddress);
     assert.equal(gate.verified, true, 'Meteora liquidity gate is not verified');
     assert.ok(!gate.pool.equals(PublicKey.default), 'Meteora liquidity pool is missing');
@@ -337,6 +350,7 @@ export async function main(env = process.env) {
       dataDir,
       randomnessMode: validatedRandomnessMode,
     });
+    const minimumManagedRoundId = firstManagedRoundId(env, validatedRandomnessMode);
 
     const startWorker = (spec) => {
       if (stopping) return;
@@ -367,6 +381,9 @@ export async function main(env = process.env) {
     assert.ok(roundSpec, 'A per-round randomness keeper is required');
     const launchedRounds = new Set();
     const roundRestartAttempts = new Map();
+    let protocolPaused = validatedProtocolPaused;
+    let lastScheduleConfigReadAt = 0;
+    let fatalRoundError = null;
     const roundInstance = (roundId) => `${roundSpec.name}:${roundId}`;
     const refreshRoundWorkerStatus = () => {
       const status = state.workers.get(roundSpec.name);
@@ -403,6 +420,31 @@ export async function main(env = process.env) {
       child.once('exit', (code, signal) => {
         children.delete(instance);
         refreshRoundWorkerStatus();
+        if (stopping) return;
+        if (code === ROUND_KEEPER_DEFERRED_EXIT_CODE) {
+          launchedRounds.delete(id);
+          roundRestartAttempts.delete(id);
+          console.log(JSON.stringify({
+            event: 'round-worker-deferred',
+            worker: roundSpec.name,
+            provider: validatedRandomnessMode,
+            round: id,
+            reason: 'protocol-paused',
+          }));
+          return;
+        }
+        if (code === ROUND_KEEPER_MISSED_EXIT_CODE) {
+          fatalRoundError = `Round ${id} was not prepared before its scheduled opened_at`;
+          state.ready = false;
+          state.error = fatalRoundError;
+          console.error(JSON.stringify({
+            event: 'round-worker-window-missed',
+            worker: roundSpec.name,
+            provider: validatedRandomnessMode,
+            round: id,
+          }));
+          return;
+        }
         if (stopping || code === 0) {
           roundRestartAttempts.delete(id);
           return;
@@ -428,27 +470,72 @@ export async function main(env = process.env) {
     };
 
     for (const spec of specs.filter((entry) => !entry.perRound)) startWorker(spec);
-    const scheduleRoundWorkers = () => {
-      if (stopping) return;
-      const roundIds = roundIdsToPrepare({
-        now: Math.floor(Date.now() / 1_000),
-        initializedAt: validatedRoundSchedule.initializedAt,
-        roundDurationSeconds: validatedRoundSchedule.roundDurationSeconds,
-      });
-      for (const roundId of roundIds) startRoundWorker(roundId);
-
-      // Completed identifiers no longer need memory once they are well behind
-      // the active schedule. Running/retrying children retain their entries.
-      const oldestRetained = (roundIds[0] ?? 0) - 2;
-      for (const id of launchedRounds) {
-        if (Number(id) < oldestRetained && !children.has(roundInstance(id))) {
-          launchedRounds.delete(id);
-          roundRestartAttempts.delete(id);
+    const refreshScheduleConfig = async () => {
+      if (Date.now() - lastScheduleConfigReadAt < 1_000) return true;
+      try {
+        const latestConfig = await program.account.protocolConfig.fetch(configAddress);
+        const latestMode = latestConfig.randomnessProgram.equals(programId) ? 'server' : 'switchboard';
+        assert.equal(latestMode, validatedRandomnessMode, 'Randomness provider changed; restart the worker host');
+        assert.equal(
+          Number(latestConfig.initializedAt.toString()),
+          validatedRoundSchedule.initializedAt,
+          'Protocol schedule origin changed; restart the worker host',
+        );
+        assert.equal(
+          Number(latestConfig.roundDurationSeconds.toString()),
+          validatedRoundSchedule.roundDurationSeconds,
+          'Protocol round duration changed; restart the worker host',
+        );
+        protocolPaused = Boolean(latestConfig.paused);
+        lastScheduleConfigReadAt = Date.now();
+        if (!fatalRoundError) {
+          state.ready = true;
+          state.error = null;
         }
+        return true;
+      } catch (error) {
+        state.ready = false;
+        state.error = error instanceof Error ? error.message : String(error);
+        console.error(JSON.stringify({
+          event: 'round-schedule-config-error',
+          message: state.error,
+        }));
+        return false;
       }
-      schedule(scheduleRoundWorkers, 500);
     };
-    scheduleRoundWorkers();
+    const scheduleRoundWorkers = async () => {
+      if (stopping) return;
+      try {
+        const configReadable = await refreshScheduleConfig();
+        if (configReadable && !protocolPaused) {
+          const roundIds = roundIdsToPrepare({
+            now: Math.floor(Date.now() / 1_000),
+            initializedAt: validatedRoundSchedule.initializedAt,
+            roundDurationSeconds: validatedRoundSchedule.roundDurationSeconds,
+          });
+          for (const roundId of roundIds) {
+            if (roundId >= minimumManagedRoundId) startRoundWorker(roundId);
+          }
+
+          // Completed identifiers no longer need memory once they are well behind
+          // the active schedule. Running/retrying children retain their entries.
+          const oldestRetained = (roundIds[0] ?? 0) - 2;
+          for (const id of launchedRounds) {
+            if (Number(id) < oldestRetained && !children.has(roundInstance(id))) {
+              launchedRounds.delete(id);
+              roundRestartAttempts.delete(id);
+            }
+          }
+        }
+      } catch (error) {
+        state.ready = false;
+        state.error = error instanceof Error ? error.message : String(error);
+        console.error(JSON.stringify({ event: 'round-schedule-error', message: state.error }));
+      } finally {
+        schedule(() => void scheduleRoundWorkers(), 500);
+      }
+    };
+    void scheduleRoundWorkers();
   }
 
   const shutdown = async (signal) => {
