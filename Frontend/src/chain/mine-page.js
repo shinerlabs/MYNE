@@ -55,8 +55,8 @@ export const state = {
   unclaimed: 0n,
   claimableSol: 0n,
   refinedAccrued: 0n,
-  // Global redistribution accumulator. Needed to value the passive share of rounds that were won
-  // but never claimed — those are not in `unclaimed`/`refinedAccrued` yet. See passiveOnRounds().
+  // Outstanding mining-share supply. Unsettled rounds do not own shares and cannot receive fees
+  // paid before their receipt is processed; see passiveOnRounds().
   minerIndex: 0n,
   // Decide the claim fee (0% / 1% / 10%) — see netClaimable in lottery.js.
   totalUnclaimed: 0n,
@@ -240,7 +240,7 @@ export async function refreshMiner() {
     state.bullionBalance = miner.bullionBalance;
     state.unclaimed = miner.rewardsBullion;
     state.claimableSol = miner.claimableSol ?? 0n;
-    state.refinedAccrued = miner.refinedAccrued; // dividends from other miners' refining fees
+    state.refinedAccrued = miner.refinedAccrued; // other miners' claim fees backing these shares
     state.minerIndex = miner.minerIndex ?? 0n;
     state.totalUnclaimed = miner.totalUnclaimed ?? 0n;
     state.hasReferrer = Boolean(miner.hasReferrer);

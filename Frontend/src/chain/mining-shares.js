@@ -27,3 +27,19 @@ export function effectiveUnclaimedMyne(miner, miningPool) {
   );
 }
 
+/**
+ * Split the authoritative share value into its retained reward basis and the
+ * passive increase created by other holders' claim fees.
+ *
+ * Older v6 accounts used `unclaimedMyne` as a refreshed value cache. Clamping
+ * that baseline keeps the upgrade backward-compatible: historical passive
+ * value already folded into the cache starts at zero, while every passive fee
+ * after the upgrade becomes visible without overstating the claimable total.
+ */
+export function miningRewardBreakdown(miner, miningPool) {
+  const total = effectiveUnclaimedMyne(miner, miningPool);
+  if (total === 0n) return { total: 0n, mined: 0n, passive: 0n };
+  const cachedBasis = toBigInt(miner?.unclaimedMyne);
+  const mined = cachedBasis < 0n ? 0n : cachedBasis > total ? total : cachedBasis;
+  return { total, mined, passive: total - mined };
+}

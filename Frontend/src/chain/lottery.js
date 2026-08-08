@@ -8,7 +8,7 @@ import { intervalReward } from './round-rewards.js';
 import { roundIdsForRange } from './round-range.js';
 import { loadReceiptIndex } from './rounds-index.js';
 import { aggregateMiners } from './miner-aggregation.js';
-import { effectiveUnclaimedMyne } from './mining-shares.js';
+import { effectiveUnclaimedMyne, miningRewardBreakdown } from './mining-shares.js';
 import {
   deriveRoundProof, deriveServerEntropyProof, randomnessEqual, randomnessHex,
 } from './randomness-proof.js';
@@ -196,7 +196,7 @@ export async function readMiner(address) {
     fetchProtocolAccount('StakePosition', stakePositionPda(address)),
     fetchProtocolAccount('StakePool', protocolPdas.stakePool),
   ]);
-  const effectiveRewards = effectiveUnclaimedMyne(miner, miningPool);
+  const rewardBreakdown = miningRewardBreakdown(miner, miningPool);
   const rewardIndex = toBig(stakePool?.rewardPerWeight);
   const rewardDebt = toBig(stakePosition?.rewardDebt);
   const rewardWeight = toBig(stakePosition?.rewardWeight);
@@ -210,9 +210,9 @@ export async function readMiner(address) {
     account: address,
     balance: BigInt(balance),
     bullionBalance: await tokenBalance(address, config.mint),
-    rewardsBullion: effectiveRewards,
+    rewardsBullion: rewardBreakdown.total,
     claimableSol,
-    refinedAccrued: 0n,
+    refinedAccrued: rewardBreakdown.passive,
     hasAccount: Boolean(miner),
     hasPosition: Boolean(stakePosition),
     totalUnclaimed: toBig(miningPool?.totalUnclaimed),
@@ -225,7 +225,10 @@ export async function readMiner(address) {
 // shares into passive fees paid before that settlement. `readMiner` already
 // values all existing shares at the current pool asset value.
 export function passiveOnRounds() { return 0n; }
-export function netClaimable({ grossMined, refinedAccrued = 0n }) { return grossMined - (grossMined * 1000n) / 10000n + refinedAccrued; }
+export function netClaimable({ grossMined, refinedAccrued = 0n }) {
+  const total = grossMined + refinedAccrued;
+  return total - (total * 1000n) / 10000n;
+}
 
 export async function readMyBets(roundId, address) {
   const totals = Array(GRID).fill(0n);

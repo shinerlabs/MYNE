@@ -1602,7 +1602,7 @@ pub mod myne_protocol {
             ctx.accounts.receipt.round_id == ctx.accounts.round.id,
             MyneError::InvalidRound
         );
-        checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
+        validate_miner_shares(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
 
         let rewards = receipt_rewards(&ctx.accounts.round, &ctx.accounts.receipt)?;
@@ -1684,7 +1684,7 @@ pub mod myne_protocol {
             ctx.accounts.receipt.round_id == ctx.accounts.round.id,
             MyneError::InvalidRound
         );
-        checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
+        validate_miner_shares(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
         let rewards = receipt_rewards(&ctx.accounts.round, &ctx.accounts.receipt)?;
         accrue_receipt_sol(
@@ -1741,7 +1741,7 @@ pub mod myne_protocol {
             ctx.accounts.receipt.round_id == ctx.accounts.round.id,
             MyneError::InvalidRound
         );
-        checkpoint_miner(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
+        validate_miner_shares(&mut ctx.accounts.miner, &ctx.accounts.mining_pool)?;
         checkpoint_stake(&mut ctx.accounts.stake_position, &ctx.accounts.stake_pool)?;
         let rewards = receipt_rewards(&ctx.accounts.round, &ctx.accounts.receipt)?;
         accrue_receipt_sol(
@@ -2246,11 +2246,11 @@ pub mod myne_protocol {
 
     /// Converts every accumulated mining reward into permanent 5x burn-stake weight.
     ///
-    /// The MYNE represented by `miner.unclaimed_myne` has not been minted yet, so this path
-    /// records the same permanent virtual burn used by Auto-burn instead of minting tokens only
-    /// to burn them in a second instruction. No claim fee is taken: no liquid MYNE leaves the
-    /// protocol, and the authority can only increase its own canonical stake position. This is
-    /// an earned-reward exit, so an emergency mining pause must not trap it.
+    /// The MYNE represented by the miner's outstanding reward shares has not been minted yet, so
+    /// this path records the same permanent virtual burn used by Auto-burn instead of minting
+    /// tokens only to burn them in a second instruction. No claim fee is taken: no liquid MYNE
+    /// leaves the protocol, and the authority can only increase its own canonical stake position.
+    /// This is an earned-reward exit, so an emergency mining pause must not trap it.
     pub fn burn_unclaimed_myne(ctx: Context<BurnUnclaimedMyne>) -> Result<()> {
         require_eq!(
             ctx.accounts.config.version,
@@ -2967,11 +2967,11 @@ mod motherlode_tests {
     use super::{
         assert_operational_roles_distinct, assert_randomness_program_allowed_for_build,
         checked_bps, distribute_mining_rewards, is_supported_meteora_program,
-        liquidity_gate_required, max_supply_base_units, mining_share_value,
-        mining_shares_for_credit, motherlode_hit, motherlode_pays_round, mul_div, mul_div_u64_u128,
-        parse_meteora_damm_v2_pool, parse_meteora_lb_pair, proportional_interval_share,
-        round_can_open_after_emission, round_emissions, select_slot_hash_at_or_after,
-        server_randomness_commitment, server_randomness_output,
+        liquidity_gate_required, max_supply_base_units, mining_basis_after_credit,
+        mining_share_value, mining_shares_for_credit, motherlode_hit, motherlode_pays_round,
+        mul_div, mul_div_u64_u128, parse_meteora_damm_v2_pool, parse_meteora_lb_pair,
+        proportional_interval_share, round_can_open_after_emission, round_emissions,
+        select_slot_hash_at_or_after, server_randomness_commitment, server_randomness_output,
         stake_reward_increment_and_remainder, switchboard_randomness_is_uncommitted,
         BASE_ROUND_EMISSION, BURN_WEIGHT_MULTIPLIER, METEORA_DAMM_ACTIVATION_POINT_OFFSET,
         METEORA_DAMM_ACTIVATION_TYPE_OFFSET, METEORA_DAMM_POOL_STATUS_OFFSET,
@@ -3125,6 +3125,40 @@ mod motherlode_tests {
         let second = mining_share_value(remaining_assets, remaining_shares, holder_shares).unwrap();
         assert_eq!(second, 109);
         assert_eq!(first + second, total_assets);
+    }
+
+    #[test]
+    fn later_reward_credit_preserves_the_holders_passive_component() {
+        // One holder has a 100 MYNE reward basis and owns every share. Another
+        // miner's claim adds 9 passive MYNE, taking its share value to 109.
+        let assets_before_credit = 109u64;
+        let shares_before_credit = 100 * MINING_SHARE_SCALE;
+        let holder_shares_before = shares_before_credit;
+        let value_before = mining_share_value(
+            assets_before_credit,
+            shares_before_credit,
+            holder_shares_before,
+        )
+        .unwrap();
+        assert_eq!(value_before, 109);
+
+        // Earning another 10 MYNE must increase the basis by 10 without
+        // reclassifying the existing 9 passive MYNE as mined rewards.
+        let issued =
+            mining_shares_for_credit(assets_before_credit, shares_before_credit, 10).unwrap();
+        let assets_after_credit = assets_before_credit + 10;
+        let shares_after_credit = shares_before_credit + issued;
+        let holder_shares_after = holder_shares_before + issued;
+        let value_after = mining_share_value(
+            assets_after_credit,
+            shares_after_credit,
+            holder_shares_after,
+        )
+        .unwrap();
+        let basis_after = mining_basis_after_credit(100, value_before, value_after).unwrap();
+        assert_eq!(value_after, 119);
+        assert_eq!(basis_after, 110);
+        assert_eq!(value_after - basis_after, 9);
     }
 
     #[test]
@@ -4086,11 +4120,11 @@ fn mul_div_u64_u128(value: u64, numerator: u128, denominator: u128) -> Result<u1
     Ok(quotient)
 }
 
-fn checkpoint_miner(miner: &mut Account<Miner>, pool: &MiningPool) -> Result<()> {
+fn validate_miner_shares(miner: &mut Account<Miner>, pool: &MiningPool) -> Result<u64> {
     // An empty v6 pool is the only safe signal for clearing stale v5
-    // additive-index debt. The cached balance cannot be used for this test:
-    // immediately after a fresh credit it is still zero while newly-issued
-    // shares already exist.
+    // additive-index debt. The non-passive basis cannot be used for this test:
+    // a valid miner can have no principal while its outstanding shares retain
+    // a passive/referral value.
     if pool.reward_per_unclaimed == 0 {
         require!(
             pool.total_unclaimed == 0,
@@ -4098,7 +4132,7 @@ fn checkpoint_miner(miner: &mut Account<Miner>, pool: &MiningPool) -> Result<()>
         );
         miner.unclaimed_myne = 0;
         miner.passive_reward_debt = 0;
-        return Ok(());
+        return Ok(0);
     }
     require!(
         pool.total_unclaimed > 0,
@@ -4106,14 +4140,24 @@ fn checkpoint_miner(miner: &mut Account<Miner>, pool: &MiningPool) -> Result<()>
     );
     if miner.passive_reward_debt == 0 {
         miner.unclaimed_myne = 0;
-        return Ok(());
+        return Ok(0);
     }
-    miner.unclaimed_myne = mining_share_value(
+    mining_share_value(
         pool.total_unclaimed,
         pool.reward_per_unclaimed,
         miner.passive_reward_debt,
-    )?;
-    Ok(())
+    )
+}
+
+fn mining_basis_after_credit(
+    current_basis: u64,
+    value_before: u64,
+    value_after: u64,
+) -> Result<u64> {
+    let credited_basis = value_after
+        .checked_sub(value_before)
+        .ok_or(MyneError::InvalidMiningPoolAccounting)?;
+    checked_add(current_basis, credited_basis)
 }
 
 fn credit_mining_rewards(
@@ -4124,7 +4168,7 @@ fn credit_mining_rewards(
     if amount == 0 {
         return Ok(());
     }
-    checkpoint_miner(miner, pool)?;
+    let value_before = validate_miner_shares(miner, pool)?;
     let shares = mining_shares_for_credit(pool.total_unclaimed, pool.reward_per_unclaimed, amount)?;
     pool.total_unclaimed = checked_add(pool.total_unclaimed, amount)?;
     pool.reward_per_unclaimed = pool
@@ -4135,15 +4179,20 @@ fn credit_mining_rewards(
         .passive_reward_debt
         .checked_add(shares)
         .ok_or(MyneError::ArithmeticOverflow)?;
-    checkpoint_miner(miner, pool)
+    let value_after = validate_miner_shares(miner, pool)?;
+    // Share issuance can floor by at most base-unit precision. Record the
+    // exact increase represented by the new shares, rather than the requested
+    // amount, so `claimable = basis + passive` remains conservative and exact.
+    miner.unclaimed_myne =
+        mining_basis_after_credit(miner.unclaimed_myne, value_before, value_after)?;
+    Ok(())
 }
 
 fn debit_all_mining_rewards(
     miner: &mut Account<Miner>,
     pool: &mut Account<MiningPool>,
 ) -> Result<u64> {
-    checkpoint_miner(miner, pool)?;
-    let amount = miner.unclaimed_myne;
+    let amount = validate_miner_shares(miner, pool)?;
     let shares = miner.passive_reward_debt;
     require!(amount > 0 && shares > 0, MyneError::InsufficientBalance);
     pool.total_unclaimed = pool

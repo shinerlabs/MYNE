@@ -38,7 +38,10 @@ pub struct Miner {
     pub bump: u8,
     pub authority: Pubkey,
     pub referrer: Pubkey,
-    /// Cached share value, refreshed whenever this miner touches the program.
+    /// Outstanding non-passive reward basis. The authoritative claimable total
+    /// is still the value of `passive_reward_debt` shares; retaining this basis
+    /// separately makes the passive increase independently auditable without
+    /// changing the account layout.
     pub unclaimed_myne: u64,
     /// v6: this miner's unclaimed-reward shares. The legacy field name keeps
     /// the account layout stable; v5 pools must be empty before migration.

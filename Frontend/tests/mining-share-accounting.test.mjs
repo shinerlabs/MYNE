@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { effectiveUnclaimedMyne, miningShareValue } from '../src/chain/mining-shares.js';
+import {
+  effectiveUnclaimedMyne,
+  miningRewardBreakdown,
+  miningShareValue,
+} from '../src/chain/mining-shares.js';
 
 test('effective unclaimed MYNE is the exact floor of pool assets times owned share fraction', () => {
   assert.equal(miningShareValue(218n, 200n, 100n), 109n);
@@ -23,9 +27,24 @@ test('invalid or cross-slot share snapshots fail closed', () => {
   assert.equal(effectiveUnclaimedMyne(null, null), 0n);
 });
 
+test('passive MYNE is the share growth above the retained mining basis', () => {
+  const pool = { totalUnclaimed: 218n, rewardPerUnclaimed: 200n };
+  assert.deepEqual(
+    miningRewardBreakdown({ unclaimedMyne: 100n, passiveRewardDebt: 100n }, pool),
+    { total: 109n, mined: 100n, passive: 9n },
+  );
+  assert.deepEqual(
+    miningRewardBreakdown({ unclaimedMyne: 999n, passiveRewardDebt: 100n }, pool),
+    { total: 109n, mined: 109n, passive: 0n },
+    'legacy cached values are clamped so the UI cannot overstate passive rewards',
+  );
+});
+
 test('claim and burn guards use live share value and referred claims omit the global admin ATA', async () => {
   const source = await readFile(new URL('../src/chain/lottery.js', import.meta.url), 'utf8');
   assert.match(source, /effectiveUnclaimedMyne\(miner, miningPool\)/);
   assert.doesNotMatch(source, /toBig\(miner\.unclaimedMyne\) === 0n/);
   assert.match(source, /const adminFeeTokens = hasReferrer \? null : associatedToken/);
+  assert.match(source, /refinedAccrued:\s*rewardBreakdown\.passive/);
+  assert.doesNotMatch(source, /refinedAccrued:\s*0n/);
 });

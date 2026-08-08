@@ -223,7 +223,7 @@ const claimPanel = `<section class="claim-panel panel rewards-panel collapsed" a
   <div class="rewards-body" id="rewards-body">
   <div class="rewards-rows">
     <div class="rewards-row"><span>Mined MYNE<small>what your rounds earned</small></span><b><img src="/myne-token-icon.svg" alt=""/> <em id="rw-mined">0.00</em></b></div>
-    <div class="rewards-row"><span>Passive MYNE<small id="rw-passive-note">from other miners’ claim fees · never charged a fee</small></span><b><img src="/myne-token-icon.svg" alt=""/> <em id="rw-passive">0.00</em></b></div>
+    <div class="rewards-row"><span>Passive MYNE<small id="rw-passive-note">accrues while your mined MYNE remains unclaimed</small></span><b><img src="/myne-token-icon.svg" alt=""/> <em id="rw-passive">0.00</em></b></div>
   </div>
   <div class="claimable-rounds" id="claimable-rounds" hidden></div>
   <div class="rewards-actions">
@@ -542,7 +542,7 @@ const motherlodeHeading = motherlodeStat.querySelector(':scope > span');
 const motherlodeTokenValue = motherlodeStat.querySelector('strong');
 const motherlodeTokenLabel = motherlodeStat.querySelector('small');
 motherlodeStat.classList.add('motherlode-stat');
-motherlodeHeading.dataset.usdLabel = 'TOTAL ≈— USDC';
+motherlodeHeading.dataset.usdLabel = '≈$—';
 motherlodeStat.setAttribute('aria-label', 'Motherlode SOL payment plus staking bonus MYNE, burned and staked at 5× reward weight');
 motherlodeTokenValue.classList.add('motherlode-token-value');
 motherlodeTokenValue.innerHTML = `<img src="/myne-token-icon.svg" alt=""/><em class="motherlode-primary-value">0.00</em><b class="motherlode-unit">MYNE</b>`;
@@ -4165,7 +4165,7 @@ let claimsResolvedKey = '';
 // Totals of unclaimed winning rounds, shared between renderClaimable (which computes them)
 // and renderChain (which paints the badge every tick).
 let claimableTotals = { count: 0, bullion: 0n, eth: 0n };
-/** MYNE a claim would actually deliver: mined − fee + passive. Labels the claim button. */
+/** MYNE a claim would actually deliver after the fee on its complete share value. */
 let netReceivable = 0n;
 
 /**
@@ -4262,7 +4262,7 @@ const renderChain = (state) => {
   const motherlodeUsdText = totalMotherlodeSol == null ? '—' : (usdcValueFor(totalMotherlodeSol) ?? '—');
   motherlodeUsdcNumber.textContent = motherlodeUsdText;
   motherlodeHeading.dataset.solLabel = `≈${motherlodeEthText} SOL`;
-  motherlodeHeading.dataset.usdLabel = `TOTAL ≈${motherlodeUsdText} USDC`;
+  motherlodeHeading.dataset.usdLabel = `≈$${motherlodeUsdText}`;
   syncSummaryHoverLabels();
   const combinedValueLabel = motherlodeUsdText === '—'
     ? 'combined market value unavailable'
@@ -4300,37 +4300,28 @@ const renderChain = (state) => {
   // so `state.unclaimed` is 0 for a win you have not claimed yet. Showing it alone rendered 0.000
   // beside a claim button offering 0.600, which is the one case this panel exists for.
   setRow('#rw-eth', chain.format.ethSmart(claimableSol));
-  // Same pair the claimable-rounds box used to show: what is sitting in won-but-unclaimed rounds.
-  // ALL mined MYNE not yet in the wallet, which is two buckets: `state.unclaimed` (what an SOL-only
-  // claim leaves behind, plus redistribution credited to you) and `claimableTotals.bullion` (won
-  // rounds not yet claimed at all). Feeding it only the second read 0.000 while 0.600 sat in the
-  // first. The expanded Mined row shows this gross amount; the card title is populated with the
-  // net claimable amount below, after the protocol fee calculation.
-  const unclaimedGld = state.unclaimed + claimableTotals.bullion;
-  setRow('#rw-mined', chain.format.solIcon(unclaimedGld));
-  const grossMined = state.unclaimed + claimableTotals.bullion;
+  // The authoritative credited total already contains passive share growth. Subtract that
+  // component only for the visual breakdown; pending receipts are entirely mined rewards because
+  // they do not receive shares until settlement.
+  const creditedTotal = state.unclaimed + claimableTotals.bullion;
   // V6 values the miner's reward shares against the pool's current aggregate
   // assets inside readMiner. Unsettled receipts own no shares yet and therefore
   // cannot earn passive fees paid before their settlement.
   const refined = (state.refinedAccrued ?? 0n)
     + chain.passiveOnRounds(claimableRounds, state.minerIndex ?? 0n);
-  // PASSIVE = the redistribution share ALONE — other miners' claim fees credited to you through
-  // reward-share value. This row used to be fed netClaimable (gross - fee + refined), which is the net
-  // PAYOUT, not passive income: it contradicted its own name, and the one number that explains
-  // why waiting pays had nowhere to appear. It is also the only component never charged a fee,
-  // which is worth saying out loud.
+  const minedComponent = creditedTotal >= refined ? creditedTotal - refined : creditedTotal;
+  setRow('#rw-mined', chain.format.solIcon(minedComponent));
+  // PASSIVE = the redistribution share alone — other miners' claim fees credited to this
+  // wallet's still-outstanding reward shares.
   // Keep passive MYNE aligned with the mined MYNE row: both use the shared
   // three-decimal token format so the reward columns remain visually consistent.
   setRow('#rw-passive', chain.format.solIcon(refined));
   // NET = what actually lands in the wallet. Same figure the row above used to show. Held in a
   // variable because the claim BUTTON needs it too — it used to be labelled with the gross mined
   // amount while this row said something larger, so the passive share looked unclaimable.
-  netReceivable = chain.netClaimable({
-    grossMined,
-    refinedAccrued: refined,
-    totalUnclaimed: state.totalUnclaimed ?? 0n,
-    hasReferrer: Boolean(state.hasReferrer),
-  });
+  // The current program applies the claim fee to the complete share value, including passive
+  // growth. Use the combined authoritative total so the button never overstates what will mint.
+  netReceivable = chain.netClaimable({ grossMined: creditedTotal });
   // The title is the actionable balance: exactly what can reach the wallet. The expanded Mined
   // row deliberately remains gross so the 10% claim deduction stays independently verifiable.
   setRow('#rw-unclaimed-gld', chain.format.solIcon(netReceivable));
@@ -4340,7 +4331,7 @@ const renderChain = (state) => {
   if (passiveNote) {
     passiveNote.textContent = refined === 0n
       ? 'accrues when other miners claim'
-      : 'from other miners’ claim fees · never charged a fee';
+      : 'from other miners’ claim fees · included in your claim';
   }
   setRow('#mined-chip-value', chain.format.solIcon(state.unclaimed + claimableTotals.bullion));
   const ethBtn = document.querySelector('#claim-eth-only');
@@ -4369,9 +4360,9 @@ const renderChain = (state) => {
     allBtn.disabled = !hasRounds && refinable === 0n && claimableSol === 0n;
     // Label with what LANDS IN THE WALLET, not the gross mined figure. The old label showed
     // `refinable` (mined only) while the row directly above said "You receive" and a larger number,
-    // because passive MYNE is paid whole and carries no fee. Two different numbers on adjacent
-    // controls, with no button next to the bigger one, reads as "the passive part is not included" —
-    // it is, in the same single transfer.
+    // because passive MYNE is included in the same share-backed claim. Two different numbers on
+    // adjacent controls, with no button next to the larger one, reads as "the passive part is not
+    // included" — it is, in the same transaction.
     const label = allBtn.querySelector('[data-reward-action-label]');
     const detail = allBtn.querySelector('small');
     if (label) label.textContent = hasRounds

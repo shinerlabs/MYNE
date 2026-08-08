@@ -12,7 +12,8 @@ test('Mine presents USDC as a quote with one fixed input mark and a text-only sw
   assert.match(source, /usdcValueFor/);
   assert.match(source, /getSolUsdc/);
   assert.match(source, /motherlodeSolEquivalent\([\s\S]*motherlodeSol[\s\S]*motherlodeMyne[\s\S]*getLiveMynePerSol\(\)/);
-  assert.match(source, /motherlodeHeading\.dataset\.usdLabel = `TOTAL ≈\$\{motherlodeUsdText\} USDC`/);
+  assert.match(source, /motherlodeHeading\.dataset\.usdLabel = `≈\$\$\{motherlodeUsdText\}`/);
+  assert.doesNotMatch(source, /motherlodeHeading\.dataset\.usdLabel = `TOTAL/);
   assert.match(source, /combined market value approximately \$\{motherlodeUsdText\} USDC/);
   assert.match(source, /src="\/usdc\.png"/);
   assert.match(surfaces, /url\('\/usdc\.png'\)/);
